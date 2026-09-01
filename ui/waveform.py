@@ -20,7 +20,7 @@ def get_waveform(proj: Path, source: str, n: int = 4000) -> dict:
         return cached
     raw = subprocess.run(
         ["ffmpeg", "-v", "error", "-i", str(src), "-map", "0:a:0",
-         "-ac", "1", "-ar", str(RATE), "-af", "volume=4.1", "-f", "s16le", "-"],
+         "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"],
         capture_output=True, check=True).stdout
     samples = array("h")
     samples.frombytes(raw[: len(raw) - len(raw) % 2])

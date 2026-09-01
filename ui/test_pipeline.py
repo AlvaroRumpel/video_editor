@@ -88,7 +88,7 @@ def test_waveform_peaks(tmp_path):
     src = tmp_path / "tone.wav"
     subprocess.run(
         ["ffmpeg", "-v", "error", "-f", "lavfi",
-         "-i", "sine=frequency=440:duration=2", str(src)], check=True)
+         "-i", "aevalsrc=sin(440*2*PI*t):d=2", str(src)], check=True)
     proj = tmp_path / "p"
     proj.mkdir()
     wf = waveform.get_waveform(proj, str(src), n=100)
