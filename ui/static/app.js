@@ -615,13 +615,15 @@ function renderQueue() {
     const icon = STATUS_ICON[e.status] || '';
     const prefix = e._scope === 'global' ? '[novo] ' : '';
     const sub = e.resultado ? `<div class="queue-sub">${escapeHtml(e.resultado)}</div>` : '';
+    const replySent = e.reply && e.status !== 'waiting_reply'
+      ? `<div class="queue-sub queue-you">você: ${escapeHtml(e.reply)}${e.status === 'pending' ? ' — aguardando o Claude retomar' : ''}</div>` : '';
     const reply = e.status === 'waiting_reply' ? `<div class="queue-reply">
         <textarea class="queue-reply-input" data-qid="${e.id}" data-scope="${e._scope}" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)" rows="2"></textarea>
         <button class="queue-reply-send" data-qid="${e.id}" data-scope="${e._scope}">Enviar</button>
       </div>` : '';
     return `<div class="queue-row">
       <div class="queue-main"><span class="queue-icon">${icon}</span><span class="queue-text">${prefix}${escapeHtml(e.text || e.type)}</span></div>
-      ${sub}${reply}
+      ${sub}${replySent}${reply}
     </div>`;
   }).join('') : '<div class="queue-empty">fila vazia</div>';
 }

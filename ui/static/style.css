@@ -347,6 +347,11 @@ footer {
   border-radius: 0 3px 3px 0;
 }
 
+.queue-you {
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+
 .queue-reply {
   display: flex;
   flex-direction: column;
