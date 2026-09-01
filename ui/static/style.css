@@ -109,7 +109,7 @@ header .spacer {
 main {
   grid-area: main;
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 300px 1fr 320px;
   overflow: hidden;
 }
 
@@ -150,10 +150,23 @@ main {
   min-height: 80px;
 }
 
+#queue-pane {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#queue-title {
+  padding: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 #queue-panel {
-  flex: 0 0 auto;
-  min-height: 90px;
-  max-height: 38%;
+  flex: 1 1 0;
 }
 
 #instruction-pane {

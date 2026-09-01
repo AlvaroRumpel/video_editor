@@ -12,6 +12,10 @@
   <span id="claude-status" class="offline" title="Fica verde quando uma sessão do Claude está escutando a fila">Claude offline</span>
 </header>
 <main>
+  <aside id="queue-pane">
+    <div id="queue-title">Fila</div>
+    <div id="queue-panel"></div>
+  </aside>
   <section id="player-pane">
     <video id="player" controls title="Espaço = play/pause"></video>
     <div id="no-preview" hidden>sem preview — peça um render</div>
@@ -23,7 +27,6 @@
       <textarea id="instr-text" placeholder="o que fazer..."></textarea>
       <button id="instr-send" title="Enviar instrução pro Claude (Ctrl+Enter). Ctrl+Z cancela o último pedido">Enviar</button>
     </div>
-    <div id="queue-panel"></div>
   </aside>
 </main>
 <footer>
