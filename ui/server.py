@@ -156,10 +156,14 @@ def format_put(request: Request, name: str, body: dict):
 
 @app.post("/api/new-project")
 def new_project(request: Request, body: dict):
+    if not body.get("bruto") and not (body.get("descricao") or "").strip():
+        raise HTTPException(400, "sem bruto exige descrição")
     entry = _make_entry("novo-projeto",
                         {"bruto": body.get("bruto"),
                          "formato": body.get("formato"),
-                         "nome": body.get("nome")}, body.get("nome", ""))
+                         "nome": body.get("nome"),
+                         "descricao": body.get("descricao", ""),
+                         "fontes": body.get("fontes", "")}, body.get("nome", ""))
     qpath = _root(request) / ".ui-runtime" / "queue.json"
     return _append_queue(qpath, entry)
 

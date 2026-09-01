@@ -710,25 +710,44 @@ async function openNewProjectModal() {
     <div class="modal-box">
       <button class="modal-close">×</button>
       <h3>Novo vídeo</h3>
-      <label>Bruto
-        <select id="new-bruto">${brutos.map(b => `<option value="${b}">${b}</option>`).join('')}</select>
-      </label>
       <label>Formato
         <select id="new-formato">${formats.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}</select>
+      </label>
+      <label>Bruto
+        <select id="new-bruto">${brutos.map(b => `<option value="${b}">${b}</option>`).join('')}</select>
       </label>
       <label>Nome
         <input type="text" id="new-nome" placeholder="nome do vídeo">
       </label>
-      <button id="new-send">Enviar</button>
+      <label>Descrição
+        <textarea id="new-descricao" placeholder="o que você quer no vídeo..."></textarea>
+      </label>
+      <label>Fontes
+        <input type="text" id="new-fontes" placeholder="projeto, links, docs de onde tirar as informações">
+      </label>
+      <button id="new-send" title="Envia o pedido pra fila do Claude">Enviar</button>
       <div id="new-confirm" hidden>pedido enviado — Claude vai iniciar a edição</div>
     </div>`;
   el('modal').hidden = false;
+  const semBruto = () => {
+    // ads é motion puro: bruto vira opcional
+    const isAds = el('new-formato').value === 'padrao-ads';
+    const sel = el('new-bruto');
+    const has = sel.querySelector('option[value=""]');
+    if (isAds && !has) sel.insertAdjacentHTML('afterbegin',
+      '<option value="" selected>— sem bruto (motion/ads) —</option>');
+    if (!isAds && has) has.remove();
+  };
+  el('new-formato').addEventListener('change', semBruto);
+  semBruto();
   el('new-send').addEventListener('click', () => {
-    const bruto = el('new-bruto').value;
+    const bruto = el('new-bruto').value || null;
     const formato = el('new-formato').value;
     const nome = el('new-nome').value.trim();
-    if (!nome) return;
-    postJSON('/api/new-project', {}, { bruto, formato, nome })
+    const descricao = el('new-descricao').value.trim();
+    const fontes = el('new-fontes').value.trim();
+    if (!nome || (!bruto && !descricao)) return;   // sem bruto exige descrição
+    postJSON('/api/new-project', {}, { bruto, formato, nome, descricao, fontes })
       .then(() => { el('new-confirm').hidden = false; });
   });
 }

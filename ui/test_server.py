@@ -146,3 +146,18 @@ def test_cancel(client):
                        json={"qid": qid}).status_code == 409
     assert client.post("/api/cancel", params={"id": "edit-fake"},
                        json={"qid": 1}).status_code == 404
+
+
+def test_new_project_sem_bruto(client):
+    # sem bruto e sem descricao -> 400
+    assert client.post("/api/new-project",
+                       json={"bruto": None, "formato": "padrao-ads",
+                             "nome": "reel-x", "descricao": ""}).status_code == 400
+    r = client.post("/api/new-project",
+                    json={"bruto": None, "formato": "padrao-ads", "nome": "reel-x",
+                          "descricao": "reel sobre feature Y",
+                          "fontes": "F:/proj/anotus, https://anotus.app"})
+    assert r.status_code == 200
+    tg = r.json()["target"]
+    assert tg["bruto"] is None and tg["descricao"] == "reel sobre feature Y"
+    assert "anotus" in tg["fontes"]

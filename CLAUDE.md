@@ -30,8 +30,11 @@ em vez de sobrescrever o objeto inteiro.
      no edl.json respeitando limites de palavra (regras do video-use).
    - `render` — `text` = `preview`|`final`; rodar render.py escrevendo
      progresso em `state.json` → `{"render": {"fase", "pct", "eta"}}`.
-   - `novo-projeto` — `target` = `{bruto, formato, nome}`; renomear bruto
+   - `novo-projeto` — `target` = `{bruto, formato, nome, descricao, fontes}`;
+     com bruto: renomear bruto
      (memória "renomear-bruto"), criar dir de edição, iniciar pipeline.
+     Sem bruto (formato ads): criar `edit/shorts/<slug>/` com `ui/`, seguir
+     `Formatos/padrao-ads.md` usando `descricao` + `fontes` como briefing.
 4. Pedido grande/ambíguo → `status: "waiting_reply"` + pergunta em
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
 5. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
