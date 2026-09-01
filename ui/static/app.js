@@ -10,6 +10,12 @@ const postJSON = (path, params, body) =>
   fetch(api(path, params), { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body) });
+const putJSON = (path, params, body) =>
+  fetch(api(path, params), { method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) });
+const escapeHtml = s => String(s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // stubs — reatribuídos por buildTimeMap() após cada load de projeto
 let outToSrc = t => t, srcToOut = t => t;
@@ -521,6 +527,163 @@ function renderAll() {
   if (S.pid !== lastFitPid) { fitView(); lastFitPid = S.pid; }
   renderCutList();
   renderTimeline();
+  renderQueue();
+  renderProgress();
+  if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
+
+// ---------------------------------------------------------------------
+// Fila viva, render/progresso, formatos, novo vídeo (Task 9)
+// ---------------------------------------------------------------------
+
+const STATUS_ICON = { pending: '⏳', executing: '▶', waiting_reply: '❓', done: '✅', failed: '❌' };
+
+function renderQueue() {
+  const queue = (S.proj.queue || []).slice().reverse();
+  el('queue-panel').innerHTML = queue.length ? queue.map(e => {
+    const icon = STATUS_ICON[e.status] || '';
+    const sub = e.resultado ? `<div class="queue-sub">${escapeHtml(e.resultado)}</div>` : '';
+    const reply = e.status === 'waiting_reply' ? `<div class="queue-reply">
+        <input type="text" class="queue-reply-input" data-qid="${e.id}" placeholder="responder...">
+        <button class="queue-reply-send" data-qid="${e.id}">Enviar</button>
+      </div>` : '';
+    return `<div class="queue-row">
+      <div class="queue-main"><span class="queue-icon">${icon}</span><span class="queue-text">${escapeHtml(e.text || e.type)}</span></div>
+      ${sub}${reply}
+    </div>`;
+  }).join('') : '<div class="queue-empty">fila vazia</div>';
+}
+
+function sendReply(qid, text) {
+  return postJSON('/api/reply', { id: S.pid }, { qid, text }).then(() => loadProject(S.pid));
+}
+
+el('queue-panel').addEventListener('click', e => {
+  const btn = e.target.closest('.queue-reply-send');
+  if (!btn) return;
+  const input = el('queue-panel').querySelector(`.queue-reply-input[data-qid="${btn.dataset.qid}"]`);
+  const text = input.value.trim();
+  if (text) sendReply(+btn.dataset.qid, text);
+});
+el('queue-panel').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.classList.contains('queue-reply-input')) return;
+  const text = e.target.value.trim();
+  if (text) sendReply(+e.target.dataset.qid, text);
+});
+
+function fmtMSS(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function renderProgress() {
+  const r = S.proj.state && S.proj.state.render;
+  const box = el('render-progress');
+  if (!r || r.pct >= 100) { box.hidden = true; return; }
+  box.hidden = false;
+  el('render-bar').style.width = `${r.pct}%`;
+  el('render-label').textContent = `${r.fase} · ${r.pct}% · ${fmtMSS(r.eta)}`;
+}
+
+function requestRender(kind) {
+  postJSON('/api/queue', { id: S.pid }, { type: 'render', target: null, text: kind })
+    .then(() => loadProject(S.pid));
+}
+
+el('btn-render-preview').addEventListener('click', () => requestRender('preview'));
+el('btn-render-final').addEventListener('click', () => requestRender('final'));
+
+async function loadFormats() {
+  S.formats = await getJSON('/api/formats');
+  return S.formats;
+}
+
+function renderFormatSelect() {
+  const sel = el('format-select');
+  sel.innerHTML = (S.formats || []).map(f =>
+    `<option value="${f.name}">${f.name}</option>`).join('');
+  sel.value = (S.proj.state && S.proj.state.formato) || '';
+}
+
+el('format-select').addEventListener('change', () => {
+  postJSON('/api/state', { id: S.pid }, { formato: el('format-select').value })
+    .then(() => loadProject(S.pid));
+});
+
+function closeModal() {
+  el('modal').hidden = true;
+  el('modal').innerHTML = '';
+}
+
+el('modal').addEventListener('click', e => {
+  if (e.target.id === 'modal' || e.target.closest('.modal-close')) closeModal();
+});
+
+async function openFormatsModal() {
+  const formats = await loadFormats();
+  el('modal').innerHTML = `
+    <div class="modal-box modal-formats">
+      <button class="modal-close">×</button>
+      <h3>Formatos</h3>
+      <div class="modal-formats-body">
+        <div class="modal-formats-list">${formats.map(f =>
+          `<div class="modal-formats-item" data-name="${f.name}">${f.name}</div>`).join('')}</div>
+        <div class="modal-formats-edit">
+          <textarea id="formats-textarea"></textarea>
+          <button id="formats-save">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+  el('modal').hidden = false;
+  let current = null;
+  const setActive = name => {
+    current = name;
+    el('formats-textarea').value = (formats.find(f => f.name === name) || {}).content || '';
+    el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
+      it.classList.toggle('active', it.dataset.name === name));
+  };
+  el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
+    it.addEventListener('click', () => setActive(it.dataset.name)));
+  if (formats.length) setActive(formats[0].name);
+  el('formats-save').addEventListener('click', () => {
+    if (!current) return;
+    putJSON('/api/format', { name: current }, { content: el('formats-textarea').value })
+      .then(loadFormats);
+  });
+}
+
+el('btn-formats').addEventListener('click', openFormatsModal);
+
+async function openNewProjectModal() {
+  const [brutos, formats] = await Promise.all([getJSON('/api/brutos'), loadFormats()]);
+  el('modal').innerHTML = `
+    <div class="modal-box">
+      <button class="modal-close">×</button>
+      <h3>Novo vídeo</h3>
+      <label>Bruto
+        <select id="new-bruto">${brutos.map(b => `<option value="${b}">${b}</option>`).join('')}</select>
+      </label>
+      <label>Formato
+        <select id="new-formato">${formats.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}</select>
+      </label>
+      <label>Nome
+        <input type="text" id="new-nome" placeholder="nome do vídeo">
+      </label>
+      <button id="new-send">Enviar</button>
+      <div id="new-confirm" hidden>pedido enviado — Claude vai iniciar a edição</div>
+    </div>`;
+  el('modal').hidden = false;
+  el('new-send').addEventListener('click', () => {
+    const bruto = el('new-bruto').value;
+    const formato = el('new-formato').value;
+    const nome = el('new-nome').value.trim();
+    if (!nome) return;
+    postJSON('/api/new-project', {}, { bruto, formato, nome })
+      .then(() => { el('new-confirm').hidden = false; });
+  });
+}
+
+el('btn-new').addEventListener('click', openNewProjectModal);
 
 loadProjects();
