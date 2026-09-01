@@ -78,6 +78,71 @@ function connectSSE(pid) {
 }
 
 // ---------------------------------------------------------------------
+// Lista de cortes + instruções (Task 8)
+// ---------------------------------------------------------------------
+
+function selectCut(i) {
+  S.selected = i;
+  const ic = el('instr-context');
+  if (ic) ic.textContent = `sobre corte #${i}`;
+  const r = S.proj.edl.ranges[i];
+  const player = el('player');
+  if (player) player.currentTime = srcToOut(r.start);
+  renderTimeline();
+}
+
+function toggleApproval(i) {
+  const cur = new Set((S.proj.state && S.proj.state.aprovacoes) || []);
+  if (cur.has(i)) cur.delete(i); else cur.add(i);
+  postJSON('/api/state', { id: S.pid }, { aprovacoes: [...cur] })
+    .then(() => loadProject(S.pid));
+}
+
+function sendVeto(i) {
+  postJSON('/api/queue', { id: S.pid }, {
+    type: 'veto', target: i, text: `revisar/remover corte #${i}`,
+  }).then(() => loadProject(S.pid));
+}
+
+function renderCutList() {
+  const ranges = S.proj.edl.ranges;
+  const aprovacoes = new Set((S.proj.state && S.proj.state.aprovacoes) || []);
+  const queue = S.proj.queue || [];
+  el('cut-list').innerHTML = ranges.map((r, i) => {
+    const cls = aprovacoes.has(i) ? 'status-approved'
+      : queueTargetsSegment(queue, i) ? 'status-pending' : '';
+    return `<div class="cut-row ${cls}" data-i="${i}">
+      <span class="cut-label">#${i}  ${fmtTime(r.start)}–${fmtTime(r.end)}</span>
+      <button class="cut-up" data-i="${i}">👍</button>
+      <button class="cut-down" data-i="${i}">👎</button>
+    </div>`;
+  }).join('');
+}
+
+el('cut-list').addEventListener('click', e => {
+  const row = e.target.closest('.cut-row');
+  if (!row) return;
+  const i = +row.dataset.i;
+  if (e.target.closest('.cut-up')) return toggleApproval(i);
+  if (e.target.closest('.cut-down')) return sendVeto(i);
+  selectCut(i);
+});
+
+function sendInstruction() {
+  const ta = el('instr-text');
+  const text = ta.value.trim();
+  if (!text) return;
+  postJSON('/api/queue', { id: S.pid }, {
+    type: 'instrucao', target: S.selected, text,
+  }).then(() => { ta.value = ''; loadProject(S.pid); });
+}
+
+el('instr-send').addEventListener('click', sendInstruction);
+el('instr-text').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendInstruction(); }
+});
+
+// ---------------------------------------------------------------------
 // Timeline (Task 7): tracks V/A/T/FX, zoom/pan, playhead
 // ---------------------------------------------------------------------
 
@@ -122,7 +187,7 @@ function truncateText(text, maxW) {
 }
 
 function queueTargetsSegment(queue, i) {
-  return queue.some(e => (e.status === 'pending' || e.status === 'executing') &&
+  return queue.some(e => (e.status === 'pending' || e.status === 'executing' || e.status === 'waiting_reply') &&
     (e.target === i || (e.target && typeof e.target === 'object' && e.target.seg === i)));
 }
 
@@ -310,8 +375,30 @@ function renderTimeline() {
   drawT(tY, tH);
   drawFX(fxY, fxH);
   drawPlayhead(cssH);
+  if (drag && drag.type === 'edge') drawEdgeGhost();
 
   window.__tl = { segmentsDrawn };
+}
+
+function drawEdgeGhost() {
+  const r = S.proj.edl.ranges[drag.seg];
+  const baseT = drag.edge === 'start' ? r.start : r.end;
+  const t = baseT + drag.deltaSec;
+  const x = (t - view.t0) * view.pxPerSec;
+  const deltaMs = Math.round(drag.deltaSec * 1000);
+  ctx.save();
+  ctx.strokeStyle = '#e6a23c';
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(x, layout.vY);
+  ctx.lineTo(x, layout.vY + layout.vH);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#e6a23c';
+  ctx.font = '10px system-ui';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`${deltaMs > 0 ? '+' : ''}${deltaMs}ms`, x + 4, layout.vY);
+  ctx.restore();
 }
 
 function hitSegment(x, y) {
@@ -358,7 +445,14 @@ function onWheel(e) {
 
 function onPointerDown(e) {
   const rect = canvas.getBoundingClientRect();
-  drag = { startX: e.clientX - rect.left, startT0: view.t0, moved: false };
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const hit = hitSegment(x, y);
+  if (hit && hit.edge) {
+    drag = { type: 'edge', seg: hit.index, edge: hit.edge, startX: x, deltaSec: 0 };
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
+  drag = { type: 'pan', startX: x, startT0: view.t0, moved: false };
   canvas.setPointerCapture(e.pointerId);
 }
 
@@ -366,6 +460,11 @@ function onPointerMove(e) {
   if (!drag) return;
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
+  if (drag.type === 'edge') {
+    drag.deltaSec = (x - drag.startX) / view.pxPerSec;
+    renderTimeline();
+    return;
+  }
   const dx = x - drag.startX;
   if (Math.abs(dx) > 3) drag.moved = true;
   if (drag.moved) {
@@ -378,6 +477,19 @@ function onPointerUp(e) {
   if (!drag) return;
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  if (drag.type === 'edge') {
+    const { seg: i, edge, deltaSec: delta } = drag;
+    if (Math.abs(delta * 1000) >= 30) {
+      postJSON('/api/queue', { id: S.pid }, {
+        type: 'borda',
+        target: { seg: i, edge, delta_ms: Math.round(delta * 1000) },
+        text: `${edge === 'start' ? 'início' : 'fim'} do corte #${i} ${delta > 0 ? '+' : ''}${Math.round(delta * 1000)}ms`,
+      }).then(() => loadProject(S.pid));
+    }
+    drag = null;
+    renderTimeline();
+    return;
+  }
   if (!drag.moved) handleTimelineClick(x, y);
   drag = null;
 }
@@ -407,6 +519,7 @@ function renderAll() {
   buildTimeMap();
   initTimelineOnce();
   if (S.pid !== lastFitPid) { fitView(); lastFitPid = S.pid; }
+  renderCutList();
   renderTimeline();
 }
 
