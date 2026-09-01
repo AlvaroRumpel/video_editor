@@ -41,9 +41,12 @@ def test_video_missing(client):
                                             "kind": "final"}).status_code == 404
 
 
-def test_formats_and_brutos(client):
+def test_formats_and_brutos(client, fake_root):
+    (fake_root / "Formatos" / "thumbnail.md").write_text("# interna",
+                                                         encoding="utf-8")
     fm = client.get("/api/formats").json()
     assert fm[0]["name"] == "padrao-youtube"
+    assert "thumbnail" not in [f["name"] for f in fm]
     assert client.get("/api/brutos").json() == []
 
 

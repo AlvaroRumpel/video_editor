@@ -1,4 +1,4 @@
-# Padrão Reels Anotus (identidade aprovada 2026-08-31)
+# Padrão Ads (identidade aprovada 2026-08-31; origem: Reels Anotus)
 
 Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue isto.
 

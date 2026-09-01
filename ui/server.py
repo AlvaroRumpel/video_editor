@@ -64,7 +64,7 @@ def video(request: Request, id: str, kind: str = "preview"):
 def formats(request: Request):
     fdir = _root(request) / "Formatos"
     return [{"name": p.stem, "content": p.read_text(encoding="utf-8")}
-            for p in sorted(fdir.glob("*.md"))]
+            for p in sorted(fdir.glob("*.md")) if p.stem not in HIDDEN_FORMATS]
 
 
 @app.get("/api/brutos")
@@ -75,6 +75,7 @@ def brutos(request: Request):
                   if p.suffix.lower() in exts) if bdir.is_dir() else []
 
 
+HIDDEN_FORMATS = {"thumbnail"}  # receitas internas, fora do dropdown
 QUEUE_TYPES = {"instrucao", "render", "borda", "veto"}
 
 

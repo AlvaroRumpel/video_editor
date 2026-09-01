@@ -1,4 +1,4 @@
-# Formato: Padrão YouTube (horizontal)
+# Formato: Padrão YouTube — vídeo longo (horizontal)
 
 Método completo da edição de talking head para YouTube. Derivado do vídeo
 "Eu criei um SaaS" (2026-08-16). Serve como receita reproduzível: seguindo este
