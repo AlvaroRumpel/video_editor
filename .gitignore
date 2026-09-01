@@ -13,6 +13,7 @@ video-use/
 __pycache__/
 *.pyc
 ui/cache/
+.ui-runtime/
 
 # Safety net: mídia solta em qualquer lugar
 *.mp4
@@ -20,3 +21,4 @@ ui/cache/
 *.mkv
 *.wav
 *.mp3
+.superpowers/
