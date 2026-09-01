@@ -136,13 +136,24 @@ main {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;   /* cada seção rola sozinha; fila sempre visível */
 }
 
 #cut-list, #queue-panel {
   padding: 8px;
   border-bottom: 1px solid var(--border);
   overflow-y: auto;
+}
+
+#cut-list {
+  flex: 1 1 0;
+  min-height: 80px;
+}
+
+#queue-panel {
+  flex: 0 0 auto;
+  min-height: 90px;
+  max-height: 38%;
 }
 
 #instruction-pane {
