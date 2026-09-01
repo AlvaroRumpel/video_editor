@@ -42,6 +42,10 @@ def fake_root(tmp_path: Path) -> Path:
     raw = tmp_path / "edit-raw"
     (raw / "ui").mkdir(parents=True)
     (raw / "ui" / "queue.json").write_text("[]", encoding="utf-8")
+    # transcripts/ compartilhado (ex.: agregado de shorts) sem ui/ e sem
+    # edl.json não é projeto — regressão vista com edit/shorts real.
+    shared = tmp_path / "edit" / "shorts"
+    (shared / "transcripts").mkdir(parents=True)
     return tmp_path
 
 
@@ -53,6 +57,7 @@ def test_find_projects(fake_root):
         {"id": "edit-raw", "name": "edit-raw",
          "has_preview": False, "has_final": False, "started": False},
     ]
+    assert "edit/shorts" not in {p["id"] for p in projs}
 
 
 def test_project_dir_rejects_escape(fake_root):

@@ -27,8 +27,9 @@ def atomic_write_json(path: Path, obj) -> None:
 
 
 def find_projects(root: Path) -> list[dict]:
-    # started (tem edl.json) sempre vence; sem edl.json mas com ui/ ou
-    # transcripts/ conta como projeto "não iniciado" (spec).
+    # started (tem edl.json) sempre vence; sem edl.json mas com ui/ conta
+    # como projeto "não iniciado" (spec). transcripts/ NÃO conta sozinho:
+    # em shorts, transcripts/ é compartilhado/agregado e não é um projeto.
     found = {}  # rel -> started(bool)
     for depth in ("*", "*/*", "*/*/*"):
         for d in sorted(root.glob(depth)):
@@ -39,8 +40,7 @@ def find_projects(root: Path) -> list[dict]:
                 continue
             if (d / "edl.json").exists():
                 found[rel] = True
-            elif rel not in found and ((d / "ui").is_dir() or
-                                       (d / "transcripts").is_dir()):
+            elif rel not in found and (d / "ui").is_dir():
                 found[rel] = False
     out = []
     for rel in sorted(found):
