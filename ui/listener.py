@@ -15,11 +15,12 @@ seen = set()
 
 def projects():
     out = []
-    for depth in ("*", "*/*", "*/*/*"):
+    for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
         for d in ROOT.glob(depth):
             if not d.is_dir() or d.relative_to(ROOT).parts[0] in SKIP:
                 continue
-            if (d / "edl.json").exists() or (d / "ui").is_dir():
+            if (d / "edl.json").exists() or (d / "ui").is_dir() \
+                    or (d / "preview.mp4").exists() or (d / "final.mp4").exists():
                 out.append(d)
     return out
 
