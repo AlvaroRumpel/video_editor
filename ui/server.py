@@ -1,5 +1,8 @@
 """Servidor da UI do video_editor. Roda: python ui/server.py"""
 from pathlib import Path
+import re
+import time
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -68,6 +71,80 @@ def brutos(request: Request):
     exts = {".mp4", ".mkv", ".mov", ".webm"}
     return sorted(p.name for p in bdir.glob("*")
                   if p.suffix.lower() in exts) if bdir.is_dir() else []
+
+
+QUEUE_TYPES = {"instrucao", "render", "borda", "veto"}
+
+
+def _append_queue(qpath, entry):
+    queue = pipeline.read_json(qpath, [])
+    queue.append(entry)
+    pipeline.atomic_write_json(qpath, queue)
+    return entry
+
+
+def _make_entry(type_, target, text):
+    return {"id": int(time.time() * 1000),
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "type": type_, "target": target, "text": text,
+            "status": "pending", "resultado": None, "reply": None}
+
+
+@app.post("/api/queue")
+def queue_post(request: Request, id: str, body: dict):
+    if body.get("type") not in QUEUE_TYPES:
+        raise HTTPException(400, "type inválido")
+    proj = _proj(request, id)
+    entry = _make_entry(body["type"], body.get("target"),
+                        body.get("text", ""))
+    return _append_queue(proj / "ui" / "queue.json", entry)
+
+
+@app.post("/api/reply")
+def reply(request: Request, id: str, body: dict):
+    qpath = _proj(request, id) / "ui" / "queue.json"
+    queue = pipeline.read_json(qpath, [])
+    for e in queue:
+        if e["id"] == body.get("qid"):
+            e["reply"] = body.get("text", "")
+            e["status"] = "pending"
+            pipeline.atomic_write_json(qpath, queue)
+            return e
+    raise HTTPException(404, "pedido não encontrado")
+
+
+@app.post("/api/state")
+def state_post(request: Request, id: str, body: dict):
+    spath = _proj(request, id) / "ui" / "state.json"
+    st = pipeline.read_json(spath, {})
+    st.update(body)
+    pipeline.atomic_write_json(spath, st)
+    return st
+
+
+@app.put("/api/format")
+def format_put(request: Request, name: str, body: dict):
+    if not re.fullmatch(r"[\w\-]+", name):
+        raise HTTPException(400, "nome inválido")
+    path = _root(request) / "Formatos" / f"{name}.md"
+    path.write_text(body.get("content", ""), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/new-project")
+def new_project(request: Request, body: dict):
+    entry = _make_entry("novo-projeto",
+                        {"bruto": body.get("bruto"),
+                         "formato": body.get("formato"),
+                         "nome": body.get("nome")}, body.get("nome", ""))
+    qpath = _root(request) / ".ui-runtime" / "queue.json"
+    return _append_queue(qpath, entry)
+
+
+@app.get("/api/global-queue")
+def global_queue(request: Request):
+    return pipeline.read_json(_root(request) / ".ui-runtime" / "queue.json",
+                              [])
 
 
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
