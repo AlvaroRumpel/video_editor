@@ -108,7 +108,7 @@ def test_new_project(client, fake_root):
 
 def test_events_first_snapshot(client):
     with client.stream("GET", "/api/events",
-                       params={"id": "edit-fake"}) as r:
+                       params={"id": "edit-fake", "max_events": 1}) as r:
         assert r.status_code == 200
         assert "text/event-stream" in r.headers["content-type"]
         for line in r.iter_lines():

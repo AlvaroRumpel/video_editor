@@ -165,12 +165,12 @@ def _snapshot(proj):
 
 
 @app.get("/api/events")
-async def events(request: Request, id: str):
+async def events(request: Request, id: str, max_events: int = 0):
     proj = _proj(request, id)
-    start_time = time.time()
 
     async def gen():
         last = None
+        count = 0
         while True:
             if await request.is_disconnected():
                 return
@@ -178,9 +178,9 @@ async def events(request: Request, id: str):
             if snap != last:
                 yield f"data: {_json.dumps(snap)}\n\n"
                 last = snap
-            # Safety timeout for testing (production clients disconnect)
-            if time.time() - start_time > 10:
-                return
+                count += 1
+                if max_events > 0 and count >= max_events:
+                    return
             await asyncio.sleep(1)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
