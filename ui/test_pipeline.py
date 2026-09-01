@@ -76,3 +76,24 @@ def test_load_project_payload(fake_root):
     assert p["queue"] == []
     assert p["claude_online"] is False
     assert p["source_duration"] == 10.0
+
+
+import shutil
+import subprocess
+import waveform
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_waveform_peaks(tmp_path):
+    src = tmp_path / "tone.wav"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=2", str(src)], check=True)
+    proj = tmp_path / "p"
+    proj.mkdir()
+    wf = waveform.get_waveform(proj, str(src), n=100)
+    assert abs(wf["duration"] - 2.0) < 0.1
+    assert len(wf["peaks"]) == 100
+    assert max(wf["peaks"]) > 0.5
+    # segunda chamada vem do cache (arquivo existe)
+    assert (proj / "ui" / "cache" / "waveform.json").exists()

@@ -20,3 +20,4 @@ ui/cache/
 *.mkv
 *.wav
 *.mp3
+.superpowers/
