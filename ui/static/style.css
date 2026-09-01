@@ -141,6 +141,10 @@ main {
   display: block;
 }
 
+#no-preview[hidden] {
+  display: none;   /* display:flex abaixo anularia o atributo hidden */
+}
+
 #no-preview {
   position: absolute;
   inset: 0;
