@@ -98,9 +98,20 @@ function selectCut(i) {
   renderTimeline();
 }
 
-function toggleApproval(i) {
+// pilha de undo (Ctrl+Z): cancela o último pedido enviado / desfaz o último 👍
+const undoStack = [];
+
+function pushQueueUndo(res) {
+  return res.json().then(entry => {
+    undoStack.push({ kind: 'queue', pid: S.pid, qid: entry.id });
+    return entry;
+  });
+}
+
+function toggleApproval(i, fromUndo) {
   const cur = new Set((S.proj.state && S.proj.state.aprovacoes) || []);
   if (cur.has(i)) cur.delete(i); else cur.add(i);
+  if (!fromUndo) undoStack.push({ kind: 'approve', pid: S.pid, i });
   postJSON('/api/state', { id: S.pid }, { aprovacoes: [...cur] })
     .then(() => loadProject(S.pid));
 }
@@ -108,8 +119,33 @@ function toggleApproval(i) {
 function sendVeto(i) {
   postJSON('/api/queue', { id: S.pid }, {
     type: 'veto', target: i, text: `revisar/remover corte #${i}`,
-  }).then(() => loadProject(S.pid));
+  }).then(pushQueueUndo).then(() => loadProject(S.pid));
 }
+
+function undoLast() {
+  const a = undoStack.pop();
+  if (!a || a.pid !== S.pid) return;
+  if (a.kind === 'queue') {
+    postJSON('/api/cancel', { id: a.pid }, { qid: a.qid })
+      .then(() => loadProject(S.pid));
+  } else if (a.kind === 'approve') {
+    toggleApproval(a.i, true);
+  }
+}
+
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toUpperCase();
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+    e.target.isContentEditable;
+  if (e.ctrlKey && e.key.toLowerCase() === 'z' && !typing) {
+    e.preventDefault(); undoLast();
+  }
+  if (e.key === ' ' && !typing) {           // espaço = play/pause
+    e.preventDefault();
+    const p = el('player');
+    if (p && p.src) { if (p.paused) p.play(); else p.pause(); }
+  }
+});
 
 function renderCutList() {
   const ranges = S.proj.edl.ranges;
@@ -120,8 +156,8 @@ function renderCutList() {
       : queueTargetsSegment(queue, i) ? 'status-pending' : '';
     return `<div class="cut-row ${cls}" data-i="${i}">
       <span class="cut-label">#${i}  ${fmtTime(r.start)}–${fmtTime(r.end)}</span>
-      <button class="cut-up" data-i="${i}">👍</button>
-      <button class="cut-down" data-i="${i}">👎</button>
+      <button class="cut-up" data-i="${i}" title="Aprovar corte (marca verde; Ctrl+Z desfaz)">👍</button>
+      <button class="cut-down" data-i="${i}" title="Vetar corte — pede revisão/remoção pro Claude">👎</button>
     </div>`;
   }).join('');
 }
@@ -141,7 +177,7 @@ function sendInstruction() {
   if (!text) return;
   postJSON('/api/queue', { id: S.pid }, {
     type: 'instrucao', target: S.selected, text,
-  }).then(() => { ta.value = ''; loadProject(S.pid); });
+  }).then(pushQueueUndo).then(() => { ta.value = ''; loadProject(S.pid); });
 }
 
 el('instr-send').addEventListener('click', sendInstruction);
@@ -429,10 +465,7 @@ function hitSegment(x, y) {
 function handleTimelineClick(x, y) {
   const hit = hitSegment(x, y);
   if (hit) {
-    S.selected = hit.index;
-    const ic = el('instr-context');
-    if (ic) ic.textContent = `sobre corte #${hit.index}`;
-    renderTimeline();
+    selectCut(hit.index);   // seleciona E posiciona o player no clipe
     return;
   }
   const t = view.t0 + x / view.pxPerSec;
@@ -450,11 +483,15 @@ function onWheel(e) {
   renderTimeline();
 }
 
+// arrasto de borda só com zoom suficiente (1px <= 100ms); senão vira pan
+const EDGE_DRAG_MIN_PXPERSEC = 10;
+const EDGE_DRAG_MAX_SEC = 2;      // ajuste fino: nunca mais que ±2s por arrasto
+
 function onPointerDown(e) {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
   const hit = hitSegment(x, y);
-  if (hit && hit.edge) {
+  if (hit && hit.edge && view.pxPerSec >= EDGE_DRAG_MIN_PXPERSEC) {
     drag = { type: 'edge', seg: hit.index, edge: hit.edge, startX: x, deltaSec: 0 };
     canvas.setPointerCapture(e.pointerId);
     return;
@@ -464,11 +501,17 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
-  if (!drag) return;
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
+  if (!drag) {   // hover: dica visual de onde dá pra arrastar borda
+    const hit = hitSegment(x, e.clientY - rect.top);
+    canvas.style.cursor = hit && hit.edge &&
+      view.pxPerSec >= EDGE_DRAG_MIN_PXPERSEC ? 'ew-resize' : 'default';
+    return;
+  }
   if (drag.type === 'edge') {
-    drag.deltaSec = (x - drag.startX) / view.pxPerSec;
+    const d = (x - drag.startX) / view.pxPerSec;
+    drag.deltaSec = Math.max(-EDGE_DRAG_MAX_SEC, Math.min(EDGE_DRAG_MAX_SEC, d));
     renderTimeline();
     return;
   }
@@ -491,7 +534,7 @@ function onPointerUp(e) {
         type: 'borda',
         target: { seg: i, edge, delta_ms: Math.round(delta * 1000) },
         text: `${edge === 'start' ? 'início' : 'fim'} do corte #${i} ${delta > 0 ? '+' : ''}${Math.round(delta * 1000)}ms`,
-      }).then(() => loadProject(S.pid));
+      }).then(pushQueueUndo).then(() => loadProject(S.pid));
     }
     drag = null;
     renderTimeline();
@@ -537,7 +580,7 @@ function renderAll() {
 // Fila viva, render/progresso, formatos, novo vídeo (Task 9)
 // ---------------------------------------------------------------------
 
-const STATUS_ICON = { pending: '⏳', executing: '▶', waiting_reply: '❓', done: '✅', failed: '❌' };
+const STATUS_ICON = { pending: '⏳', executing: '▶', waiting_reply: '❓', done: '✅', failed: '❌', cancelado: '🚫' };
 
 function renderQueue() {
   const projEntries = (S.proj.queue || []).map(e => ({ ...e, _scope: 'proj' }));

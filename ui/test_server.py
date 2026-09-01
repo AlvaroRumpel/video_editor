@@ -133,3 +133,16 @@ def test_events_first_snapshot(client):
                 snap = _json.loads(line[5:])
                 assert "mtimes" in snap and "claude_online" in snap
                 break
+
+
+def test_cancel(client):
+    qid = client.post("/api/queue", params={"id": "edit-fake"},
+                      json={"type": "instrucao", "text": "x"}).json()["id"]
+    r = client.post("/api/cancel", params={"id": "edit-fake"},
+                    json={"qid": qid})
+    assert r.status_code == 200 and r.json()["status"] == "cancelado"
+    # cancelar de novo -> 409 (não está mais pending)
+    assert client.post("/api/cancel", params={"id": "edit-fake"},
+                       json={"qid": qid}).status_code == 409
+    assert client.post("/api/cancel", params={"id": "edit-fake"},
+                       json={"qid": 1}).status_code == 404

@@ -119,6 +119,23 @@ def reply(request: Request, id: str, body: dict):
     raise HTTPException(404, "pedido não encontrado")
 
 
+@app.post("/api/cancel")
+def cancel(request: Request, id: str, body: dict):
+    if id == "_global":
+        qpath = _root(request) / ".ui-runtime" / "queue.json"
+    else:
+        qpath = _proj(request, id) / "ui" / "queue.json"
+    queue = pipeline.read_json(qpath, [])
+    for e in queue:
+        if e["id"] == body.get("qid"):
+            if e["status"] not in ("pending", "waiting_reply"):
+                raise HTTPException(409, f"pedido já {e['status']}")
+            e["status"] = "cancelado"
+            pipeline.atomic_write_json(qpath, queue)
+            return e
+    raise HTTPException(404, "pedido não encontrado")
+
+
 @app.post("/api/state")
 def state_post(request: Request, id: str, body: dict):
     spath = _proj(request, id) / "ui" / "state.json"

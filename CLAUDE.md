@@ -34,7 +34,8 @@ em vez de sobrescrever o objeto inteiro.
      (memória "renomear-bruto"), criar dir de edição, iniciar pipeline.
 4. Pedido grande/ambíguo → `status: "waiting_reply"` + pergunta em
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
-5. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
+5. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
+6. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
 
 ## Regras
 
