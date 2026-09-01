@@ -1,1 +1,33 @@
 <title>video_editor</title>
+<link rel="stylesheet" href="style.css">
+<header>
+  <select id="proj-select"></select>
+  <select id="format-select"></select>
+  <button id="btn-new">Novo vídeo</button>
+  <button id="btn-formats">Formatos</button>
+  <span class="spacer"></span>
+  <div id="render-progress" hidden><div id="render-bar"></div><span id="render-label"></span></div>
+  <button id="btn-render-preview">Render Preview</button>
+  <button id="btn-render-final">Render Final</button>
+  <span id="claude-status" class="offline">Claude offline</span>
+</header>
+<main>
+  <section id="player-pane">
+    <video id="player" controls></video>
+    <div id="no-preview" hidden>sem preview — peça um render</div>
+  </section>
+  <aside id="side-pane">
+    <div id="cut-list"></div>
+    <div id="instruction-pane">
+      <div id="instr-context">instrução geral</div>
+      <textarea id="instr-text" placeholder="o que fazer..."></textarea>
+      <button id="instr-send">Enviar</button>
+    </div>
+    <div id="queue-panel"></div>
+  </aside>
+</main>
+<footer>
+  <canvas id="timeline"></canvas>
+</footer>
+<div id="modal" hidden></div>
+<script src="app.js"></script>
