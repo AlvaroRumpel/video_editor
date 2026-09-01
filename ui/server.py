@@ -224,6 +224,14 @@ async def events(request: Request, id: str, max_events: int = 0):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    resp = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        resp.headers["Cache-Control"] = "no-cache"  # sempre revalidar JS/CSS
+    return resp
+
+
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
 
 if __name__ == "__main__":
