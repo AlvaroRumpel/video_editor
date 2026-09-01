@@ -1,0 +1,22 @@
+# Conteúdo pessoal / mídia — nunca publicar
+bruto/
+Export/
+assets/
+edit/
+edit-the-goat/
+
+# Repo próprio (clone de browser-use/video-use com branch local-mods)
+video-use/
+
+# Segredos e caches
+.env
+__pycache__/
+*.pyc
+ui/cache/
+
+# Safety net: mídia solta em qualquer lugar
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
