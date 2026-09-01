@@ -27,27 +27,31 @@ def atomic_write_json(path: Path, obj) -> None:
 
 
 def find_projects(root: Path) -> list[dict]:
-    # started (tem edl.json) sempre vence; sem edl.json mas com ui/ conta
-    # como projeto "não iniciado" (spec). transcripts/ NÃO conta sozinho:
-    # em shorts, transcripts/ é compartilhado/agregado e não é um projeto.
+    # started = tem edl.json OU já produziu preview/final (ads/motion não
+    # usa EDL). Sem nada disso mas com ui/ = "não iniciado". transcripts/
+    # NÃO conta sozinho: em shorts é compartilhado/agregado.
+    # Profundidade 4 cobre edit/shorts/<brand>/<projeto>.
     found = {}  # rel -> started(bool)
-    for depth in ("*", "*/*", "*/*/*"):
+    for depth in ("*", "*/*", "*/*/*", "*/*/*/*"):
         for d in sorted(root.glob(depth)):
             if not d.is_dir():
                 continue
             rel = d.relative_to(root).as_posix()
             if rel.split("/")[0] in SKIP_DIRS:
                 continue
-            if (d / "edl.json").exists():
+            if (d / "edl.json").exists() or (d / "preview.mp4").exists() \
+                    or (d / "final.mp4").exists():
                 found[rel] = True
             elif rel not in found and (d / "ui").is_dir():
                 found[rel] = False
     out = []
     for rel in sorted(found):
         proj = root / rel
+        parts = rel.split("/")
+        name = "/".join(parts[-2:]) if len(parts) >= 3 else proj.name
         out.append({
             "id": rel,
-            "name": proj.name,
+            "name": name,
             "has_preview": (proj / "preview.mp4").exists(),
             "has_final": (proj / "final.mp4").exists(),
             "started": found[rel],
