@@ -13,6 +13,13 @@ Quando o usuário pedir para "escutar a UI":
 
 ## Ciclo de um pedido
 
+**Atenção — escrita concorrente:** antes de QUALQUER escrita em `queue.json`,
+reler o arquivo do disco e fazer merge por `id` — nunca sobrescrever entradas
+que você não conhece (a UI pode ter adicionado um pedido novo enquanto você
+processava o anterior). O mesmo cuidado vale para `state.json`: ao escrever
+progresso de render, preservar as chaves que não são suas (ex.: `aprovacoes`)
+em vez de sobrescrever o objeto inteiro.
+
 1. Marcar `status: "executing"` (reescrever o queue.json atômico).
 2. Ler `ui/state.json` → `formato` = receita em `Formatos/<formato>.md`;
    seguir a receita.

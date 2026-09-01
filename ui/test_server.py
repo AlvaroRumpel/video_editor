@@ -106,6 +106,19 @@ def test_new_project(client, fake_root):
     assert gq[0]["target"]["bruto"] == "video.mkv"
 
 
+def test_reply_global(client, fake_root):
+    r = client.post("/api/new-project",
+                    json={"bruto": "video.mkv", "formato": "padrao-youtube",
+                          "nome": "outro-video"})
+    qid = r.json()["id"]
+    rr = client.post("/api/reply", params={"id": "_global"},
+                     json={"qid": qid, "text": "pode sim"})
+    assert rr.status_code == 200
+    gq = client.get("/api/global-queue").json()
+    entry = next(e for e in gq if e["id"] == qid)
+    assert entry["reply"] == "pode sim" and entry["status"] == "pending"
+
+
 def test_events_first_snapshot(client):
     with client.stream("GET", "/api/events",
                        params={"id": "edit-fake", "max_events": 1}) as r:

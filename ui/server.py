@@ -104,7 +104,10 @@ def queue_post(request: Request, id: str, body: dict):
 
 @app.post("/api/reply")
 def reply(request: Request, id: str, body: dict):
-    qpath = _proj(request, id) / "ui" / "queue.json"
+    if id == "_global":
+        qpath = _root(request) / ".ui-runtime" / "queue.json"
+    else:
+        qpath = _proj(request, id) / "ui" / "queue.json"
     queue = pipeline.read_json(qpath, [])
     for e in queue:
         if e["id"] == body.get("qid"):

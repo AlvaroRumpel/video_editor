@@ -27,18 +27,31 @@ def atomic_write_json(path: Path, obj) -> None:
 
 
 def find_projects(root: Path) -> list[dict]:
-    out = []
-    for depth in ("*/edl.json", "*/*/edl.json", "*/*/*/edl.json"):
-        for edl in sorted(root.glob(depth)):
-            rel = edl.parent.relative_to(root).as_posix()
+    # started (tem edl.json) sempre vence; sem edl.json mas com ui/ ou
+    # transcripts/ conta como projeto "não iniciado" (spec).
+    found = {}  # rel -> started(bool)
+    for depth in ("*", "*/*", "*/*/*"):
+        for d in sorted(root.glob(depth)):
+            if not d.is_dir():
+                continue
+            rel = d.relative_to(root).as_posix()
             if rel.split("/")[0] in SKIP_DIRS:
                 continue
-            out.append({
-                "id": rel,
-                "name": edl.parent.name,
-                "has_preview": (edl.parent / "preview.mp4").exists(),
-                "has_final": (edl.parent / "final.mp4").exists(),
-            })
+            if (d / "edl.json").exists():
+                found[rel] = True
+            elif rel not in found and ((d / "ui").is_dir() or
+                                       (d / "transcripts").is_dir()):
+                found[rel] = False
+    out = []
+    for rel in sorted(found):
+        proj = root / rel
+        out.append({
+            "id": rel,
+            "name": proj.name,
+            "has_preview": (proj / "preview.mp4").exists(),
+            "has_final": (proj / "final.mp4").exists(),
+            "started": found[rel],
+        })
     return out
 
 

@@ -48,7 +48,7 @@ async function loadProjects() {
   const projs = await getJSON('/api/projects');
   const sel = el('proj-select');
   sel.innerHTML = projs.map(p =>
-    `<option value="${p.id}">${p.name}</option>`).join('');
+    `<option value="${p.id}">${p.name}${p.started ? '' : ' (não iniciado)'}</option>`).join('');
   sel.onchange = () => loadProject(sel.value);
   if (projs.length) loadProject(localStorage.lastPid || projs[0].id);
 }
@@ -57,6 +57,7 @@ async function loadProject(pid) {
   S.pid = pid; localStorage.lastPid = pid;
   S.proj = await getJSON('/api/project', { id: pid });
   S.wave = await getJSON('/api/waveform', { id: pid });
+  S.globalQueue = await getJSON('/api/global-queue');
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
   if (S.proj.has_preview)
@@ -539,36 +540,41 @@ function renderAll() {
 const STATUS_ICON = { pending: '⏳', executing: '▶', waiting_reply: '❓', done: '✅', failed: '❌' };
 
 function renderQueue() {
-  const queue = (S.proj.queue || []).slice().reverse();
-  el('queue-panel').innerHTML = queue.length ? queue.map(e => {
+  const projEntries = (S.proj.queue || []).map(e => ({ ...e, _scope: 'proj' }));
+  const globalEntries = (S.globalQueue || []).map(e => ({ ...e, _scope: 'global' }));
+  const merged = projEntries.concat(globalEntries).sort((a, b) => b.id - a.id);
+  el('queue-panel').innerHTML = merged.length ? merged.map(e => {
     const icon = STATUS_ICON[e.status] || '';
+    const prefix = e._scope === 'global' ? '[novo] ' : '';
     const sub = e.resultado ? `<div class="queue-sub">${escapeHtml(e.resultado)}</div>` : '';
     const reply = e.status === 'waiting_reply' ? `<div class="queue-reply">
-        <input type="text" class="queue-reply-input" data-qid="${e.id}" placeholder="responder...">
-        <button class="queue-reply-send" data-qid="${e.id}">Enviar</button>
+        <input type="text" class="queue-reply-input" data-qid="${e.id}" data-scope="${e._scope}" placeholder="responder...">
+        <button class="queue-reply-send" data-qid="${e.id}" data-scope="${e._scope}">Enviar</button>
       </div>` : '';
     return `<div class="queue-row">
-      <div class="queue-main"><span class="queue-icon">${icon}</span><span class="queue-text">${escapeHtml(e.text || e.type)}</span></div>
+      <div class="queue-main"><span class="queue-icon">${icon}</span><span class="queue-text">${prefix}${escapeHtml(e.text || e.type)}</span></div>
       ${sub}${reply}
     </div>`;
   }).join('') : '<div class="queue-empty">fila vazia</div>';
 }
 
-function sendReply(qid, text) {
-  return postJSON('/api/reply', { id: S.pid }, { qid, text }).then(() => loadProject(S.pid));
+function sendReply(qid, text, scope) {
+  const pid = scope === 'global' ? '_global' : S.pid;
+  return postJSON('/api/reply', { id: pid }, { qid, text }).then(() => loadProject(S.pid));
 }
 
 el('queue-panel').addEventListener('click', e => {
   const btn = e.target.closest('.queue-reply-send');
   if (!btn) return;
-  const input = el('queue-panel').querySelector(`.queue-reply-input[data-qid="${btn.dataset.qid}"]`);
+  const input = el('queue-panel').querySelector(
+    `.queue-reply-input[data-qid="${btn.dataset.qid}"][data-scope="${btn.dataset.scope}"]`);
   const text = input.value.trim();
-  if (text) sendReply(+btn.dataset.qid, text);
+  if (text) sendReply(+btn.dataset.qid, text, btn.dataset.scope);
 });
 el('queue-panel').addEventListener('keydown', e => {
   if (e.key !== 'Enter' || !e.target.classList.contains('queue-reply-input')) return;
   const text = e.target.value.trim();
-  if (text) sendReply(+e.target.dataset.qid, text);
+  if (text) sendReply(+e.target.dataset.qid, text, e.target.dataset.scope);
 });
 
 function fmtMSS(sec) {

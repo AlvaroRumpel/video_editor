@@ -39,13 +39,20 @@ def fake_root(tmp_path: Path) -> Path:
     (tmp_path / "Formatos").mkdir()
     (tmp_path / "Formatos" / "padrao-youtube.md").write_text("# receita",
                                                              encoding="utf-8")
+    raw = tmp_path / "edit-raw"
+    (raw / "ui").mkdir(parents=True)
+    (raw / "ui" / "queue.json").write_text("[]", encoding="utf-8")
     return tmp_path
 
 
 def test_find_projects(fake_root):
     projs = pipeline.find_projects(fake_root)
-    assert projs == [{"id": "edit-fake", "name": "edit-fake",
-                      "has_preview": True, "has_final": False}]
+    assert projs == [
+        {"id": "edit-fake", "name": "edit-fake",
+         "has_preview": True, "has_final": False, "started": True},
+        {"id": "edit-raw", "name": "edit-raw",
+         "has_preview": False, "has_final": False, "started": False},
+    ]
 
 
 def test_project_dir_rejects_escape(fake_root):
