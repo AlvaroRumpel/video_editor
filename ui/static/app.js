@@ -63,6 +63,15 @@ async function loadProjects() {
 }
 
 async function loadProject(pid) {
+  try {
+    await loadProjectInner(pid);
+  } catch (err) {   // servidor reiniciando etc.: tenta de novo em 2s
+    console.warn('loadProject falhou, retry em 2s', err);
+    setTimeout(() => loadProject(pid), 2000);
+  }
+}
+
+async function loadProjectInner(pid) {
   S.pid = pid; localStorage.lastPid = pid;
   S.proj = await getJSON('/api/project', { id: pid });
   S.wave = await getJSON('/api/waveform', { id: pid });
