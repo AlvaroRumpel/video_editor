@@ -179,13 +179,17 @@ WATCH = {"edl": "edl.json", "queue": "ui/queue.json",
          "final": "final.mp4"}
 
 
-def _snapshot(proj):
+def _snapshot(proj, root):
     mtimes = {}
     for key, rel in WATCH.items():
         try:
             mtimes[key] = (proj / rel).stat().st_mtime
         except OSError:
             mtimes[key] = None
+    try:  # fila global (novo-projeto): status precisa refletir ao vivo na UI
+        mtimes["global_queue"] = (root / ".ui-runtime" / "queue.json").stat().st_mtime
+    except OSError:
+        mtimes["global_queue"] = None
     return {"mtimes": mtimes, "claude_online": pipeline.claude_online(proj)}
 
 
@@ -199,7 +203,7 @@ async def events(request: Request, id: str, max_events: int = 0):
         while True:
             if await request.is_disconnected():
                 return
-            snap = _snapshot(proj)
+            snap = _snapshot(proj, _root(request))
             if snap != last:
                 yield f"data: {_json.dumps(snap)}\n\n"
                 last = snap

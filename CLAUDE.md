@@ -37,8 +37,14 @@ em vez de sobrescrever o objeto inteiro.
      `Formatos/padrao-ads.md` usando `descricao` + `fontes` como briefing.
 4. Pedido grande/ambíguo → `status: "waiting_reply"` + pergunta em
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
-5. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
-6. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
+   TODA pergunta ao usuário passa por aqui — nunca só no chat: o usuário
+   acompanha e responde pela UI.
+5. Tarefa longa (ex.: novo-projeto): manter `status: "executing"` e ir
+   atualizando `resultado` com o status atual em uma frase curta a cada
+   etapa concluída ("transcrevendo...", "gerando animações 2/5..."). A UI
+   mostra isso ao vivo.
+6. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
+7. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
 
 ## Regras
 

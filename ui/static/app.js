@@ -44,13 +44,22 @@ function buildTimeMap() {
   return map;
 }
 
-async function loadProjects() {
+async function refreshProjectList() {
   const projs = await getJSON('/api/projects');
   const sel = el('proj-select');
   sel.innerHTML = projs.map(p =>
     `<option value="${p.id}">${p.name}${p.started ? '' : ' (não iniciado)'}</option>`).join('');
+  if (S.pid && projs.some(p => p.id === S.pid)) sel.value = S.pid;
+  return projs;
+}
+
+async function loadProjects() {
+  const projs = await refreshProjectList();
+  const sel = el('proj-select');
   sel.onchange = () => loadProject(sel.value);
-  if (projs.length) loadProject(localStorage.lastPid || projs[0].id);
+  if (!projs.length) return;
+  const last = localStorage.lastPid;
+  loadProject(projs.some(p => p.id === last) ? last : projs[0].id);
 }
 
 async function loadProject(pid) {
@@ -58,10 +67,12 @@ async function loadProject(pid) {
   S.proj = await getJSON('/api/project', { id: pid });
   S.wave = await getJSON('/api/waveform', { id: pid });
   S.globalQueue = await getJSON('/api/global-queue');
+  refreshProjectList();   // projeto novo criado pelo Claude aparece sem F5
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
   if (S.proj.has_preview)
     v.src = api('/api/video', { id: pid, kind: 'preview' });
+  else if (v.getAttribute('src')) v.removeAttribute('src');
   renderAll();          // definida nas tasks 7-9
   connectSSE(pid);
 }

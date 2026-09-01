@@ -13,14 +13,17 @@
 </header>
 <main>
   <aside id="queue-pane">
-    <div id="queue-title">Fila</div>
+    <div class="pane-title">Fila</div>
     <div id="queue-panel"></div>
   </aside>
   <section id="player-pane">
-    <video id="player" controls title="Espaço = play/pause"></video>
-    <div id="no-preview" hidden>sem preview — peça um render</div>
+    <div id="stage">
+      <video id="player" controls title="Espaço = play/pause"></video>
+      <div id="no-preview" hidden>sem preview — peça um render</div>
+    </div>
   </section>
   <aside id="side-pane">
+    <div class="pane-title">Cortes</div>
     <div id="cut-list" title="Clique num corte pra ver o trecho no player"></div>
     <div id="instruction-pane">
       <div id="instr-context">instrução geral</div>

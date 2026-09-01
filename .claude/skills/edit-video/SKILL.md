@@ -23,7 +23,10 @@ Passos, nesta ordem:
 Executar conforme o `CLAUDE.md` da raiz do projeto (protocolo da fila):
 FIFO, marcar `executing` → executar seguindo a receita do formato em
 `state.json`/`Formatos/` → `done`/`failed` com `resultado` legível.
-Pedido grande ou ambíguo → `waiting_reply` com a pergunta em `resultado`.
+Pedido grande ou ambíguo → `waiting_reply` com a pergunta em `resultado` —
+TODA pergunta ao usuário vai pela fila, nunca só no chat. Em tarefa longa,
+manter `executing` e atualizar `resultado` com o status atual a cada etapa
+("transcrevendo...", "gerando animações 2/5...") — a UI mostra ao vivo.
 Pedidos `cancelado` nunca são executados. Ao editar `queue.json`/`state.json`,
 sempre reler antes e mesclar por `id` / preservar chaves alheias.
 
