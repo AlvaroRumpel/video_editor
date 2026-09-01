@@ -602,7 +602,7 @@ function renderQueue() {
     const prefix = e._scope === 'global' ? '[novo] ' : '';
     const sub = e.resultado ? `<div class="queue-sub">${escapeHtml(e.resultado)}</div>` : '';
     const reply = e.status === 'waiting_reply' ? `<div class="queue-reply">
-        <input type="text" class="queue-reply-input" data-qid="${e.id}" data-scope="${e._scope}" placeholder="responder...">
+        <textarea class="queue-reply-input" data-qid="${e.id}" data-scope="${e._scope}" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)" rows="2"></textarea>
         <button class="queue-reply-send" data-qid="${e.id}" data-scope="${e._scope}">Enviar</button>
       </div>` : '';
     return `<div class="queue-row">
@@ -627,6 +627,14 @@ el('queue-panel').addEventListener('click', e => {
 });
 el('queue-panel').addEventListener('keydown', e => {
   if (e.key !== 'Enter' || !e.target.classList.contains('queue-reply-input')) return;
+  if (e.ctrlKey) {   // Ctrl+Enter = quebra de linha
+    const ta = e.target, p = ta.selectionStart;
+    ta.value = ta.value.slice(0, p) + '\n' + ta.value.slice(ta.selectionEnd);
+    ta.selectionStart = ta.selectionEnd = p + 1;
+    e.preventDefault();
+    return;
+  }
+  e.preventDefault();   // Enter puro = envia
   const text = e.target.value.trim();
   if (text) sendReply(+e.target.dataset.qid, text, e.target.dataset.scope);
 });
