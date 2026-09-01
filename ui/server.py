@@ -2,10 +2,12 @@
 from pathlib import Path
 import re
 import time
+import asyncio
+import json as _json
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import pipeline
@@ -145,6 +147,43 @@ def new_project(request: Request, body: dict):
 def global_queue(request: Request):
     return pipeline.read_json(_root(request) / ".ui-runtime" / "queue.json",
                               [])
+
+
+WATCH = {"edl": "edl.json", "queue": "ui/queue.json",
+         "state": "ui/state.json", "preview": "preview.mp4",
+         "final": "final.mp4"}
+
+
+def _snapshot(proj):
+    mtimes = {}
+    for key, rel in WATCH.items():
+        try:
+            mtimes[key] = (proj / rel).stat().st_mtime
+        except OSError:
+            mtimes[key] = None
+    return {"mtimes": mtimes, "claude_online": pipeline.claude_online(proj)}
+
+
+@app.get("/api/events")
+async def events(request: Request, id: str):
+    proj = _proj(request, id)
+    start_time = time.time()
+
+    async def gen():
+        last = None
+        while True:
+            if await request.is_disconnected():
+                return
+            snap = _snapshot(proj)
+            if snap != last:
+                yield f"data: {_json.dumps(snap)}\n\n"
+                last = snap
+            # Safety timeout for testing (production clients disconnect)
+            if time.time() - start_time > 10:
+                return
+            await asyncio.sleep(1)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")

@@ -104,3 +104,16 @@ def test_new_project(client, fake_root):
     gq = client.get("/api/global-queue").json()
     assert gq[0]["type"] == "novo-projeto"
     assert gq[0]["target"]["bruto"] == "video.mkv"
+
+
+def test_events_first_snapshot(client):
+    with client.stream("GET", "/api/events",
+                       params={"id": "edit-fake"}) as r:
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers["content-type"]
+        for line in r.iter_lines():
+            if line.startswith("data:"):
+                import json as _json
+                snap = _json.loads(line[5:])
+                assert "mtimes" in snap and "claude_online" in snap
+                break
