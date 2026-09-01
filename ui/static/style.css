@@ -192,6 +192,46 @@ main {
   flex: 1 1 0;
 }
 
+/* caixinha "o que o Claude está fazendo" */
+#activity-box {
+  flex-shrink: 0;
+  margin: 8px;
+  padding: 8px 10px;
+  background: rgba(79, 140, 255, 0.08);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+#activity-now {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+#activity-box .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #activity-box .dot { animation: none; }
+}
+
+#activity-prev {
+  color: var(--text-dim);
+  margin-top: 4px;
+  padding-left: 14px;
+}
+
 #instruction-pane {
   padding: 8px;
   border-bottom: 1px solid var(--border);

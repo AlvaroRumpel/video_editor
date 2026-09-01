@@ -67,6 +67,7 @@ async function loadProject(pid) {
   S.proj = await getJSON('/api/project', { id: pid });
   S.wave = await getJSON('/api/waveform', { id: pid });
   S.globalQueue = await getJSON('/api/global-queue');
+  S.activity = await getJSON('/api/activity');
   refreshProjectList();   // projeto novo criado pelo Claude aparece sem F5
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
@@ -593,7 +594,20 @@ function renderAll() {
 
 const STATUS_ICON = { pending: '⏳', executing: '▶', waiting_reply: '❓', done: '✅', failed: '❌', cancelado: '🚫' };
 
+function renderActivity() {
+  const a = S.activity || {};
+  const box = el('activity-box');
+  if (!box) return;
+  const fresh = a.ts && (Date.now() - new Date(a.ts).getTime()) < 10 * 60 * 1000;
+  box.hidden = !(a.atual && fresh);
+  if (box.hidden) return;
+  el('activity-now-text').textContent = a.atual;
+  el('activity-prev').hidden = !a.anterior;
+  if (a.anterior) el('activity-prev-text').textContent = a.anterior;
+}
+
 function renderQueue() {
+  renderActivity();
   const projEntries = (S.proj.queue || []).map(e => ({ ...e, _scope: 'proj' }));
   const globalEntries = (S.globalQueue || []).map(e => ({ ...e, _scope: 'global' }));
   const merged = projEntries.concat(globalEntries).sort((a, b) => b.id - a.id);

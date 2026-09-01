@@ -168,6 +168,13 @@ def new_project(request: Request, body: dict):
     return _append_queue(qpath, entry)
 
 
+@app.get("/api/activity")
+def activity(request: Request):
+    """O que o Claude está fazendo agora (escrito pela sessão executora)."""
+    return pipeline.read_json(_root(request) / ".ui-runtime" / "activity.json",
+                              {})
+
+
 @app.get("/api/global-queue")
 def global_queue(request: Request):
     return pipeline.read_json(_root(request) / ".ui-runtime" / "queue.json",
@@ -186,10 +193,12 @@ def _snapshot(proj, root):
             mtimes[key] = (proj / rel).stat().st_mtime
         except OSError:
             mtimes[key] = None
-    try:  # fila global (novo-projeto): status precisa refletir ao vivo na UI
-        mtimes["global_queue"] = (root / ".ui-runtime" / "queue.json").stat().st_mtime
-    except OSError:
-        mtimes["global_queue"] = None
+    for key, rel in (("global_queue", "queue.json"),
+                     ("activity", "activity.json")):
+        try:  # fila global + atividade: refletem ao vivo na UI
+            mtimes[key] = (root / ".ui-runtime" / rel).stat().st_mtime
+        except OSError:
+            mtimes[key] = None
     return {"mtimes": mtimes, "claude_online": pipeline.claude_online(proj)}
 
 

@@ -161,3 +161,13 @@ def test_new_project_sem_bruto(client):
     tg = r.json()["target"]
     assert tg["bruto"] is None and tg["descricao"] == "reel sobre feature Y"
     assert "anotus" in tg["fontes"]
+
+
+def test_activity(client, fake_root):
+    assert client.get("/api/activity").json() == {}
+    act = fake_root / ".ui-runtime" / "activity.json"
+    act.parent.mkdir(exist_ok=True)
+    act.write_text('{"atual": "renderizando 3/5", "anterior": "cortes", '
+                   '"ts": "2026-09-01T22:00:00+00:00"}', encoding="utf-8")
+    a = client.get("/api/activity").json()
+    assert a["atual"] == "renderizando 3/5" and a["anterior"] == "cortes"

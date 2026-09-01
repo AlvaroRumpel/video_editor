@@ -43,6 +43,10 @@ em vez de sobrescrever o objeto inteiro.
    atualizando `resultado` com o status atual em uma frase curta a cada
    etapa concluída ("transcrevendo...", "gerando animações 2/5..."). A UI
    mostra isso ao vivo.
+   Além disso, manter `.ui-runtime/activity.json` =
+   `{"atual": "<ação de agora>", "anterior": "<ação concluída>", "ts": "<ISO>"}`
+   a cada mudança de ação — vira a caixinha "o que o Claude está fazendo"
+   na UI (some sozinha se ficar >10min sem update).
 6. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
 7. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
 
