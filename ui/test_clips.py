@@ -179,3 +179,53 @@ def test_srt_clipe_tempo_relativo(words60):
     assert blocos[0].split("\n")[1].startswith("00:00:00,0")            # 1º cue começa em ~0 (relativo ao clipe)
     ultimo = blocos[-1].split("\n")[1].split(" --> ")[1]
     assert ultimo < "00:00:16,000"                                        # ~10 s + ~5 s
+
+
+import os, sys
+pytest_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None or not clips.RENDER.exists(), reason="sem ffmpeg/render.py")
+
+
+def _ff(*args):
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
+
+
+@pytest_ffmpeg
+def test_render_real_preview(tmp_path, words60):
+    export = tmp_path / "Export" / "x - horizontal.mp4"; export.parent.mkdir()
+    _ff("-f", "lavfi", "-i", "testsrc=s=1920x1080:r=60:d=62", "-f", "lavfi", "-i", "sine=f=440:r=48000:d=62",
+        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(export))
+    proj = tmp_path / "proj"; proj.mkdir()
+    c = _clips(words60, plataformas=["shorts"])
+    clips.edl(c, proj, export, words60)
+    r = clips.render(c, proj, tmp_path / "out", preview=True)
+    assert r["erros"] == [] and r["renderizados"] == ["01-um-shorts.mp4"]
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                            "-of", "csv=p=0", str(tmp_path / "out" / "01-um-shorts.mp4")], capture_output=True, text=True).stdout.strip()
+    assert probe == "1080,1920"
+
+
+def test_render_erro_isolado(tmp_path, words60):
+    proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    c = _clips(words60, plataformas=["shorts", "reels"])
+    c["clipes"][0]["ranges"][0]["t_out"] = words60[-1]["e"] + clips.PAD_OUT       # ~60 s: ok shorts e reels
+    clips.edl(c, proj, export, words60)
+    chamadas = []
+    def run(cmd):
+        chamadas.append(cmd)
+        class R: returncode = 1 if "reels" in " ".join(cmd) else 0; stderr = "boom"
+        return R()
+    r = clips.render(c, proj, tmp_path / "out", _run=run)
+    assert r["renderizados"] == ["01-um-shorts.mp4"] and any("reels" in e and "boom" in e for e in r["erros"])
+    assert len(chamadas) == 2 and all("--preview" not in cmd for cmd in chamadas)
+
+
+def test_cli(tmp_path, words60):
+    exe = [sys.executable, str(Path(clips.__file__))]
+    wo = tmp_path / "w.json"; wo.write_text(json.dumps(words60), encoding="utf-8")
+    cj = tmp_path / "c.json"; cj.write_text(json.dumps(_clips(words60, x=637)), encoding="utf-8")
+    r = subprocess.run([*exe, "validar", str(cj), str(wo)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 1 and json.loads(r.stdout)["ok"] is False
+    r = subprocess.run([*exe, "candidatos", str(wo), str(tmp_path / "cand.json"), "--n", "3"], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0 and isinstance(json.loads(r.stdout), list)
+    r = subprocess.run([*exe, "validar", str(tmp_path / "nao.json"), str(wo)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2 and "erro" in json.loads(r.stdout)

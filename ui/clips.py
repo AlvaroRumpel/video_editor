@@ -256,3 +256,66 @@ def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
     (proj / "clips" / "clips.md").write_text(md, encoding="utf-8")
     (proj / "clips.md").write_text(md, encoding="utf-8")
     return {"gerados": gerados, "md": md}
+
+
+def _run_padrao(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          env={**__import__("os").environ, "PYTHONIOENCODING": "utf-8"})
+
+
+def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _run=None) -> dict:
+    run = _run or _run_padrao
+    proj = Path(proj); export_dir = Path(export_dir); export_dir.mkdir(parents=True, exist_ok=True)
+    ok, erros = [], []
+    for n, c in enumerate(_aprovados(clips), 1):
+        for plat in c.get("plataformas", []):
+            nome = f"{n:02d}-{c['slug']}-{plat}"
+            edl_path = proj / "clips" / nome / "edl.json"
+            if not edl_path.exists():
+                erros.append(f"{nome}: edl.json não existe (rode `edl` antes)"); continue
+            cmd = [sys.executable, str(RENDER), str(edl_path), "-o", str(export_dir / f"{nome}.mp4")]
+            if preview: cmd.append("--preview")
+            r = run(cmd)
+            if r.returncode != 0:
+                erros.append(f"{nome}: render falhou ({r.returncode}): {str(r.stderr)[-400:]}")
+            else:
+                ok.append(f"{nome}.mp4")
+    return {"renderizados": ok, "erros": erros}
+
+
+def _ler(p): return json.loads(Path(p).read_text(encoding="utf-8-sig"))
+
+
+def _cli(ns):
+    if ns.cmd == "words-out":
+        out = words_out(_ler(ns.edl), _ler(ns.transcript), _ler(ns.real))
+        pipeline.atomic_write_json(Path(ns.out), out); return {"palavras": len(out), "fim": out[-1]["e"] if out else 0}, 0
+    if ns.cmd == "candidatos":
+        c = candidatos(_ler(ns.words), n=ns.n)
+        pipeline.atomic_write_json(Path(ns.out), c); return c, 0
+    if ns.cmd == "validar":
+        r = validar(_ler(ns.clips), _ler(ns.words)); return r, (0 if r["ok"] else 1)
+    if ns.cmd == "edl":
+        c = _ler(ns.clips); w = _ler(Path(ns.proj) / "clips" / "words_out.json")
+        return edl(c, Path(ns.proj), Path(ns.export), w), 0
+    r = render(_ler(ns.clips), Path(ns.proj), Path(ns.export_dir), preview=ns.preview)
+    return r, (0 if not r["erros"] else 1)
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="Clip Factory")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("words-out"); p.add_argument("edl"); p.add_argument("transcript"); p.add_argument("real"); p.add_argument("out")
+    p = sub.add_parser("candidatos"); p.add_argument("words"); p.add_argument("out"); p.add_argument("--n", type=int, default=20)
+    p = sub.add_parser("validar"); p.add_argument("clips"); p.add_argument("words")
+    p = sub.add_parser("edl"); p.add_argument("clips"); p.add_argument("proj"); p.add_argument("export")
+    p = sub.add_parser("render"); p.add_argument("clips"); p.add_argument("proj"); p.add_argument("export_dir"); p.add_argument("--preview", action="store_true")
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns)
+    except Exception as e:
+        print(json.dumps({"erro": f"{type(e).__name__}: {e}"}, ensure_ascii=False)); sys.exit(2)
+    print(json.dumps(out, ensure_ascii=False)); sys.exit(code)
