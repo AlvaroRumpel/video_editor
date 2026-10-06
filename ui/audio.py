@@ -57,3 +57,29 @@ def denoise(src: Path, dst: Path, forte: bool = False) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
     _ff(["-i", str(src), "-af", af, "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(dst)])
     return dst
+
+
+AAC = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+
+
+def _ratio(duck_db: float) -> float:
+    # ponytail: assume voz ~12 dB acima do threshold; ratio dá o duck pedido nesse caso.
+    d = min(abs(duck_db), 11.0)
+    return 12.0 / (12.0 - d)
+
+
+def mix_trilha(video: Path, trilha: Path, dst: Path, nivel_db: float = -18.0,
+               duck_db: float = -8.0, fade_s: float = 1.5) -> Path:
+    dur = duracao(video)
+    fmt = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+    graph = (
+        f"[0:a]{fmt},asplit=2[voz][sc];"
+        f"[1:a]aloop=loop=-1:size=2000000000,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,{fmt},"
+        f"volume={nivel_db}dB,afade=t=in:d={fade_s},afade=t=out:st={max(dur - fade_s, 0):.3f}:d={fade_s}[tr];"
+        f"[tr][sc]sidechaincompress=threshold=0.05:ratio={_ratio(duck_db):.3f}:attack=200:release=800[duck];"
+        f"[voz][duck]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1:LRA=11[out]"
+    )
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    _ff(["-i", str(video), "-i", str(trilha), "-filter_complex", graph,
+         "-map", "0:v", "-map", "[out]", "-c:v", "copy", *AAC, "-movflags", "+faststart", str(dst)])
+    return dst

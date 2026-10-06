@@ -87,3 +87,27 @@ def test_denoise_forte_escapa_dois_pontos(voz, tmp_path, monkeypatch):
     af = capt[0][capt[0].index("-af") + 1]
     assert "\\:" in af
     assert re.search(r"(?<!\\):", af.split("m=", 1)[1]) is None
+
+
+BP100 = "bandpass=f=100:w=40"   # isola a trilha (100 Hz) da voz (1 kHz)
+
+
+def test_mix_trilha_duck_loop_loudness(video, trilha, tmp_path):
+    dst = tmp_path / "mix.mp4"
+    audio.mix_trilha(video, trilha, dst)
+    assert abs(audio.duracao(dst) - audio.duracao(video)) < 0.1     # loop cobre os 8 s
+    com_fala = audio.rms_db(dst, 3.0, 4.0, BP100)    # voz ligada em 3-4 s
+    sem_fala = audio.rms_db(dst, 4.2, 4.9, BP100)    # voz desligada em 4-5 s
+    assert com_fala < sem_fala - 3                   # ducking atua
+    assert audio.rms_db(dst, 6.5, 7.5, BP100) > -60  # trilha ainda presente após o loop de 3 s
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v",
+                            "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(dst)],
+                           capture_output=True, text=True).stdout.strip()
+    assert probe == "h264"                           # -c:v copy
+
+
+def test_mix_trilha_nivel_mais_baixo(video, trilha, tmp_path):
+    a = tmp_path / "a.mp4"; b = tmp_path / "b.mp4"
+    audio.mix_trilha(video, trilha, a, nivel_db=-18)
+    audio.mix_trilha(video, trilha, b, nivel_db=-24)
+    assert audio.rms_db(b, 4.2, 4.9, BP100) < audio.rms_db(a, 4.2, 4.9, BP100) - 3
