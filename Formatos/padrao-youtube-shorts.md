@@ -21,6 +21,7 @@ re-encode, não uma re-edição. Receita provada em `edit/shorts/build_shorts.py
 2. **Timings**: `words_out.py` mapeia os tempos de palavra do Scribe para a
    timeline do export — toda borda de corte senta em fronteira de palavra
    (padding 50ms antes / 80ms depois).
+   > Ação paga (transcrição Scribe): seguir "Orçamento" do CLAUDE.md (`budget.py autorizar` antes, `registrar` depois).
 3. **EDL por short**: um `edl_NN-<slug>.json` por short; o reframe (crop+scale)
    vai no campo `grade` do EDL — o `render.py` aplica depois do scale dele,
    então roda por segmento na extração.

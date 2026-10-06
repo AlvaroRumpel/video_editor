@@ -50,6 +50,25 @@ em vez de sobrescrever o objeto inteiro.
 6. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
 7. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
 
+## Orçamento (ações pagas)
+
+Antes de QUALQUER ação que gaste dinheiro ou cota (ElevenLabs, stock pago,
+vídeo por IA...):
+
+1. `python ui/budget.py autorizar <proj> <provedor> <unidades>`.
+2. exit 2 (`precisa_aprovacao`) ou 3 (`bloqueado`) → pedido `waiting_reply`
+   na fila com `resultado` = motivo + estimativa ("gerar 5 clipes Kling ≈
+   US$1,40 — aprova?"). Esperar `reply` afirmativo; repetir o passo 1 com
+   `--aprovacao <id do pedido>`.
+3. Executar.
+4. `python ui/budget.py registrar <proj> <provedor> <unidades> [--usd real]
+   [--aprovacao <id>]`.
+
+Provedores e preços: `ui/precos.json` (provedor novo = entrada nova antes de
+usar). Transcrição Scribe: registrar `elevenlabs_scribe` com minutos do áudio
+após `transcribe.py`; na primeira rodada, medir `python ui/budget.py saldo`
+antes/depois e anotar `creditos` por minuto em `precos.json`.
+
 ## Regras
 
 - Confirmação de estratégia do video-use continua valendo (via waiting_reply).

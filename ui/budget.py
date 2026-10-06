@@ -167,3 +167,31 @@ def autorizar(root: Path, proj: Path, provedor: str, unidades: float,
         return _decisao("precisa_aprovacao",
                         f"acima de {b['aprovar_acima_usd']} US$: estimativa {est['usd']:.2f}", est)
     return _decisao("ok", "dentro dos limites", est)
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    ap = argparse.ArgumentParser(description="orçamento do video_editor")
+    ap.add_argument("--root", default=str(pipeline.ROOT))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("autorizar")
+    a.add_argument("proj"); a.add_argument("provedor"); a.add_argument("unidades", type=float)
+    a.add_argument("--aprovacao", type=int)
+    r = sub.add_parser("registrar")
+    r.add_argument("proj"); r.add_argument("provedor"); r.add_argument("unidades", type=float)
+    r.add_argument("--usd", type=float); r.add_argument("--creditos", type=int)
+    r.add_argument("--aprovacao", type=int); r.add_argument("--nota", default="")
+    sub.add_parser("saldo")
+    ns = ap.parse_args()
+    root = Path(ns.root)
+    if ns.cmd == "autorizar":
+        d = autorizar(root, Path(ns.proj), ns.provedor, ns.unidades, aprovacao=ns.aprovacao)
+        print(json.dumps(d, ensure_ascii=False))
+        sys.exit({"ok": 0, "precisa_aprovacao": 2, "bloqueado": 3}[d["status"]])
+    if ns.cmd == "registrar":
+        print(json.dumps(registrar(Path(ns.proj), ns.provedor, ns.unidades, usd=ns.usd,
+                                   creditos=ns.creditos, aprovacao=ns.aprovacao,
+                                   nota=ns.nota, root=root), ensure_ascii=False))
+    if ns.cmd == "saldo":
+        print(json.dumps(saldo_elevenlabs(root)))

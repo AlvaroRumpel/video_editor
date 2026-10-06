@@ -52,6 +52,8 @@ Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue
 
 **Áudio**: música de `assets/music/`, `loudnorm=I=-15:TP=-1.5:LRA=11`, fade out 1.2s no fim, aac 192k, `+faststart`. Trilha diferente por vídeo (usadas: Phoenix2026=01, Incredulity=02, Unraveling=03, bed-unraveling=04).
 
+> Ação paga (SFX/trilha/vídeo IA, quando houver): seguir "Orçamento" do CLAUDE.md (`budget.py autorizar` antes, `registrar` depois).
+
 **Duração alvo**: 27-35s.
 
 ## QC antes de entregar

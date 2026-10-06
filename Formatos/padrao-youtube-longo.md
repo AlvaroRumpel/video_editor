@@ -76,6 +76,8 @@ senão o primeiro segmento pede imagem antes do início do arquivo.
 
 ## 1. Pipeline (ordem obrigatória)
 
+> Ação paga (transcrição Scribe): seguir "Orçamento" do CLAUDE.md (`budget.py autorizar` antes, `registrar` depois).
+
 ```
 transcribe.py            → transcripts/<fonte>.json     (word-level, cacheado)
 pack_transcripts.py      → takes_packed.md              (leitura por frase)

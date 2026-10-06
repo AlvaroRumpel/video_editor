@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 import pytest
 import budget
@@ -197,3 +199,17 @@ def test_autorizar_saldo_suficiente_ok(root):
     saldo = {"usados": 0, "limite": 1000, "restante": 1000, "reset_ts": 0}
     d = budget.autorizar(root, _proj(root), "elevenlabs_sfx", 1, saldo=saldo)
     assert d["status"] == "ok" and "dentro dos limites" in d["motivo"]
+
+
+def test_cli_autorizar_e_registrar(root):
+    proj = _proj(root)
+    cli = str(Path(budget.__file__))
+    def run(*a):
+        return subprocess.run([sys.executable, cli, "--root", str(root), *a],
+                              capture_output=True, text=True)
+    r = run("autorizar", str(proj), "fal_kling", "1")
+    assert r.returncode == 0 and json.loads(r.stdout)["status"] == "ok"
+    assert run("autorizar", str(proj), "fal_kling", "3").returncode == 2
+    r = run("registrar", str(proj), "fal_kling", "1", "--usd", "0.3")
+    assert r.returncode == 0 and json.loads(r.stdout)["usd"] == 0.3
+    assert budget.gasto_projeto(proj)["usd"] == 0.3
