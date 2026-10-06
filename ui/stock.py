@@ -51,21 +51,30 @@ def _fetch_url(url: str, headers: dict | None = None):
         return 0, b"", {}
 
 
+def _url_segura(url: str) -> str:
+    p = urllib.parse.urlsplit(url)
+    return f"{p.scheme}://{p.netloc}{p.path}"
+
+
 def _json(fetch, url, headers=None):
     """GET + JSON; 429 → espera Retry-After (≤ 60 s) uma vez. Devolve (obj|None, aviso|None)."""
     status, corpo, h = fetch(url, headers)
     if status == 429:
-        espera = min(60, int((h.get("Retry-After") or "5").strip() or 5))
+        ra = next((v for k_, v in h.items() if k_.lower() == "retry-after"), "5")
+        try:
+            espera = min(60, int(str(ra).strip()))
+        except ValueError:
+            espera = 5
         time.sleep(espera)
         status, corpo, h = fetch(url, headers)
         if status == 429:
-            return None, f"429 persistente em {url}"
+            return None, f"429 persistente em {_url_segura(url)}"
     if not (200 <= status < 300):
-        return None, f"HTTP {status} em {url}"
+        return None, f"HTTP {status} em {_url_segura(url)}"
     try:
         return json.loads(corpo.decode("utf-8")), None
     except (ValueError, UnicodeDecodeError) as e:
-        return None, f"resposta inválida de {url}: {e}"
+        return None, f"resposta inválida de {_url_segura(url)}: {e}"
 
 
 def _variante(arquivos: list[dict], chave_w="width", chave_url="link") -> dict | None:
@@ -170,6 +179,8 @@ def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fet
             if baixados >= n or not _filtrar(c, tipo):
                 continue
             status, corpo, _ = fetch(c["download_url"], None)
+            if len(corpo) > MAX_DOWNLOAD:
+                avisos.append(f"{nome}-{c['id']}: arquivo > 150 MB, descartado"); continue
             if not (200 <= status < 300) or not corpo:
                 avisos.append(f"{nome}-{c['id']}: download {status} ({'corpo vazio' if not corpo else 'falhou'})"); continue
             arq = f"{nome}-{re.sub(r'[^\w\-.]+', '_', c['id'])}.{c['ext']}"

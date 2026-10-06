@@ -131,3 +131,22 @@ def test_chaves_env(monkeypatch):
     monkeypatch.setattr(stock, "_ler_env", lambda: {})
     k = stock.chaves()
     assert k["pexels"] == "abc" and k["pixabay"] == ""
+
+
+def test_download_gigante_descarta(tmp_path, mp4, jpg, chaves):
+    fetch = _fetch_factory(mp4, jpg, extra={"https://cdn/1-1080.mp4": (200, b"x" * (stock.MAX_DOWNLOAD + 1), {})})
+    r = stock.buscar("x", "video", ["pexels"], 3, tmp_path / "c", _fetch=fetch)
+    assert r["candidatos"] == [] and any("150 MB" in a for a in r["avisos"])
+    assert not (tmp_path / "c" / "pexels-1.mp4").exists()
+
+
+def test_aviso_nao_vaza_chave(tmp_path, mp4, jpg, chaves):
+    fetch = _fetch_factory(mp4, jpg, extra={})
+    base = fetch
+    def f(url, headers=None):
+        if "pixabay.com/api/videos" in url:
+            return 500, b"", {}
+        return base(url, headers)
+    r = stock.buscar("x", "video", ["pixabay"], 3, tmp_path / "c", _fetch=f)
+    assert any("pixabay.com/api/videos/" in a for a in r["avisos"])
+    assert not any("XK" in a for a in r["avisos"])
