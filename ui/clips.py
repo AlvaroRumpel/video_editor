@@ -111,13 +111,31 @@ SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 TOL = 0.005
 
 
+def _num(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _pares(c: dict) -> list[tuple[float, float]]:
+    """(t_in, t_out) só dos ranges bem formados."""
+    out = []
+    for r in c.get("ranges") or []:
+        try:
+            out.append((float(r["t_in"]), float(r["t_out"])))
+        except (KeyError, TypeError, ValueError):
+            pass
+    return out
+
+
 def dur_clipe(c: dict) -> float:
-    return sum(float(r["t_out"]) - float(r["t_in"]) for r in c.get("ranges", []))
+    return sum(to - ti for ti, to in _pares(c))
 
 
 def _aprovados(clips: dict) -> list[dict]:
     aps = [c for c in clips.get("clipes", []) if c.get("status") == "aprovado"]
-    return sorted(aps, key=lambda c: (-(c.get("nota") or 0), min((float(r["t_in"]) for r in c.get("ranges", [])), default=0)))
+    return sorted(aps, key=lambda c: (-_num(c.get("nota")), min((ti for ti, _ in _pares(c)), default=0)))
 
 
 def _em_palavra(t: float, words, borda: str) -> bool:
@@ -128,8 +146,8 @@ def _em_palavra(t: float, words, borda: str) -> bool:
 
 def _palavras_de(c: dict, words) -> set[str]:
     out = set()
-    for r in c.get("ranges", []):
-        out |= {f"{w['t']}:{w['w']}" for w in words if w["t"] >= float(r["t_in"]) and w["e"] <= float(r["t_out"])}
+    for ti, to in _pares(c):
+        out |= {f"{w['t']}:{w['w']}" for w in words if w["t"] >= ti and w["e"] <= to}
     return out
 
 
@@ -148,21 +166,20 @@ def validar(clips: dict, words: list[dict]) -> dict:
         rs = c.get("ranges") or []
         if not rs:
             erros.append(f"{cid}: sem ranges"); continue
-        for r in rs:
-            try:
-                ti, to = float(r["t_in"]), float(r["t_out"])
-            except (KeyError, TypeError, ValueError):
-                erros.append(f"{cid}: range malformado {r}"); continue
+        pares = _pares(c)
+        if len(pares) != len(rs):
+            erros.append(f"{cid}: range malformado em ranges"); continue
+        for ti, to in pares:
             if to <= ti:
                 erros.append(f"{cid}: t_out ({to}) <= t_in ({ti})"); continue
             if not _em_palavra(ti, words, "in"):
                 erros.append(f"{cid}: t_in {ti} não está em fronteira de palavra")
             if not _em_palavra(to, words, "out"):
                 erros.append(f"{cid}: t_out {to} não está em fronteira de palavra")
-        for i in range(len(rs)):
-            for j in range(i + 1, len(rs)):
-                a, b = rs[i], rs[j]
-                if float(a["t_in"]) < float(b["t_out"]) and float(b["t_in"]) < float(a["t_out"]):
+        for i in range(len(pares)):
+            for j in range(i + 1, len(pares)):
+                a, b = pares[i], pares[j]
+                if a[0] < b[1] and b[0] < a[1]:
                     erros.append(f"{cid}: ranges {i} e {j} se sobrepõem")
         d = dur_clipe(c)
         for p in c.get("plataformas", []):
@@ -172,7 +189,7 @@ def validar(clips: dict, words: list[dict]) -> dict:
             if not lo <= d <= hi:
                 erros.append(f"{cid}: {d:.1f}s fora de {lo}–{hi}s para {p}")
     aps = _aprovados(clips)
-    meta = int(clips.get("meta_n", 0) or 0)
+    meta = int(_num(clips.get("meta_n")))
     if len(aps) > meta + 2:
         erros.append(f"{len(aps)} aprovados > meta_n + 2 ({meta + 2})")
     for i in range(len(aps)):

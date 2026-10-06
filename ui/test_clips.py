@@ -129,3 +129,9 @@ def test_validar_sem_ranges_ou_invertido(words60):
     r = clips.validar(c, words60); assert not r["ok"] and any("c01" in e and "ranges" in e for e in r["erros"])
     c = _clips(words60); r0 = c["clipes"][0]["ranges"][0]; r0["t_in"], r0["t_out"] = r0["t_out"], r0["t_in"]
     r = clips.validar(c, words60); assert any("c01" in e and "t_out" in e for e in r["erros"])
+
+
+@pytest.mark.parametrize("rs", [[{"t_in": "x"}], [None], [{"t_in": 1}]])
+def test_validar_range_malformado_nao_levanta(words60, rs):
+    r = clips.validar(_clips(words60, ranges=rs, nota="alta"), words60)
+    assert not r["ok"] and any("c01" in e for e in r["erros"])
