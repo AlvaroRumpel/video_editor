@@ -1,0 +1,11 @@
+{
+ "oficial": [
+  "planalto.gov.br",
+  "stf.jus.br",
+  "stj.jus.br",
+  "*.jus.br",
+  "*.gov.br",
+  "in.gov.br"
+ ],
+ "doutrina": []
+}
