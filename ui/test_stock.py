@@ -416,3 +416,88 @@ def test_cli_ranquear_e_preparar_conflito(tmp_path, mp4, jpg, monkeypatch):
     r = subprocess.run([*exe, "sheet", str(tmp_path / "nao.json"), str(tmp_path / "x.png"), str(proj)],
                        capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 2 and "erro" in json.loads(r.stdout)
+
+
+def test_creditos_archive_cc_by_url(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0]["candidatos"][0].update(fonte="archive", autor="Pre", url="https://archive.org/details/x",
+                                             licenca="https://creativecommons.org/licenses/by/4.0/")
+    b["momentos"][0].update(status="aprovado", escolhido="b01-1")
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    assert stock.creditos(bj, proj / "c.md") == {"usados": 1, "com_credito": 1}
+    assert "Pre" in (proj / "c.md").read_text(encoding="utf-8").split("## Para a descrição")[1]
+
+
+def test_archive_sem_licenseurl_ignora(tmp_path, mp4, jpg, chaves):
+    meta = {"metadata": {"creator": "X"}, "files": ARCHIVE_META["files"]}
+    base = _fetch2(mp4, jpg)
+    def f(url, headers=None):
+        return (200, json.dumps(meta).encode(), {}) if "archive.org/metadata/" in url else base(url, headers)
+    r = stock.buscar("court", "video", ["archive"], 3, tmp_path / "c", _fetch=f)
+    assert r["candidatos"] == [] and "archive-courtfilm: sem licenseurl, ignorado" in r["avisos"]
+
+
+def test_tolerancia_itens_e_fontes(tmp_path, mp4, jpg, chaves, monkeypatch):
+    fotos = {"photos": [{"id": 1, "width": 4000, "height": 2000}, PEXELS_FOTOS["photos"][0]]}
+    base = _fetch_factory(mp4, jpg)
+    def f(url, headers=None):
+        return (200, json.dumps(fotos).encode(), {}) if "api.pexels.com/v1" in url else base(url, headers)
+    r = stock.buscar("x", "foto", ["pexels"], 3, tmp_path / "c", _fetch=f)
+    assert [c["id"] for c in r["candidatos"]] == ["9"]
+    assert stock._segundos("00:00:20.5") == 20.5 and stock._segundos("01:02") == 62 and stock._segundos("x") == 0
+    def quebra(*a): raise KeyError("id")
+    monkeypatch.setitem(stock.FONTES, "pexels", quebra)
+    r = stock.buscar("x", "video", ["pexels", "pixabay"], 1, tmp_path / "d", _fetch=base)
+    assert any(a.startswith("pexels: resposta inesperada (KeyError") for a in r["avisos"])
+    assert [c["fonte"] for c in r["candidatos"]] == ["pixabay"]
+
+
+def test_archive_length_hhmmss(tmp_path, mp4, jpg, chaves):
+    meta = {"metadata": {"licenseurl": "https://x/", "creator": "P"},
+            "files": [{"name": "a.mp4", "size": "10", "width": "1920", "height": "1080", "length": "00:00:20.5"}]}
+    base = _fetch2(mp4, jpg)
+    def f(url, headers=None):
+        return (200, json.dumps(meta).encode(), {}) if "archive.org/metadata/" in url else base(url, headers)
+    assert stock.buscar("c", "video", ["archive"], 1, tmp_path / "c", _fetch=f)["candidatos"][0]["dur"] == 20.5
+
+
+def test_unsplash_download_location(tmp_path, mp4, jpg, monkeypatch):
+    monkeypatch.setattr(stock, "chaves", lambda: {"pexels": "", "pixabay": "", "unsplash": "UK"})
+    u = {"results": [{**UNSPLASH["results"][0], "links": {"html": "h", "download_location": "https://api.unsplash.com/photos/u1/download"}}]}
+    base = _fetch2(mp4, jpg)
+    def f(url, headers=None):
+        return (200, json.dumps(u).encode(), {}) if "search/photos" in url else base(url, headers)
+    calls = []
+    def g(url, headers=None):
+        calls.append((url, headers or {})); return f(url, headers)
+    r = stock.buscar("g", "foto", ["unsplash"], 1, tmp_path / "c", _fetch=g)
+    urls = [u_ for u_, _ in calls]
+    assert urls.index("https://api.unsplash.com/photos/u1/download") > urls.index("https://cdn/u1.jpg")
+    assert dict(calls[-1][1]) == {"Authorization": "Client-ID UK"}
+    assert "_download_location" not in r["candidatos"][0]
+    assert "_download_location" not in (tmp_path / "c" / "unsplash-u1.json").read_text(encoding="utf-8")
+
+
+def test_preparar_zero_aprovados_e_sobreposicao(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] and any("0 aprovados" in a for a in r["avisos"])
+    b = json.loads(bj.read_text(encoding="utf-8")); b["momentos"][1].update(t_in=11.0, t_out=14.0)
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    _aprova(bj, b01="b01-1", b02="b02-1")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] is False and "b01 e b02 se sobrepõem" in r["erros"]
+
+
+def test_wikimedia_autor_unescape(tmp_path, mp4, jpg, chaves):
+    import copy
+    info = copy.deepcopy(WIKI_INFO)
+    em = info["query"]["pages"]["1"]["imageinfo"][0]["extmetadata"]
+    em["Artist"]["value"] = '<a href="x">Jo &amp; Co</a>'
+    base = _fetch2(mp4, jpg)
+    def f(url, headers=None):
+        return (200, json.dumps(info).encode(), {}) if "prop=imageinfo" in url else base(url, headers)
+    assert stock.buscar("g", "video", ["wikimedia"], 1, tmp_path / "c", _fetch=f)["candidatos"][0]["autor"] == "Jo & Co"
+    em["Artist"]["value"] = "<br>"
+    assert stock.buscar("g", "video", ["wikimedia"], 1, tmp_path / "d", _fetch=f)["candidatos"][0]["autor"] == "(autor não informado)"

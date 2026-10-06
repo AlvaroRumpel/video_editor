@@ -1,6 +1,7 @@
 """B-roll de stock: busca em bancos gratuitos, contact sheet, ranqueamento
 opcional (CLIP), overlays prontos e merge no edl.json, créditos.
 Sem FastAPI. ffmpeg por subprocess; HTTP por urllib (_fetch injetável)."""
+import html
 import json
 import os
 import re
@@ -113,7 +114,7 @@ def _pexels(termo, tipo, n, k, fetch):
     return [{"fonte": "pexels", "id": str(p["id"]), "autor": p.get("photographer", ""), "url": p.get("url", ""),
              "licenca": "Pexels License", "tipo": "foto", "dur": 0.0, "largura": p.get("width", 0),
              "altura": p.get("height", 0), "download_url": p["src"]["large2x"], "ext": "jpg"}
-            for p in d.get("photos", [])], None
+            for p in d.get("photos", []) if p.get("src", {}).get("large2x")], None
 
 
 def _pixabay(termo, tipo, n, k, fetch):
@@ -156,7 +157,19 @@ def _unsplash(termo, tipo, n, k, fetch):
     return [{"fonte": "unsplash", "id": str(p["id"]), "autor": p.get("user", {}).get("name", ""),
              "url": p.get("links", {}).get("html", ""), "licenca": "Unsplash License (crédito obrigatório)",
              "tipo": "foto", "dur": 0.0, "largura": p.get("width", 0), "altura": p.get("height", 0),
-             "download_url": p.get("urls", {}).get("full", ""), "ext": "jpg"} for p in d.get("results", [])], None
+             "download_url": p.get("urls", {}).get("full", ""), "ext": "jpg",
+             "_download_location": p.get("links", {}).get("download_location", "")} for p in d.get("results", [])], None
+
+
+def _segundos(s) -> float:
+    """'20.5', '01:02' ou '00:01:02.5' → segundos; ilegível → 0."""
+    try:
+        t = 0.0
+        for parte in str(s or 0).split(":"):
+            t = t * 60 + float(parte)
+        return t
+    except ValueError:
+        return 0.0
 
 
 def _archive(termo, tipo, n, k, fetch):
@@ -166,23 +179,25 @@ def _archive(termo, tipo, n, k, fetch):
     d, av = _json(fetch, f"https://archive.org/advancedsearch.php?q={q}&fl[]=identifier&rows={n * 2}&output=json")
     if d is None:
         return [], av
-    out = []
+    out, avisos = [], []
     for doc in d.get("response", {}).get("docs", []):
         ident = doc.get("identifier")
         m, av2 = _json(fetch, f"https://archive.org/metadata/{ident}")
         if m is None:
             continue
         meta = m.get("metadata", {})
+        if not meta.get("licenseurl"):
+            avisos.append(f"archive-{ident}: sem licenseurl, ignorado"); continue
         for f in m.get("files", []):
             if not str(f.get("name", "")).lower().endswith(".mp4") or int(f.get("size", 0) or 0) > 100 * 1024 * 1024:
                 continue
             out.append({"fonte": "archive", "id": ident, "autor": meta.get("creator", ""),
-                        "url": f"https://archive.org/details/{ident}", "licenca": meta.get("licenseurl", "domínio público (verificar)"),
-                        "tipo": "video", "dur": float(f.get("length", 0) or 0), "largura": int(f.get("width", 0) or 0),
+                        "url": f"https://archive.org/details/{ident}", "licenca": meta["licenseurl"],
+                        "tipo": "video", "dur": _segundos(f.get("length")), "largura": int(f.get("width", 0) or 0),
                         "altura": int(f.get("height", 0) or 0),
                         "download_url": f"https://archive.org/download/{ident}/{urllib.parse.quote(f['name'])}", "ext": "mp4"})
             break
-    return out, None
+    return out, "; ".join(avisos) or None
 
 
 def _wikimedia(termo, tipo, n, k, fetch):
@@ -200,9 +215,11 @@ def _wikimedia(termo, tipo, n, k, fetch):
     out = []
     for pg in i.get("query", {}).get("pages", {}).values():
         for info in pg.get("imageinfo", []):
+            if not info.get("url"):
+                continue
             ext = info["url"].rsplit(".", 1)[-1].lower()
             em = info.get("extmetadata", {})
-            out.append({"fonte": "wikimedia", "id": pg["title"].replace("File:", ""), "autor": re.sub(r"<[^>]+>", "", em.get("Artist", {}).get("value", "")),
+            out.append({"fonte": "wikimedia", "id": pg["title"].replace("File:", ""), "autor": html.unescape(re.sub(r"<[^>]+>", "", em.get("Artist", {}).get("value", ""))).strip() or "(autor não informado)",
                         "url": info.get("descriptionurl", ""), "licenca": em.get("LicenseShortName", {}).get("value", "ver página"),
                         "tipo": tipo, "dur": float(info.get("duration", 0) or 0), "largura": info.get("width", 0),
                         "altura": info.get("height", 0), "download_url": info["url"], "ext": ext})
@@ -237,7 +254,10 @@ def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fet
         fn = FONTES.get(nome)
         if not fn:
             avisos.append(f"{nome}: fonte desconhecida"); continue
-        cands, av = fn(termo, tipo, n, k, fetch)
+        try:
+            cands, av = fn(termo, tipo, n, k, fetch)
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            avisos.append(f"{nome}: resposta inesperada ({type(e).__name__}: {e})"); continue
         if av:
             avisos.append(av)
         baixados = 0
@@ -249,9 +269,11 @@ def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fet
                 avisos.append(f"{nome}-{c['id']}: arquivo > 150 MB, descartado"); continue
             if not (200 <= status < 300) or not corpo:
                 avisos.append(f"{nome}-{c['id']}: download {status} ({'corpo vazio' if not corpo else 'falhou'})"); continue
+            if c.get("_download_location"):       # Unsplash exige avisar o download
+                fetch(c["_download_location"], {"Authorization": f"Client-ID {k['unsplash']}"})
             arq = f"{nome}-{re.sub(r'[^\w\-.]+', '_', c['id'])}.{c['ext']}"
             (dst_dir / arq).write_bytes(corpo)
-            meta = {kk: v for kk, v in c.items() if kk not in ("download_url", "ext", "altura")}
+            meta = {kk: v for kk, v in c.items() if kk not in ("download_url", "ext", "altura", "_download_location")}
             meta["arq"] = _rel(dst_dir, arq)
             meta["score"] = None
             (dst_dir / f"{Path(arq).stem}.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -404,8 +426,14 @@ def preparar(broll_json: Path, edl_json: Path, proj: Path) -> dict:
             if dur < t_out - t_in:
                 erros.append(f"{m['id']}: fonte tem {dur:.1f}s < trecho {t_out - t_in:.1f}s — escolha outro candidato"); continue
         novos.append((m, c))
+    for i, (ma, _) in enumerate(novos):
+        for mb, _ in novos[i + 1:]:
+            if _cruza(float(ma["t_in"]), float(ma["t_out"]), float(mb["t_in"]), float(mb["t_out"])):
+                erros.append(f"{ma['id']} e {mb['id']} se sobrepõem")
     if erros:
         return {"ok": False, "gerados": [], "avisos": avisos, "erros": erros}
+    if not novos:
+        avisos.append("0 aprovados — overlays de b-roll removidos do EDL")
     ovs = []
     for m, c in novos:
         dst, av = _overlay(m, c, proj); avisos += av
@@ -423,6 +451,12 @@ def preparar(broll_json: Path, edl_json: Path, proj: Path) -> dict:
 EXIGE_CREDITO = ("unsplash", "wikimedia")
 
 
+def _exige_credito(c: dict) -> bool:
+    lic = c.get("licenca", "")
+    return (c["fonte"] in EXIGE_CREDITO or "crédito" in lic.lower() or lic.startswith("CC BY")
+            or "creativecommons.org/licenses/by" in lic)
+
+
 def creditos(broll_json: Path, dst_md: Path) -> dict:
     b = ler_broll(broll_json)
     linhas, desc = [], []
@@ -433,7 +467,7 @@ def creditos(broll_json: Path, dst_md: Path) -> dict:
         if not c:
             continue
         linhas.append(f"- {m['id']} · {c['fonte']} · {c['autor']} · {c['url']} · {c['licenca']}")
-        if c["fonte"] in EXIGE_CREDITO or "crédito" in c.get("licenca", "").lower() or c.get("licenca", "").startswith("CC BY"):
+        if _exige_credito(c):
             desc.append(f"{c['autor']} — {c['url']} ({c['licenca']})")
     md = "# Créditos de b-roll\n\n" + "\n".join(linhas) + "\n\n## Para a descrição\n\n" + ("\n".join(desc) if desc else "(nenhum crédito obrigatório)") + "\n"
     Path(dst_md).write_text(md, encoding="utf-8")
@@ -452,9 +486,11 @@ def ranquear(broll_json: Path, proj: Path) -> dict:
     modelo.eval()
     b = ler_broll(broll_json)
     tmp = Path(proj) / "broll" / ".rank"; tmp.mkdir(parents=True, exist_ok=True)
-    n = 0
+    n = pulados = 0
     with torch.no_grad():
         for m in b.get("momentos", []):
+            if m.get("escolhido"):
+                pulados += 1; continue
             txt = modelo.encode_text(tok([m.get("termo") or m.get("frase", "")]))
             txt = txt / txt.norm(dim=-1, keepdim=True)
             for i, c in enumerate(m.get("candidatos", [])):
@@ -473,13 +509,13 @@ def ranquear(broll_json: Path, proj: Path) -> dict:
             m["candidatos"].sort(key=lambda c: -(c.get("score") or 0))
     for p in tmp.glob("*.png"): p.unlink()
     tmp.rmdir()
-    Path(broll_json).write_text(json.dumps(b, ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"ok": True, "ranqueados": n}
+    pipeline.atomic_write_json(Path(broll_json), b)
+    return {"ok": True, "ranqueados": n, "pulados": pulados}
 
 
 def _cli(ns):
     if ns.cmd == "buscar":
-        return buscar(ns.termo, ns.tipo, ns.fontes.split(","), ns.n, Path(ns.dst)), 0
+        return buscar(ns.termo, ns.tipo, [f.strip() for f in ns.fontes.split(",")], ns.n, Path(ns.dst)), 0
     if ns.cmd == "sheet":
         return sheet(Path(ns.broll), Path(ns.png), Path(ns.proj)), 0
     if ns.cmd == "ranquear":
