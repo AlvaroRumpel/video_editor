@@ -242,7 +242,7 @@ def test_docs_lista_e_renderiza(client, fake_root):
 
 
 def test_doc_nome_invalido(client, fake_root):
-    for nome in ("../x.md", "a/b.md", "a\b.md", "x.txt", ".md"):
+    for nome in ("../x.md", "a/b.md", "a\\b.md", "x.txt", ".md"):
         assert client.get("/api/doc", params={"id": "edit-fake", "name": nome}).status_code == 400
     assert client.get("/api/doc", params={"id": "edit-fake", "name": "nao.md"}).status_code == 404
 
