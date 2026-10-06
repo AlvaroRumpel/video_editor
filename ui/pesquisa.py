@@ -47,7 +47,8 @@ def parse_pesquisa(texto: str) -> dict:
     for n, raw in enumerate(texto.splitlines(), 1):
         linha = raw.rstrip()
         if linha.startswith("## "):
-            secao = next((k for k, v in SECOES.items() if linha.strip() == v), None)
+            secao = next((k for k, v in SECOES.items()
+                          if re.match(r"^##\s+" + re.escape(v[3:]) + r"\b", linha)), None)
             continue
         if secao is None or not linha.strip():
             continue
@@ -73,35 +74,49 @@ TITULO_RE = re.compile(rb"<title[^>]*>(.*?)</title>", re.I | re.S)
 MAX_SNAP = 2 * 1024 * 1024
 
 
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+ULTIMO_ERRO: dict[str, str] = {}   # url -> motivo da última falha de rede
+
+
 def _fetch_url(url: str, metodo: str | None = None) -> tuple[int, bytes]:
     """metodo=None: HEAD com fallback GET (corpo vazio no HEAD); "GET": só GET com corpo."""
     for m in ((metodo,) if metodo else ("HEAD", "GET")):
         try:
-            req = urllib.request.Request(url, method=m, headers={"User-Agent": "video_editor/1.0"})
+            req = urllib.request.Request(url, method=m, headers={"User-Agent": UA, "Accept": "text/html,*/*"})
             with urllib.request.urlopen(req, timeout=10) as r:   # segue redirects
                 return r.status, (r.read(MAX_SNAP + 1) if m == "GET" else b"")
         except urllib.error.HTTPError as e:
             if m == "HEAD" and e.code in (403, 405):
                 continue
             return e.code, b""
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            ULTIMO_ERRO[url] = str(getattr(e, "reason", e))
             return 0, b""
     return 0, b""
 
 
 def _refs(path: Path) -> set[str]:
-    return set(REF_RE.findall(path.read_text(encoding="utf-8")))
+    return set(REF_RE.findall(path.read_text(encoding="utf-8-sig")))
 
 
 def validar(md_path: Path, roteiro: Path | None = None, fatos: Path | None = None,
             root: Path = ROOT, hoje: str | None = None, _fetch=None) -> dict:
     fontes = carregar_fontes(root)
-    fetch = _fetch or _fetch_url
+    bruto = _fetch or _fetch_url
+    cache: dict = {}
+
+    def fetch(u):
+        if u not in cache:
+            cache[u] = bruto(u)
+        return cache[u]
     hoje_d = date.fromisoformat(hoje) if hoje else date.today()
-    p = parse_pesquisa(md_path.read_text(encoding="utf-8"))
+    p = parse_pesquisa(md_path.read_text(encoding="utf-8-sig"))
     erros, avisos = [], []
     for m in p["malformados"]:
         erros.append(f"linha {m['linha']}: achado malformado: {m['texto'][:60]}")
+    if not p["achados"]:
+        erros.append("nenhum achado em ## Achados")
     vistos = set()
     for a in p["achados"]:
         if a["id"] in vistos:
@@ -114,7 +129,9 @@ def validar(md_path: Path, roteiro: Path | None = None, fatos: Path | None = Non
             erros.append(f"{a['id']}: fonte classificada como inspiracao ({a['url']}) — fato exige oficial/doutrina")
         status, _ = fetch(a["url"])
         if not (200 <= status < 400):
-            erros.append(f"{a['id']}: URL respondeu {status} ({a['url']})")
+            motivo = (f"sem resposta ({ULTIMO_ERRO.get(a['url'], 'sem detalhe')})" if status == 0
+                      else f"URL respondeu {status}")
+            erros.append(f"{a['id']}: {motivo} ({a['url']})")
         try:
             if (hoje_d - date.fromisoformat(a["acesso"])).days > 180:
                 avisos.append(f"{a['id']}: acesso há mais de 180 dias ({a['acesso']})")
@@ -126,20 +143,39 @@ def validar(md_path: Path, roteiro: Path | None = None, fatos: Path | None = Non
         if path:
             for ref in sorted(_refs(path) - vistos):
                 erros.append(f"{nome}: referência [{ref}] não existe em {md_path.name}")
+    if roteiro:
+        erros += _sem_ref(roteiro)
     return {"ok": not erros, "erros": erros, "avisos": avisos}
 
 
+def _sem_ref(path: Path) -> list[str]:
+    erros, cerca = [], False
+    for n, linha in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+        t = linha.strip()
+        if t.startswith("```"):
+            cerca = not cerca
+            continue
+        if (cerca or not t or t.startswith(("#", "{", "}", "[{", '"'))
+                or t.lower().startswith(("sfx:", "cues"))):
+            continue
+        if any(rx.search(t) for _, rx in GATILHOS) and not REF_RE.search(t):
+            erros.append(f"roteiro.md linha {n}: afirmação verificável sem [F#]: {t[:60]}")
+    return erros
+
+
 def snapshot(md_path: Path, dir: Path, _fetch=None) -> list[dict]:
-    p = parse_pesquisa(md_path.read_text(encoding="utf-8"))
+    p = parse_pesquisa(md_path.read_text(encoding="utf-8-sig"))
     dir.mkdir(parents=True, exist_ok=True)
     idx = []
     for a in p["achados"]:
         status, corpo = _fetch(a["url"]) if _fetch else _fetch_url(a["url"], "GET")
         corpo = corpo[:MAX_SNAP]
-        (dir / f"{a['id']}.html").write_bytes(corpo)
+        salvo = 200 <= status < 300 and bool(corpo)
+        if salvo:   # não sobrescreve evidência boa com falha
+            (dir / f"{a['id']}.html").write_bytes(corpo)
         m = TITULO_RE.search(corpo)
         titulo = m.group(1).decode("utf-8", "replace").strip() if m else ""
-        idx.append({"id": a["id"], "url": a["url"], "status": status, "titulo": titulo,
+        idx.append({"id": a["id"], "url": a["url"], "status": status, "salvo": salvo, "titulo": titulo,
                     "salvo_em": datetime.now().isoformat(timespec="seconds")})
     (dir / "index.json").write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
     return idx
