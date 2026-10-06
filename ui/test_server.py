@@ -229,3 +229,43 @@ def test_events_inclui_costs_e_budget(client):
     r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
     snap = json.loads(r.text.split("data: ", 1)[1].strip())
     assert "costs" in snap["mtimes"] and "budget" in snap["mtimes"]
+
+
+def test_docs_lista_e_renderiza(client, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "pesquisa.md").write_text("# P\n\n- [F1] x\n", encoding="utf-8")
+    (proj / "nota.txt").write_text("nao", encoding="utf-8")
+    r = client.get("/api/docs", params={"id": "edit-fake"})
+    assert [d["name"] for d in r.json()] == ["pesquisa.md"]
+    r = client.get("/api/doc", params={"id": "edit-fake", "name": "pesquisa.md"})
+    assert r.status_code == 200 and "<h1>P</h1>" in r.json()["html"]
+
+
+def test_doc_nome_invalido(client, fake_root):
+    for nome in ("../x.md", "a/b.md", "a\b.md", "x.txt", ".md"):
+        assert client.get("/api/doc", params={"id": "edit-fake", "name": nome}).status_code == 400
+    assert client.get("/api/doc", params={"id": "edit-fake", "name": "nao.md"}).status_code == 404
+
+
+def test_new_project_roteiro_e_pauta(client, fake_root):
+    r = client.post("/api/new-project", json={"formato": "roteiro", "nome": "Prazos", "descricao": "tema prazos",
+                                              "duracao_min": 8, "publico": "estudantes"})
+    e = r.json()
+    assert e["type"] == "roteiro" and e["target"] == {"tema": "tema prazos", "duracao_min": 8, "publico": "estudantes", "nome": "Prazos"}
+    r = client.post("/api/new-project", json={"formato": "pauta", "marca": "anotus", "mes": "2026-11"})
+    e = r.json()
+    assert e["type"] == "pauta" and e["target"] == {"marca": "anotus", "mes": "2026-11"}
+    assert client.post("/api/new-project", json={"formato": "pauta"}).status_code == 400
+    q = json.loads((fake_root / ".ui-runtime" / "queue.json").read_text(encoding="utf-8"))
+    assert [x["type"] for x in q] == ["roteiro", "pauta"]
+
+
+def test_queue_aceita_roteiro_pauta(client):
+    assert "roteiro" in server.QUEUE_TYPES and "pauta" in server.QUEUE_TYPES
+
+
+def test_events_inclui_docs(client, fake_root):
+    (fake_root / "edit-fake" / "x.md").write_text("a", encoding="utf-8")
+    r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
+    snap = json.loads(r.text.split("data: ", 1)[1].strip())
+    assert snap["mtimes"]["docs"] is not None

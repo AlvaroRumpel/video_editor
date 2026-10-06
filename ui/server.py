@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import budget
+import md_min
 import pipeline
 import waveform as wf
 
@@ -62,6 +63,26 @@ def video(request: Request, id: str, kind: str = "preview"):
     return FileResponse(path, media_type="video/mp4")
 
 
+@app.get("/api/docs")
+def docs(request: Request, id: str):
+    proj = _proj(request, id)
+    return [{"name": p.name, "mtime": p.stat().st_mtime}
+            for p in sorted(proj.glob("*.md"))]
+
+
+@app.get("/api/doc")
+def doc(request: Request, id: str, name: str):
+    if not DOC_NAME.match(name) or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(400, "nome inválido")
+    proj = _proj(request, id)
+    path = proj / name
+    if path.resolve().parent != proj.resolve():
+        raise HTTPException(400, "nome inválido")
+    if not path.is_file():
+        raise HTTPException(404, "doc não encontrado")
+    return {"name": name, "html": md_min.render(path.read_text(encoding="utf-8"))}
+
+
 @app.get("/api/formats")
 def formats(request: Request):
     fdir = _root(request) / "Formatos"
@@ -77,8 +98,9 @@ def brutos(request: Request):
                   if p.suffix.lower() in exts) if bdir.is_dir() else []
 
 
-HIDDEN_FORMATS = {"thumbnail"}  # receitas internas, fora do dropdown
-QUEUE_TYPES = {"instrucao", "render", "borda", "veto"}
+HIDDEN_FORMATS = {"thumbnail", "pauta"}  # receitas internas, fora do dropdown
+QUEUE_TYPES = {"instrucao", "render", "borda", "veto", "roteiro", "pauta"}
+DOC_NAME = re.compile(r"^[\w\-. ]+\.md$")
 
 
 def _append_queue(qpath, entry):
@@ -158,6 +180,20 @@ def format_put(request: Request, name: str, body: dict):
 
 @app.post("/api/new-project")
 def new_project(request: Request, body: dict):
+    formato = body.get("formato")
+    qpath = _root(request) / ".ui-runtime" / "queue.json"
+    if formato == "roteiro":
+        tema = (body.get("descricao") or "").strip()
+        if not tema:
+            raise HTTPException(400, "roteiro exige tema (descrição)")
+        return _append_queue(qpath, _make_entry("roteiro",
+            {"tema": tema, "duracao_min": body.get("duracao_min"), "publico": body.get("publico", ""),
+             "nome": body.get("nome", "")}, body.get("nome") or tema[:60]))
+    if formato == "pauta":
+        if not body.get("marca") or not body.get("mes"):
+            raise HTTPException(400, "pauta exige marca e mês")
+        return _append_queue(qpath, _make_entry("pauta",
+            {"marca": body["marca"], "mes": body["mes"]}, f"pauta {body['marca']} {body['mes']}"))
     if not body.get("bruto") and not (body.get("descricao") or "").strip():
         raise HTTPException(400, "sem bruto exige descrição")
     entry = _make_entry("novo-projeto",
@@ -166,7 +202,6 @@ def new_project(request: Request, body: dict):
                          "nome": body.get("nome"),
                          "descricao": body.get("descricao", ""),
                          "fontes": body.get("fontes", "")}, body.get("nome", ""))
-    qpath = _root(request) / ".ui-runtime" / "queue.json"
     return _append_queue(qpath, entry)
 
 
@@ -235,6 +270,8 @@ def _snapshot(proj, root):
             mtimes[key] = (proj / rel).stat().st_mtime
         except OSError:
             mtimes[key] = None
+    mds = [p.stat().st_mtime for p in proj.glob("*.md")]
+    mtimes["docs"] = max(mds) if mds else None
     for key, rel in (("global_queue", "queue.json"),
                      ("activity", "activity.json"),
                      ("budget", "budget.json")):
