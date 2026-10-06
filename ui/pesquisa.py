@@ -146,8 +146,8 @@ def snapshot(md_path: Path, dir: Path, _fetch=None) -> list[dict]:
 
 
 GATILHOS = [
-    ("lei", re.compile(r"\b(art\.?|artigo|lei\s*n[ºo.]?|s[úu]mula|inciso|§|par[áa]grafo)\b", re.I)),
-    ("numero", re.compile(r"\b\d+([.,]\d+)?\s*(%|dias?|anos?|meses|horas?|reais|mil|milh[õo]es|vezes)\b", re.I)),
+    ("lei", re.compile(r"(\b(art\.?|artigo|lei\s*n[ºo.]?|s[úu]mula|inciso|par[áa]grafo)\b|§)", re.I)),
+    ("numero", re.compile(r"\b\d+([.,]\d+)?\s*(%|por cento|(dias?|anos?|meses|horas?|reais|mil|milh[õo]es|vezes)\b)", re.I)),
     ("absoluto", re.compile(r"\b(sempre|nunca|todos?|todas?|proibido|vedado|obrigat[óo]ri[oa])\b", re.I)),
 ]
 

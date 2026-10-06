@@ -160,6 +160,11 @@ def test_extrair_fatos():
     assert out[0]["trecho"].startswith("o prazo") and out[0]["t"] > 0
 
 
+def test_extrair_fatos_simbolos():
+    out = pesquisa.extrair_fatos(_tr(["o § 3 prevê isso", "subiu 15% no ano", "caiu 20 por cento"]))
+    assert [o["gatilho"] for o in out] == ["lei", "numero", "numero"]
+
+
 def test_extrair_fatos_vazio():
     assert pesquisa.extrair_fatos({}) == [] and pesquisa.extrair_fatos({"words": []}) == []
 
