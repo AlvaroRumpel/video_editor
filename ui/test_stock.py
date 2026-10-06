@@ -229,3 +229,39 @@ def test_resposta_malformada_continua(tmp_path, mp4, jpg, chaves):
     r = stock.buscar("x", "video", ["pexels", "pixabay"], 1, tmp_path / "c", _fetch=fetch)
     assert [c["fonte"] for c in r["candidatos"]] == ["pixabay"]
     assert any("inválida" in a for a in r["avisos"])
+
+
+def _broll(proj: Path, mp4: bytes, jpg: bytes, n_mom=2, n_cand=2):
+    cand = proj / "broll" / "cand"; cand.mkdir(parents=True, exist_ok=True)
+    moms = []
+    for i in range(n_mom):
+        cs = []
+        for k in range(n_cand):
+            nome = f"m{i}-{k}.mp4" if k == 0 else f"m{i}-{k}.jpg"
+            (cand / nome).write_bytes(mp4 if k == 0 else jpg)
+            cs.append({"arq": f"broll/cand/{nome}", "fonte": "pexels", "id": f"{i}{k}", "autor": "A", "url": "https://x/",
+                       "licenca": "Pexels License", "tipo": "video" if k == 0 else "foto", "dur": 6.0 if k == 0 else 0.0,
+                       "largura": 1920, "score": None})
+        moms.append({"id": f"b0{i + 1}", "t_in": 10.0 + 30 * i, "t_out": 13.0 + 30 * i, "modo": "cutin",
+                     "frase": "x", "termo": "y", "fontes": ["pexels"], "candidatos": cs,
+                     "escolhido": None, "offset": 0.0, "status": "proposto"})
+    p = proj / "broll.json"
+    p.write_text(json.dumps({"momentos": moms}), encoding="utf-8")
+    return p
+
+
+def _dim(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=width,height,r_frame_rate,pix_fmt", "-of", "json", str(path)],
+                         capture_output=True, text=True).stdout
+    s = json.loads(out)["streams"][0]
+    return s["width"], s["height"], s["r_frame_rate"], s.get("pix_fmt")
+
+
+def test_sheet_grade(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"
+    bj = _broll(proj, mp4, jpg)
+    r = stock.sheet(bj, proj / "broll" / "sheet.png", proj)
+    assert r["linhas"] == 2 and r["colunas"] == 2
+    w, h, _, _ = _dim(proj / "broll" / "sheet.png")
+    assert (w, h) == (960, 540)

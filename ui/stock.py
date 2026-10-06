@@ -256,3 +256,65 @@ def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fet
             (dst_dir / f"{Path(arq).stem}.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
             out.append(meta); baixados += 1
     return {"candidatos": out, "avisos": avisos}
+
+
+FONTE = Path("C:/Windows/Fonts/arial.ttf")
+
+
+def _ff(args: list[str]) -> str:
+    r = subprocess.run([FFMPEG, "-hide_banner", "-nostats", "-y", *args], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        raise RuntimeError(f"ffmpeg falhou ({r.returncode}): {r.stderr[-800:]}")
+    return r.stderr
+
+
+def duracao(path: Path) -> float:
+    r = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
+                       capture_output=True, text=True, check=True)
+    return float(json.loads(r.stdout)["format"]["duration"])
+
+
+def ler_broll(path: Path) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+
+
+def _rotulo(txt: str) -> str:
+    return txt.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
+
+
+def _frame(arq: Path, dst_png: Path, rotulo: str, pos: float = 0.3):
+    args = []
+    if arq.suffix.lower() in (".mp4", ".webm", ".mov"):
+        args += ["-ss", f"{max(0.0, duracao(arq) * pos):.3f}"]
+    fonte = f":fontfile='{FONTE.as_posix().replace(':', chr(92) + ':')}'" if FONTE.exists() else ""
+    vf = (f"scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2,"
+          f"drawtext=text='{_rotulo(rotulo)}'{fonte}:x=6:y=h-22:fontsize=16:fontcolor=white:box=1:boxcolor=black@0.6")
+    _ff([*args, "-i", str(arq), "-frames:v", "1", "-vf", vf, str(dst_png)])
+
+
+def sheet(broll_json: Path, dst_png: Path, proj: Path) -> dict:
+    b = ler_broll(broll_json)
+    moms = b.get("momentos", [])
+    cols = max((len(m.get("candidatos", [])) for m in moms), default=0)
+    if not moms or not cols:
+        raise ValueError("broll.json sem momentos/candidatos")
+    tmp = Path(dst_png).with_suffix(".tiles"); tmp.mkdir(parents=True, exist_ok=True)
+    tiles = []
+    for m in moms:
+        cands = m.get("candidatos", [])
+        for k in range(cols):
+            png = tmp / f"{m['id']}-{k}.png"
+            if k < len(cands):
+                c = cands[k]
+                rot = f"{m['id']}-{k + 1} · {c['fonte']} · {c['dur']:.0f}s" if c["tipo"] == "video" else f"{m['id']}-{k + 1} · {c['fonte']} · foto"
+                _frame(proj / c["arq"], png, rot)
+            else:
+                _ff(["-f", "lavfi", "-i", "color=c=black:s=480x270", "-frames:v", "1", str(png)])
+            tiles.append(png)
+    lista = tmp / "lista.txt"
+    lista.write_text("".join(f"file '{p.as_posix()}'\n" for p in tiles), encoding="utf-8")
+    _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", f"tile={cols}x{len(moms)}", "-frames:v", "1", str(dst_png)])
+    for p in tiles: p.unlink(missing_ok=True)
+    lista.unlink(missing_ok=True); tmp.rmdir()
+    return {"png": str(dst_png), "linhas": len(moms), "colunas": cols}
