@@ -2,6 +2,9 @@
 Sem FastAPI. Arquivos: .ui-runtime/budget.json, ui/precos.json,
 <proj>/ui/costs.jsonl, .ui-runtime/quota.json (cache do saldo ElevenLabs)."""
 import json
+import os
+import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,3 +84,86 @@ def gasto_mes(root: Path, ano_mes: str | None = None) -> dict:
         usd += g["usd"]
         cred += g["creditos"]
     return {"usd": round(usd, 4), "creditos": cred}
+
+
+ELEVEN_SUB_URL = "https://api.elevenlabs.io/v1/user/subscription"
+
+
+def _chave_elevenlabs() -> str:
+    v = os.environ.get("ELEVENLABS_API_KEY", "")
+    if v:
+        return v
+    env = pipeline.ROOT / "video-use" / ".env"
+    try:
+        for ln in env.read_text(encoding="utf-8").splitlines():
+            k, _, val = ln.partition("=")
+            if k.strip() == "ELEVENLABS_API_KEY":
+                return val.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _fetch_elevenlabs(key: str) -> dict:
+    req = urllib.request.Request(ELEVEN_SUB_URL, headers={"xi-api-key": key})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def saldo_elevenlabs(root: Path, max_idade_s: int = 300, _fetch=None):
+    qpath = root / ".ui-runtime" / "quota.json"
+    cache = pipeline.read_json(qpath, {}).get("elevenlabs")
+    if cache and time.time() - cache.get("lido_em", 0) < max_idade_s:
+        return {k: cache[k] for k in ("usados", "limite", "restante", "reset_ts")}
+    key = _chave_elevenlabs()
+    if not key:
+        return None
+    try:
+        d = (_fetch or _fetch_elevenlabs)(key)
+        usados = int(d["character_count"])
+        limite = int(d["character_limit"])
+    except Exception:
+        return None
+    saldo = {"usados": usados, "limite": limite, "restante": limite - usados,
+             "reset_ts": d.get("next_character_count_reset_unix", 0)}
+    q = pipeline.read_json(qpath, {})          # reler antes de gravar
+    q["elevenlabs"] = {**saldo, "lido_em": time.time()}
+    pipeline.atomic_write_json(qpath, q)
+    return saldo
+
+
+def _decisao(status, motivo, est):
+    return {"status": status, "motivo": motivo, "estimativa": est}
+
+
+def autorizar(root: Path, proj: Path, provedor: str, unidades: float,
+              aprovacao=None, saldo="auto") -> dict:
+    est = estimar(root, provedor, unidades)
+    if est is None:
+        return _decisao("bloqueado", f"preço desconhecido para {provedor}", None)
+    if aprovacao is not None:
+        return _decisao("ok", f"aprovado pelo pedido {aprovacao}", est)
+    b = ler_budget(root)
+    pid = proj.name
+    teto_proj = float(b["tetos_projeto"].get(pid, b["teto_projeto_usd"]))
+    mes = gasto_mes(root)["usd"]
+    if mes + est["usd"] > float(b["teto_mensal_usd"]):
+        return _decisao("bloqueado",
+                        f"teto mensal: {mes:.2f} + {est['usd']:.2f} > {b['teto_mensal_usd']}", est)
+    gp = gasto_projeto(proj)["usd"]
+    if gp + est["usd"] > teto_proj:
+        return _decisao("bloqueado",
+                        f"teto do projeto: {gp:.2f} + {est['usd']:.2f} > {teto_proj}", est)
+    if est["creditos"] > 0:
+        if saldo == "auto":
+            saldo = saldo_elevenlabs(root)
+        if saldo is None:
+            return _decisao("precisa_aprovacao", "saldo ElevenLabs desconhecido", est)
+        if est["creditos"] > saldo["restante"]:
+            return _decisao("precisa_aprovacao",
+                            f"cota ElevenLabs acaba: restam {saldo['restante']} créditos, "
+                            f"ação usa {est['creditos']}", est)
+    if est["usd"] > float(b["aprovar_acima_usd"]):
+        return _decisao("precisa_aprovacao",
+                        f"acima de {b['aprovar_acima_usd']} US$: estimativa {est['usd']:.2f}", est)
+    return _decisao("ok", "dentro dos limites", est)
