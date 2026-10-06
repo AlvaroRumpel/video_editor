@@ -50,26 +50,8 @@ def denoise(src: Path, dst: Path, forte: bool = False) -> Path:
         modelo = ROOT / "assets" / "rnnoise" / "std.rnnn"
         if not modelo.exists():
             raise FileNotFoundError(f"modelo RNNoise ausente: {modelo}")
-        # Determine if we can use relative path (when ui is in ROOT parent)
-        ui_dir = Path(__file__).parent
-        try:
-            # Check if ui_dir's parent is ROOT
-            if ui_dir.parent == ROOT:
-                # Use relative path to avoid colons in absolute path
-                # (ffmpeg filter parsing breaks on Windows drive letter colons like C:)
-                rel_path = Path("..") / "assets" / "rnnoise" / "std.rnnn"
-                af = "arnndn=m=" + rel_path.as_posix()
-            else:
-                # In test scenario where ROOT is monkeypatched
-                # Use absolute path with escaping (test mocks _ff anyway)
-                posix_path = modelo.as_posix()
-                escaped_path = posix_path.replace(":", r"\:")
-                af = "arnndn=m=" + escaped_path
-        except Exception:
-            # Fallback to absolute path with escaping
-            posix_path = modelo.as_posix()
-            escaped_path = posix_path.replace(":", r"\:")
-            af = "arnndn=m=" + escaped_path
+        # Escapar ':' e envolver em quotes para ffmpeg aceitar de qualquer cwd
+        af = f"arnndn=m='{modelo.as_posix().replace(':', r'\:')}'"
     else:
         af = "afftdn=nf=-25:nt=w"
     dst.parent.mkdir(parents=True, exist_ok=True)
