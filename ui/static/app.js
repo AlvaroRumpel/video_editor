@@ -599,6 +599,7 @@ function renderAll() {
   renderBudget();
   renderAudioInfo();
   renderBrollInfo();
+  renderClipsInfo();
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
 
@@ -714,6 +715,15 @@ function renderBrollInfo() {
   const cnt = v => Array.isArray(v) ? v.length : (v ?? 0);
   const fontes = Object.entries(b.fontes || {}).map(([k, v]) => `${k} ${v}`).join(', ');
   box.textContent = `b-roll: ${cnt(b.aprovados)}/${cnt(b.momentos)} aprovados${fontes ? ' · ' + fontes : ''}`;
+  box.hidden = false;
+}
+
+function renderClipsInfo() {
+  const c = S.proj.state && S.proj.state.clips;
+  const box = el('clips-info');
+  if (!c) { box.hidden = true; return; }
+  const cnt = v => Array.isArray(v) ? v.length : (v ?? 0);
+  box.textContent = `clips: ${cnt(c.aprovados)} aprovados · ${cnt(c.renderizados)} renderizados · ${cnt(c.publora_drafts)} drafts`;
   box.hidden = false;
 }
 

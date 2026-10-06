@@ -86,6 +86,10 @@ Footage/foto de terceiros (b-roll) só via `python ui/stock.py` — licença e
 crédito ficam em `broll.json`/`creditos.md`; nunca baixar à mão. Sem custo,
 sem orçamento. Fluxo: `padrao-youtube-longo.md` §5.1.
 
+Shorts: `Formatos/padrao-youtube-shorts.md` (Clip Factory, `ui/clips.py`). Publora
+só como **draft** (`create_post` + upload + `complete_media`); nunca agendar sem
+pedido explícito — Starter limita 3 agendados / 7 dias.
+
 ## Regras
 
 - Confirmação de estratégia do video-use continua valendo (via waiting_reply).
