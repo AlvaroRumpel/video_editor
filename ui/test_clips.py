@@ -195,7 +195,7 @@ def test_srt_clipe_tempo_relativo(words60):
     assert ultimo < "00:00:16,000"                                        # ~10 s + ~5 s
 
 
-import os, sys
+import sys
 pytest_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None or not clips.RENDER.exists(), reason="sem ffmpeg/render.py")
 
 
@@ -243,3 +243,41 @@ def test_cli(tmp_path, words60):
     assert r.returncode == 0 and isinstance(json.loads(r.stdout), list)
     r = subprocess.run([*exe, "validar", str(tmp_path / "nao.json"), str(wo)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 2 and "erro" in json.loads(r.stdout)
+
+
+def test_validar_plataformas_id_status(words60):
+    for v in (None, [], "shorts"):
+        c = _clips(words60, plataformas=v)
+        assert any("plataformas" in e for e in clips.validar(c, words60)["erros"])
+    c = _clips(words60, status="ok")
+    assert any("status inválido" in e for e in clips.validar(c, words60)["erros"])
+    c = _clips(words60); c["clipes"].append(dict(c["clipes"][0], slug="dois", status="vetado"))
+    assert any("id repetido" in e for e in clips.validar(c, words60)["erros"])
+
+
+def test_zero_aprovados(tmp_path, words60):
+    proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    c = _clips(words60, status="proposto")
+    assert clips.edl(c, proj, export, words60)["avisos"]
+    r = clips.render(c, proj, tmp_path / "out", _run=lambda cmd: pytest.fail("não deve rodar"))
+    assert r["renderizados"] == [] and "0 clipes aprovados" in r["erros"][0]
+    with pytest.raises(FileNotFoundError):
+        clips.edl(c, proj, tmp_path / "nao.mp4", words60)
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_render_remove_obsoletos(tmp_path, words60, preview):
+    proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    c = _clips(words60); out = tmp_path / "out"; out.mkdir(); (out / "stale.mp4").write_bytes(b"0")
+    clips.edl(c, proj, export, words60)
+    class R: returncode = 0; stderr = ""
+    r = clips.render(c, proj, out, preview=preview, _run=lambda cmd: R())
+    assert (out / "stale.mp4").exists() == preview
+    assert r["removidos"] == ([] if preview else ["stale.mp4"])
+
+
+def test_srt_fecha_antes_de_1_2s():
+    ws = [{"t": 0.0, "e": 0.5, "w": "a"}, {"t": 0.6, "e": 1.1, "w": "b"}, {"t": 1.2, "e": 1.7, "w": "c"}]
+    c = {"ranges": [{"t_in": 0.0, "t_out": 2.0}]}
+    srt = clips.srt_clipe(c, ws)
+    assert "\na b\n" in srt and "\nc\n" in srt

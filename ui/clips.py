@@ -117,6 +117,7 @@ def candidatos(words: list[dict], n: int = 20, min_s: float = 25, max_s: float =
 PLATAFORMAS = {"shorts": (20, 60), "reels": (20, 90), "tiktok": (20, 60)}
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 TOL = 0.005
+STATUS = {"proposto", "aprovado", "vetado"}
 
 
 def _num(v) -> float:
@@ -160,9 +161,14 @@ def _palavras_de(c: dict, words) -> set[str]:
 
 
 def validar(clips: dict, words: list[dict]) -> dict:
-    erros, avisos, slugs = [], [], set()
+    erros, avisos, slugs, ids = [], [], set(), set()
     for c in clips.get("clipes", []):
         cid = c.get("id", "?")
+        if cid in ids:
+            erros.append(f"{cid}: id repetido")
+        ids.add(cid)
+        if c.get("status") not in STATUS:
+            erros.append(f"{cid}: status inválido {c.get('status')!r}")
         if not SLUG_RE.match(str(c.get("slug", ""))):
             erros.append(f"{cid}: slug inválido {c.get('slug')!r}")
         if c.get("slug") in slugs:
@@ -190,7 +196,12 @@ def validar(clips: dict, words: list[dict]) -> dict:
                 if a[0] < b[1] and b[0] < a[1]:
                     erros.append(f"{cid}: ranges {i} e {j} se sobrepõem")
         d = dur_clipe(c)
-        for p in c.get("plataformas", []):
+        plats = c.get("plataformas")
+        if not plats:
+            erros.append(f"{cid}: sem plataformas"); continue
+        if not isinstance(plats, list):
+            erros.append(f"{cid}: plataformas deve ser lista"); continue
+        for p in plats:
             if p not in PLATAFORMAS:
                 erros.append(f"{cid}: plataforma desconhecida {p}"); continue
             lo, hi = PLATAFORMAS[p]
@@ -223,13 +234,18 @@ def srt_clipe(c: dict, words: list[dict]) -> str:
         ti, to = float(r["t_in"]), float(r["t_out"])
         ws = [w for w in words if w["t"] >= ti and w["e"] <= to]
         grupo = []
-        for w in ws:
-            grupo.append(w)
-            if len(grupo) == 3 or grupo[-1]["e"] - grupo[0]["t"] >= 1.2 or w["w"].endswith(PONT_FIM):
-                cues.append((grupo[0]["t"] - ti + offset, grupo[-1]["e"] - ti + offset, " ".join(g["w"] for g in grupo)))
-                grupo = []
-        if grupo:
+
+        def fecha():
             cues.append((grupo[0]["t"] - ti + offset, grupo[-1]["e"] - ti + offset, " ".join(g["w"] for g in grupo)))
+            grupo.clear()
+        for w in ws:
+            if grupo and w["e"] - grupo[0]["t"] > 1.2:
+                fecha()
+            grupo.append(w)
+            if len(grupo) == 3 or w["w"].endswith(PONT_FIM):
+                fecha()
+        if grupo:
+            fecha()
         offset += to - ti
     return "".join(f"{i}\n{_ts(a)} --> {_ts(b)}\n{txt}\n\n" for i, (a, b, txt) in enumerate(cues, 1))
 
@@ -239,7 +255,10 @@ def _quote(r: dict, words) -> str:
 
 
 def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
-    proj = Path(proj); export = Path(export).resolve()
+    proj = Path(proj); export = Path(export)
+    if not export.exists():
+        raise FileNotFoundError(f"export não existe: {export}")
+    export = export.resolve()
     gerados, linhas = [], []
     for n, c in enumerate(_aprovados(clips), 1):
         x = c.get("x", clips.get("x_padrao", 636))
@@ -263,7 +282,10 @@ def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
     (proj / "clips").mkdir(parents=True, exist_ok=True)
     (proj / "clips" / "clips.md").write_text(md, encoding="utf-8")
     (proj / "clips.md").write_text(md, encoding="utf-8")
-    return {"gerados": gerados, "md": md}
+    res = {"gerados": gerados, "md": md}
+    if not _aprovados(clips):
+        res["avisos"] = ["0 aprovados — só clips.md gerado"]
+    return res
 
 
 def _run_padrao(cmd):
@@ -274,10 +296,14 @@ def _run_padrao(cmd):
 def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _run=None) -> dict:
     run = _run or _run_padrao
     proj = Path(proj); export_dir = Path(export_dir); export_dir.mkdir(parents=True, exist_ok=True)
-    ok, erros = [], []
-    for n, c in enumerate(_aprovados(clips), 1):
+    ok, erros, esperados = [], [], set()
+    aps = _aprovados(clips)
+    if not aps:
+        return {"renderizados": [], "erros": ["0 clipes aprovados — aplique a resposta da aprovação (status: aprovado) antes de renderizar"]}
+    for n, c in enumerate(aps, 1):
         for plat in c.get("plataformas", []):
             nome = f"{n:02d}-{c['slug']}-{plat}"
+            esperados.add(f"{nome}.mp4")
             edl_path = proj / "clips" / nome / "edl.json"
             if not edl_path.exists():
                 erros.append(f"{nome}: edl.json não existe (rode `edl` antes)"); continue
@@ -288,7 +314,12 @@ def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _ru
                 erros.append(f"{nome}: render falhou ({r.returncode}): {str(r.stderr)[-400:]}")
             else:
                 ok.append(f"{nome}.mp4")
-    return {"renderizados": ok, "erros": erros}
+    removidos = []
+    if not preview:
+        for f in sorted(export_dir.glob("*.mp4")):
+            if f.name not in esperados:
+                f.unlink(); removidos.append(f.name)
+    return {"renderizados": ok, "erros": erros, "removidos": removidos}
 
 
 def _ler(p): return json.loads(Path(p).read_text(encoding="utf-8-sig"))
@@ -307,7 +338,7 @@ def _cli(ns):
         c = _ler(ns.clips); w = _ler(Path(ns.proj) / "clips" / "words_out.json")
         return edl(c, Path(ns.proj), Path(ns.export), w), 0
     r = render(_ler(ns.clips), Path(ns.proj), Path(ns.export_dir), preview=ns.preview)
-    return r, (0 if not r["erros"] else 1)
+    return r, (0 if not r["erros"] else 2)
 
 
 if __name__ == "__main__":

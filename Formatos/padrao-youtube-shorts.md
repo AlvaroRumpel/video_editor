@@ -34,11 +34,14 @@ re-encode, não uma re-edição. Receita provada em `edit/shorts/build_shorts.py
 5. `python ui/clips.py edl edit/<proj>/clips/clips.json edit/<proj> "Export/<nome> - horizontal.mp4"`
    → `waiting_reply`: "clipes: N propostos — ver Docs › clips.md. responda `ok`,
    ou `c03:não c05:nota 3 c07:x=700 c02:sem-legenda`". Aplicar a resposta
-   (`status`, `nota`, `x`, `legenda`), re-`validar`, re-`edl`.
+   (`status`, `nota`, `x`, `legenda`), re-`validar`, re-`edl`. `ok` = todos os
+   `proposto` viram `aprovado`; `cNN:não` = `vetado`; os demais campos (`nota`,
+   `x`, `legenda`) só mudam onde indicado.
 6. `python ui/clips.py render edit/<proj>/clips/clips.json edit/<proj> Export/shorts/<proj> --preview`
    → `waiting_reply` "previews em Export/shorts/<proj>/ — `ok` ou ajustes" → `render` final (sem `--preview`).
 7. **Publora (Claude via MCP):** conta da marca (memória `publora-postagem`); para cada
-   `.mp4` final: `create_post` como draft (legenda = gancho + 1 frase + hashtags do
+   `.mp4` final (subir SÓ os arquivos listados em `renderizados` do `render`
+   final, nunca listar a pasta): `create_post` como draft (legenda = gancho + 1 frase + hashtags do
    padrão; sem travessão), `get_upload_url` → `PUT` → `complete_media`. Nunca
    `scheduled` (Starter: 3 agendados / 7 dias).
 8. `state.json.clips = {"propostos", "aprovados", "renderizados", "publora_drafts": [ids]}` (merge).
