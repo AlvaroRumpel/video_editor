@@ -198,3 +198,61 @@ def validar(clips: dict, words: list[dict]) -> dict:
             if pa and pb and len(pa & pb) / min(len(pa), len(pb)) > 0.5:
                 erros.append(f"{aps[i]['id']} e {aps[j]['id']}: > 50% de palavras em comum")
     return {"ok": not erros, "erros": erros, "avisos": avisos}
+
+
+REFRAME = "crop=608:1080:{x}:0,scale=1080:1920:flags=lanczos"
+
+
+def _ts(seg: float) -> str:
+    ms = int(round(seg * 1000)); h, ms = divmod(ms, 3600000); m, ms = divmod(ms, 60000); s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def srt_clipe(c: dict, words: list[dict]) -> str:
+    """cues de 1–3 palavras (≤ 1,2 s), tempo relativo ao clipe (ranges somados na ordem do clipe)."""
+    cues, offset = [], 0.0
+    for r in c.get("ranges", []):
+        ti, to = float(r["t_in"]), float(r["t_out"])
+        ws = [w for w in words if w["t"] >= ti and w["e"] <= to]
+        grupo = []
+        for w in ws:
+            grupo.append(w)
+            if len(grupo) == 3 or grupo[-1]["e"] - grupo[0]["t"] >= 1.2 or w["w"].endswith(PONT_FIM):
+                cues.append((grupo[0]["t"] - ti + offset, grupo[-1]["e"] - ti + offset, " ".join(g["w"] for g in grupo)))
+                grupo = []
+        if grupo:
+            cues.append((grupo[0]["t"] - ti + offset, grupo[-1]["e"] - ti + offset, " ".join(g["w"] for g in grupo)))
+        offset += to - ti
+    return "".join(f"{i}\n{_ts(a)} --> {_ts(b)}\n{txt}\n\n" for i, (a, b, txt) in enumerate(cues, 1))
+
+
+def _quote(r: dict, words) -> str:
+    return " ".join(w["w"] for w in words if w["t"] >= float(r["t_in"]) and w["e"] <= float(r["t_out"]))[:120]
+
+
+def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
+    proj = Path(proj); export = Path(export).resolve()
+    gerados, linhas = [], []
+    for n, c in enumerate(_aprovados(clips), 1):
+        x = c.get("x", clips.get("x_padrao", 636))
+        for plat in c.get("plataformas", []):
+            d = proj / "clips" / f"{n:02d}-{c['slug']}-{plat}"
+            d.mkdir(parents=True, exist_ok=True)
+            e = {"version": 1, "sources": {"EXPORT": str(export)},
+                 "ranges": [{"source": "EXPORT", "start": float(r["t_in"]), "end": float(r["t_out"]),
+                             "beat": r.get("beat", ""), "quote": _quote(r, words)} for r in c["ranges"]],
+                 "grade": REFRAME.format(x=x), "overlays": []}
+            if c.get("legenda") or plat == "tiktok":
+                (d / "legenda.srt").write_text(srt_clipe(c, words), encoding="utf-8")
+                e["subtitles"] = "legenda.srt"
+            pipeline.atomic_write_json(d / "edl.json", e)
+            gerados.append(f"clips/{d.name}")
+    for c in clips.get("clipes", []):
+        linhas.append(f"| {c.get('id')} | {c.get('nota') or '-'} | {dur_clipe(c):.0f}s | {str(c.get('gancho', ''))[:60]} | "
+                      f"{', '.join(c.get('plataformas', []))} | {c.get('status')} |")
+    md = ("# Clipes\n\n| id | nota | dur | gancho | plataformas | status |\n|---|---|---|---|---|---|\n"
+          + "\n".join(linhas) + "\n")
+    (proj / "clips").mkdir(parents=True, exist_ok=True)
+    (proj / "clips" / "clips.md").write_text(md, encoding="utf-8")
+    (proj / "clips.md").write_text(md, encoding="utf-8")
+    return {"gerados": gerados, "md": md}

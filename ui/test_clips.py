@@ -135,3 +135,47 @@ def test_validar_sem_ranges_ou_invertido(words60):
 def test_validar_range_malformado_nao_levanta(words60, rs):
     r = clips.validar(_clips(words60, ranges=rs, nota="alta"), words60)
     assert not r["ok"] and any("c01" in e for e in r["erros"])
+
+
+def test_edl_gera_dirs_srt_md(tmp_path, words60):
+    proj = tmp_path / "proj"; proj.mkdir()
+    export = tmp_path / "Export" / "x - horizontal.mp4"; export.parent.mkdir(); export.write_bytes(b"0")
+    c = _clips(words60, plataformas=["shorts", "reels", "tiktok"], legenda=False)
+    r = clips.edl(c, proj, export, words60)
+    assert sorted(r["gerados"]) == ["clips/01-um-reels", "clips/01-um-shorts", "clips/01-um-tiktok"]
+    e = json.loads((proj / "clips" / "01-um-shorts" / "edl.json").read_text(encoding="utf-8"))
+    assert e["grade"] == "crop=608:1080:636:0,scale=1080:1920:flags=lanczos"
+    assert e["sources"]["EXPORT"] == str(export.resolve()) and e["ranges"][0]["quote"].startswith("palavra")
+    assert "subtitles" not in e
+    et = json.loads((proj / "clips" / "01-um-tiktok" / "edl.json").read_text(encoding="utf-8"))
+    assert et["subtitles"] == "legenda.srt" and (proj / "clips" / "01-um-tiktok" / "legenda.srt").exists()
+    srt = (proj / "clips" / "01-um-tiktok" / "legenda.srt").read_text(encoding="utf-8")
+    assert srt.startswith("1\n00:00:00,") and "-->" in srt
+    md = (proj / "clips.md").read_text(encoding="utf-8")
+    assert "| c01 |" in md and (proj / "clips" / "clips.md").exists()
+
+
+def test_edl_legenda_opcional_e_so_aprovados(tmp_path, words60):
+    proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    c = _clips(words60, legenda=True, plataformas=["shorts"])
+    vet = json.loads(json.dumps(c["clipes"][0])); vet.update(id="c02", slug="dois", status="vetado")
+    c["clipes"].append(vet)
+    r = clips.edl(c, proj, export, words60)
+    assert r["gerados"] == ["clips/01-um-shorts"]
+    assert (proj / "clips" / "01-um-shorts" / "legenda.srt").exists()
+
+
+def test_srt_clipe_tempo_relativo(words60):
+    c = _clips(words60)
+    c["clipes"][0]["ranges"] = [{"t_in": 30.0 - clips.PAD_IN, "t_out": 40.0, "beat": "A"},
+                                {"t_in": 0.0, "t_out": 5.0, "beat": "B"}]
+    # ajustar bordas para palavras reais
+    w30 = min(words60, key=lambda w: abs(w["t"] - 30)); w40 = min(words60, key=lambda w: abs(w["e"] - 40))
+    w0 = words60[0]; w5 = min(words60, key=lambda w: abs(w["e"] - 5))
+    c["clipes"][0]["ranges"] = [{"t_in": w30["t"] - clips.PAD_IN, "t_out": w40["e"] + clips.PAD_OUT, "beat": "A"},
+                                {"t_in": w0["t"] - clips.PAD_IN, "t_out": w5["e"] + clips.PAD_OUT, "beat": "B"}]
+    srt = clips.srt_clipe(c["clipes"][0], words60)
+    blocos = srt.strip().split("\n\n")
+    assert blocos[0].split("\n")[1].startswith("00:00:00,0")            # 1º cue começa em ~0 (relativo ao clipe)
+    ultimo = blocos[-1].split("\n")[1].split(" --> ")[1]
+    assert ultimo < "00:00:16,000"                                        # ~10 s + ~5 s
