@@ -143,7 +143,72 @@ def _pixabay(termo, tipo, n, k, fetch):
             for p in d.get("hits", [])], None
 
 
-FONTES = {"pexels": _pexels, "pixabay": _pixabay}
+def _unsplash(termo, tipo, n, k, fetch):
+    if tipo != "foto":
+        return [], None
+    if not k.get("unsplash"):
+        return [], "unsplash: sem chave (UNSPLASH_ACCESS_KEY)"
+    d, av = _json(fetch, f"https://api.unsplash.com/search/photos?query={urllib.parse.quote(termo)}&per_page={n * 3}&orientation=landscape",
+                  {"Authorization": f"Client-ID {k['unsplash']}", "Accept-Version": "v1"})
+    if d is None:
+        return [], av
+    return [{"fonte": "unsplash", "id": str(p["id"]), "autor": p.get("user", {}).get("name", ""),
+             "url": p.get("links", {}).get("html", ""), "licenca": "Unsplash License (crédito obrigatório)",
+             "tipo": "foto", "dur": 0.0, "largura": p.get("width", 0), "altura": p.get("height", 0),
+             "download_url": p.get("urls", {}).get("full", ""), "ext": "jpg"} for p in d.get("results", [])], None
+
+
+def _archive(termo, tipo, n, k, fetch):
+    if tipo != "video":
+        return [], None
+    q = urllib.parse.quote(f"({termo}) AND mediatype:movies")
+    d, av = _json(fetch, f"https://archive.org/advancedsearch.php?q={q}&fl[]=identifier&rows={n * 2}&output=json")
+    if d is None:
+        return [], av
+    out = []
+    for doc in d.get("response", {}).get("docs", []):
+        ident = doc.get("identifier")
+        m, av2 = _json(fetch, f"https://archive.org/metadata/{ident}")
+        if m is None:
+            continue
+        meta = m.get("metadata", {})
+        for f in m.get("files", []):
+            if not str(f.get("name", "")).lower().endswith(".mp4") or int(f.get("size", 0) or 0) > 100 * 1024 * 1024:
+                continue
+            out.append({"fonte": "archive", "id": ident, "autor": meta.get("creator", ""),
+                        "url": f"https://archive.org/details/{ident}", "licenca": meta.get("licenseurl", "domínio público (verificar)"),
+                        "tipo": "video", "dur": float(f.get("length", 0) or 0), "largura": int(f.get("width", 0) or 0),
+                        "altura": int(f.get("height", 0) or 0),
+                        "download_url": f"https://archive.org/download/{ident}/{urllib.parse.quote(f['name'])}", "ext": "mp4"})
+            break
+    return out, None
+
+
+def _wikimedia(termo, tipo, n, k, fetch):
+    ft = "video" if tipo == "video" else "bitmap"
+    base = "https://commons.wikimedia.org/w/api.php"
+    d, av = _json(fetch, f"{base}?action=query&list=search&srsearch={urllib.parse.quote(termo + ' filetype:' + ft)}&srnamespace=6&srlimit={n * 3}&format=json")
+    if d is None:
+        return [], av
+    titulos = [s["title"] for s in d.get("query", {}).get("search", [])]
+    if not titulos:
+        return [], None
+    i, av = _json(fetch, f"{base}?action=query&titles={urllib.parse.quote('|'.join(titulos))}&prop=imageinfo&iiprop=url|size|extmetadata&format=json")
+    if i is None:
+        return [], av
+    out = []
+    for pg in i.get("query", {}).get("pages", {}).values():
+        for info in pg.get("imageinfo", []):
+            ext = info["url"].rsplit(".", 1)[-1].lower()
+            em = info.get("extmetadata", {})
+            out.append({"fonte": "wikimedia", "id": pg["title"].replace("File:", ""), "autor": re.sub(r"<[^>]+>", "", em.get("Artist", {}).get("value", "")),
+                        "url": info.get("descriptionurl", ""), "licenca": em.get("LicenseShortName", {}).get("value", "ver página"),
+                        "tipo": tipo, "dur": float(info.get("duration", 0) or 0), "largura": info.get("width", 0),
+                        "altura": info.get("height", 0), "download_url": info["url"], "ext": ext})
+    return out, None
+
+
+FONTES = {"pexels": _pexels, "pixabay": _pixabay, "unsplash": _unsplash, "archive": _archive, "wikimedia": _wikimedia}
 
 
 def _filtrar(c: dict, tipo: str) -> bool:

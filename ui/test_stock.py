@@ -150,3 +150,82 @@ def test_aviso_nao_vaza_chave(tmp_path, mp4, jpg, chaves):
     r = stock.buscar("x", "video", ["pixabay"], 3, tmp_path / "c", _fetch=f)
     assert any("pixabay.com/api/videos/" in a for a in r["avisos"])
     assert not any("XK" in a for a in r["avisos"])
+
+
+UNSPLASH = {"results": [{"id": "u1", "width": 5000, "height": 3000, "links": {"html": "https://unsplash.com/photos/u1"},
+                         "user": {"name": "Hal"}, "urls": {"full": "https://cdn/u1.jpg", "regular": "https://cdn/u1-r.jpg"}}]}
+ARCHIVE_SEARCH = {"response": {"docs": [{"identifier": "courtfilm"}]}}
+ARCHIVE_META = {"metadata": {"title": "Court film", "licenseurl": "https://creativecommons.org/publicdomain/mark/1.0/",
+                             "creator": "Prelinger"},
+                "files": [{"name": "court.mp4", "format": "MPEG4", "size": "5000000", "width": "1920", "height": "1080", "length": "20.5"},
+                          {"name": "big.mp4", "format": "MPEG4", "size": "900000000", "width": "1920", "height": "1080", "length": "20"}]}
+WIKI_SEARCH = {"query": {"search": [{"title": "File:Gavel.webm"}]}}
+WIKI_INFO = {"query": {"pages": {"1": {"title": "File:Gavel.webm", "imageinfo": [
+    {"url": "https://upload.wikimedia.org/x/Gavel.webm", "width": 1920, "height": 1080, "duration": 9.0,
+     "descriptionurl": "https://commons.wikimedia.org/wiki/File:Gavel.webm",
+     "extmetadata": {"Artist": {"value": "Ivo"}, "LicenseShortName": {"value": "CC BY-SA 4.0"}}}]}}}}
+
+
+def _fetch2(mp4, jpg):
+    chamadas = []
+    def fetch(url, headers=None):
+        chamadas.append((url, headers or {}))
+        if "api.unsplash.com" in url: return 200, json.dumps(UNSPLASH).encode(), {}
+        if "advancedsearch.php" in url: return 200, json.dumps(ARCHIVE_SEARCH).encode(), {}
+        if "archive.org/metadata/" in url: return 200, json.dumps(ARCHIVE_META).encode(), {}
+        if "list=search" in url: return 200, json.dumps(WIKI_SEARCH).encode(), {}
+        if "prop=imageinfo" in url: return 200, json.dumps(WIKI_INFO).encode(), {}
+        if url.endswith((".mp4", ".webm")): return 200, mp4, {}
+        if url.endswith(".jpg"): return 200, jpg, {}
+        return 404, b"", {}
+    fetch.chamadas = chamadas
+    return fetch
+
+
+def test_unsplash_foto(tmp_path, mp4, jpg, monkeypatch):
+    monkeypatch.setattr(stock, "chaves", lambda: {"pexels": "", "pixabay": "", "unsplash": "UK"})
+    fetch = _fetch2(mp4, jpg)
+    r = stock.buscar("gavel", "foto", ["unsplash"], 2, tmp_path / "c", _fetch=fetch)
+    c = r["candidatos"][0]
+    assert c["fonte"] == "unsplash" and c["autor"] == "Hal" and c["licenca"] == "Unsplash License (crédito obrigatório)"
+    assert c["url"] == "https://unsplash.com/photos/u1"
+    assert [h for u, h in fetch.chamadas if "api.unsplash.com" in u][0]["Authorization"] == "Client-ID UK"
+
+
+def test_archive_video_pula_grande(tmp_path, mp4, jpg, chaves):
+    r = stock.buscar("court", "video", ["archive"], 3, tmp_path / "c", _fetch=_fetch2(mp4, jpg))
+    assert [c["id"] for c in r["candidatos"]] == ["courtfilm"]
+    c = r["candidatos"][0]
+    assert c["dur"] == 20.5 and c["autor"] == "Prelinger" and "publicdomain" in c["licenca"]
+    assert c["arq"].endswith("archive-courtfilm.mp4")
+
+
+def test_wikimedia_video(tmp_path, mp4, jpg, chaves):
+    r = stock.buscar("gavel", "video", ["wikimedia"], 3, tmp_path / "c", _fetch=_fetch2(mp4, jpg))
+    c = r["candidatos"][0]
+    assert c["fonte"] == "wikimedia" and c["id"] == "Gavel.webm" and c["licenca"] == "CC BY-SA 4.0" and c["autor"] == "Ivo"
+    assert c["arq"].endswith("archive-courtfilm.mp4") is False and c["arq"].endswith(".webm")
+
+
+def test_429_retry_uma_vez(tmp_path, mp4, jpg, chaves, monkeypatch):
+    monkeypatch.setattr(stock.time, "sleep", lambda s: None)
+    vezes = {"n": 0}
+    def fetch(url, headers=None):
+        if "api.pexels.com" in url:
+            vezes["n"] += 1
+            if vezes["n"] == 1:
+                return 429, b"", {"Retry-After": "1"}
+            return 200, json.dumps(PEXELS_VIDEOS).encode(), {}
+        return 200, mp4, {}
+    r = stock.buscar("x", "video", ["pexels"], 1, tmp_path / "c", _fetch=fetch)
+    assert vezes["n"] == 2 and len(r["candidatos"]) == 1
+
+
+def test_resposta_malformada_continua(tmp_path, mp4, jpg, chaves):
+    def fetch(url, headers=None):
+        if "api.pexels.com" in url: return 200, b"{nope", {}
+        if "pixabay.com/api/videos" in url: return 200, json.dumps(PIXABAY_VIDEOS).encode(), {}
+        return 200, mp4, {}
+    r = stock.buscar("x", "video", ["pexels", "pixabay"], 1, tmp_path / "c", _fetch=fetch)
+    assert [c["fonte"] for c in r["candidatos"]] == ["pixabay"]
+    assert any("inválida" in a for a in r["avisos"])
