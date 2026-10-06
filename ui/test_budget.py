@@ -156,13 +156,15 @@ def test_autorizar_teto_projeto_aninhado(root):
 def test_autorizar_mensal_bloqueia_projeto(root):
     """Monthly ceiling is checked first and blocks before project ceiling."""
     (root / ".ui-runtime").mkdir()
-    # Low monthly, high project ceiling
+    # Both ceilings exceeded: monthly=1, project=1
     (root / ".ui-runtime" / "budget.json").write_text(
-        json.dumps({"teto_mensal_usd": 2, "teto_projeto_usd": 50}), encoding="utf-8")
-    # Spend 1.9 in edit-raw
-    budget.registrar(root / "edit-raw", "fal_kling", 1, usd=1.9, root=root)
-    # Try to authorize 1 clip (0.28) in edit-fake: 1.9+0.28 > 2
-    d = budget.autorizar(root, _proj(root), "fal_kling", 1)
+        json.dumps({"teto_mensal_usd": 1, "teto_projeto_usd": 1}), encoding="utf-8")
+    # Spend 0.9 in edit-fake project
+    proj = _proj(root)
+    budget.registrar(proj, "fal_kling", 1, usd=0.9, root=root)
+    # Try to authorize 1 clip (0.28): 0.9+0.28 > 1 for both monthly and project
+    # Monthly check should fire first
+    d = budget.autorizar(root, proj, "fal_kling", 1)
     assert d["status"] == "bloqueado" and "mensal" in d["motivo"]
 
 
