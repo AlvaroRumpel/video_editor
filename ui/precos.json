@@ -1,4 +1,8 @@
 {
   "elevenlabs_scribe": {"unidade": "min_audio", "usd": 0.0, "creditos": 0,
-                        "nota": "free: creditos/min medido na 1a rodada (saldo antes/depois)"}
+                        "nota": "free: creditos/min medido na 1a rodada (saldo antes/depois)"},
+  "elevenlabs_sfx":   {"unidade": "efeito", "usd": 0.0, "creditos": 0,
+                       "nota": "free: creditos/efeito medido na 1a rodada (saldo antes/depois)"},
+  "elevenlabs_music": {"unidade": "faixa",  "usd": 0.0, "creditos": 0,
+                       "nota": "free: creditos/faixa medido na 1a rodada (saldo antes/depois)"}
 }

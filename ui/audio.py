@@ -3,8 +3,11 @@ Sem FastAPI. ffmpeg por subprocess; HTTP por urllib (_fetch injetável)."""
 import json
 import re
 import subprocess
+import sys
+import urllib.request
 from pathlib import Path
 
+import budget
 import pipeline
 
 FFMPEG = "ffmpeg"
@@ -125,3 +128,90 @@ def mix_sfx(video: Path, cues, sfx_dir: Path, dst: Path) -> Path:
     _ff([*args, "-filter_complex", ";".join(partes), "-map", "0:v", "-map", "[out]",
          "-c:v", "copy", *AAC, "-movflags", "+faststart", str(dst)])
     return dst
+
+
+ELEVEN_SFX_URL = "https://api.elevenlabs.io/v1/sound-generation"
+ELEVEN_MUSIC_URL = "https://api.elevenlabs.io/v1/music"
+
+
+def _fetch_elevenlabs(key: str, url: str, body: dict) -> bytes:
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode("utf-8"),
+        headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return r.read()
+
+
+def _gerar(root: Path, proj: Path, provedor: str, url: str, body: dict, dst: Path,
+           prompt: str, aprovacao, _fetch) -> dict:
+    budget._existe(proj)
+    d = budget.autorizar(root, proj, provedor, 1, aprovacao=aprovacao)
+    if d["status"] != "ok":
+        return d
+    key = budget._chave_elevenlabs()
+    if not key:
+        raise RuntimeError("ELEVENLABS_API_KEY ausente")
+    dados = (_fetch or _fetch_elevenlabs)(key, url, body)
+    bruto = dst.with_suffix(dst.suffix + ".bin")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    bruto.write_bytes(dados)
+    try:
+        _ff(["-i", str(bruto), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(dst)])
+    finally:
+        bruto.unlink(missing_ok=True)
+    budget.registrar(proj, provedor, 1, aprovacao=aprovacao, nota=prompt[:80], root=root)
+    return {"status": "ok", "path": str(dst), "estimativa": d["estimativa"]}
+
+
+def gerar_sfx(root: Path, proj: Path, prompt: str, dur_s: float, dst: Path,
+              aprovacao=None, _fetch=None) -> dict:
+    return _gerar(root, proj, "elevenlabs_sfx", ELEVEN_SFX_URL,
+                  {"text": prompt, "duration_seconds": float(dur_s)}, dst, prompt, aprovacao, _fetch)
+
+
+def gerar_musica(root: Path, proj: Path, prompt: str, dur_s: float, dst: Path,
+                 aprovacao=None, _fetch=None) -> dict:
+    return _gerar(root, proj, "elevenlabs_music", ELEVEN_MUSIC_URL,
+                  {"prompt": prompt, "music_length_ms": int(round(dur_s * 1000))},
+                  dst, prompt, aprovacao, _fetch)
+
+
+EXIT = {"ok": 0, "precisa_aprovacao": 2, "bloqueado": 3}
+
+
+def _cli(ns, root: Path):
+    if ns.cmd == "medir-ruido":
+        return {"ruido_db": medir_ruido(Path(ns.src))}, 0
+    if ns.cmd == "denoise":
+        return {"path": str(denoise(Path(ns.src), Path(ns.dst), forte=ns.forte))}, 0
+    if ns.cmd == "mix-trilha":
+        return {"path": str(mix_trilha(Path(ns.video), Path(ns.trilha), Path(ns.dst),
+                                       nivel_db=ns.nivel, duck_db=ns.duck))}, 0
+    if ns.cmd == "mix-sfx":
+        return {"path": str(mix_sfx(Path(ns.video), Path(ns.cues), Path(ns.sfx_dir), Path(ns.dst)))}, 0
+    fn = gerar_sfx if ns.cmd == "gerar-sfx" else gerar_musica
+    d = fn(root, Path(ns.proj), ns.prompt, ns.dur, Path(ns.dst), aprovacao=ns.aprovacao)
+    return d, EXIT[d["status"]]
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="áudio do video_editor")
+    ap.add_argument("--root", default=str(ROOT))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("medir-ruido"); p.add_argument("src")
+    p = sub.add_parser("denoise"); p.add_argument("src"); p.add_argument("dst"); p.add_argument("--forte", action="store_true")
+    p = sub.add_parser("mix-trilha"); p.add_argument("video"); p.add_argument("trilha"); p.add_argument("dst")
+    p.add_argument("--nivel", type=float, default=-18.0); p.add_argument("--duck", type=float, default=-8.0)
+    p = sub.add_parser("mix-sfx"); p.add_argument("video"); p.add_argument("cues"); p.add_argument("sfx_dir"); p.add_argument("dst")
+    for nome in ("gerar-sfx", "gerar-musica"):
+        p = sub.add_parser(nome); p.add_argument("proj"); p.add_argument("prompt")
+        p.add_argument("dur", type=float); p.add_argument("dst"); p.add_argument("--aprovacao", type=int)
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns, Path(ns.root))
+    except (ValueError, FileNotFoundError, RuntimeError) as e:
+        print(json.dumps({"erro": str(e)}, ensure_ascii=False)); sys.exit(1)
+    print(json.dumps(out, ensure_ascii=False)); sys.exit(code)

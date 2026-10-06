@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 import pytest
 import audio
@@ -153,3 +154,76 @@ def test_mix_sfx_som_inexistente(video_mudo, sfx_dir, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="nao-existe"):
         audio.mix_sfx(video_mudo, [{"t": 1, "som": "nao-existe"}], sfx_dir, tmp_path / "x.mp4")
     assert chamado == []
+
+
+import budget
+from test_pipeline import fake_root  # fixture reexport
+
+
+@pytest.fixture
+def root(fake_root: Path) -> Path:
+    (fake_root / "ui").mkdir(exist_ok=True)
+    (fake_root / "ui" / "precos.json").write_text(json.dumps({
+        "elevenlabs_sfx": {"unidade": "efeito", "usd": 0.0, "creditos": 100},
+        "elevenlabs_music": {"unidade": "faixa", "usd": 0.0, "creditos": 500},
+    }), encoding="utf-8")
+    return fake_root
+
+
+def _wav_bytes(tmp_path) -> bytes:
+    p = tmp_path / "resp.wav"
+    _ff("-f", "lavfi", "-i", "sine=f=500:r=44100:d=1", "-c:a", "pcm_s16le", str(p))
+    return p.read_bytes()
+
+
+def test_gerar_sfx_ok(root, tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "k")
+    saldo = {"usados": 0, "limite": 10000, "restante": 10000, "reset_ts": 0}
+    monkeypatch.setattr(budget, "saldo_elevenlabs", lambda *a, **k: saldo)
+    chamadas = []
+    def fetch(key, url, body):
+        chamadas.append((key, url, body)); return _wav_bytes(tmp_path)
+    proj = root / "edit-fake"
+    dst = tmp_path / "pop.wav"
+    r = audio.gerar_sfx(root, proj, "pop curto e seco", 0.8, dst, _fetch=fetch)
+    assert r["status"] == "ok" and Path(r["path"]) == dst and dst.exists()
+    assert chamadas[0][0] == "k" and "sound-generation" in chamadas[0][1]
+    assert chamadas[0][2] == {"text": "pop curto e seco", "duration_seconds": 0.8}
+    assert abs(audio.duracao(dst) - 1.0) < 0.05           # convertido pra WAV 48k
+    assert budget.gasto_projeto(proj) == {"usd": 0.0, "creditos": 100}
+
+
+def test_gerar_musica_body(root, tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "k")
+    monkeypatch.setattr(budget, "saldo_elevenlabs",
+                        lambda *a, **k: {"usados": 0, "limite": 10000, "restante": 10000, "reset_ts": 0})
+    chamadas = []
+    def fetch(key, url, body):
+        chamadas.append((url, body)); return _wav_bytes(tmp_path)
+    r = audio.gerar_musica(root, root / "edit-fake", "piano calmo", 30, tmp_path / "m.wav", _fetch=fetch)
+    assert r["status"] == "ok"
+    assert chamadas[0][0].endswith("/v1/music")
+    assert chamadas[0][1] == {"prompt": "piano calmo", "music_length_ms": 30000}
+
+
+def test_gerar_sfx_bloqueado_nao_busca(root, tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "saldo_elevenlabs", lambda *a, **k: None)   # saldo desconhecido
+    chamadas = []
+    r = audio.gerar_sfx(root, root / "edit-fake", "x", 1, tmp_path / "x.wav",
+                        _fetch=lambda *a: chamadas.append(a) or b"")
+    assert r["status"] == "precisa_aprovacao" and chamadas == []
+    assert not (tmp_path / "x.wav").exists()
+    assert not (root / "edit-fake" / "ui" / "costs.jsonl").exists()
+
+
+def test_cli_medir_ruido(voz):
+    r = subprocess.run([sys.executable, str(Path(audio.__file__)), "medir-ruido", str(voz)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and -56 < json.loads(r.stdout)["ruido_db"] < -44
+
+
+def test_cli_gerar_sfx_projeto_inexistente(root, tmp_path):
+    r = subprocess.run([sys.executable, str(Path(audio.__file__)), "--root", str(root),
+                        "gerar-sfx", str(root / "nao-existe"), "x", "1", str(tmp_path / "x.wav")],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "erro" in json.loads(r.stdout)
