@@ -11,6 +11,7 @@ def root(fake_root: Path) -> Path:
     (fake_root / "ui" / "precos.json").write_text(json.dumps({
         "fal_kling": {"unidade": "clipe", "usd": 0.28, "creditos": 0},
         "elevenlabs_sfx": {"unidade": "efeito", "usd": 0.0, "creditos": 200},
+        "mixed_provider": {"unidade": "item", "usd": 0.6, "creditos": 200},
     }), encoding="utf-8")
     return fake_root
 
@@ -136,3 +137,61 @@ def test_saldo_elevenlabs_sem_chave(root, monkeypatch):
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "")
     assert budget.saldo_elevenlabs(root, _fetch=lambda k: {}) is None
+
+
+def test_autorizar_teto_projeto_aninhado(root):
+    """Nested project uses full relative path as key in tetos_projeto."""
+    proj = root / "edit" / "shorts" / "marca" / "proj"
+    (proj / "ui").mkdir(parents=True, exist_ok=True)
+    (root / ".ui-runtime").mkdir()
+    (root / ".ui-runtime" / "budget.json").write_text(
+        json.dumps({"tetos_projeto": {"edit/shorts/marca/proj": 50}}), encoding="utf-8")
+    # Spend 4.9
+    budget.registrar(proj, "fal_kling", 1, usd=4.9, root=root)
+    # Should be OK: 4.9+0.28 = 5.18 < 50 (custom ceiling, not default 5)
+    d = budget.autorizar(root, proj, "fal_kling", 1)
+    assert d["status"] == "ok"
+
+
+def test_autorizar_mensal_bloqueia_projeto(root):
+    """Monthly ceiling is checked first and blocks before project ceiling."""
+    (root / ".ui-runtime").mkdir()
+    # Low monthly, high project ceiling
+    (root / ".ui-runtime" / "budget.json").write_text(
+        json.dumps({"teto_mensal_usd": 2, "teto_projeto_usd": 50}), encoding="utf-8")
+    # Spend 1.9 in edit-raw
+    budget.registrar(root / "edit-raw", "fal_kling", 1, usd=1.9, root=root)
+    # Try to authorize 1 clip (0.28) in edit-fake: 1.9+0.28 > 2
+    d = budget.autorizar(root, _proj(root), "fal_kling", 1)
+    assert d["status"] == "bloqueado" and "mensal" in d["motivo"]
+
+
+def test_autorizar_cota_antes_usd_check(root):
+    """Credit check happens before USD approval threshold check."""
+    saldo = {"usados": 0, "limite": 1000, "restante": 100, "reset_ts": 0}
+    # mixed_provider: usd 0.6, creditos 200
+    # 0.6 > 0.5 (would need approval for USD)
+    # but 200 > 100 (restante) so should fail on quota first
+    d = budget.autorizar(root, _proj(root), "mixed_provider", 1, saldo=saldo)
+    assert d["status"] == "precisa_aprovacao" and "cota" in d["motivo"]
+
+
+def test_autorizar_aprovacao_ignora_mensal_e_cota(root):
+    """Approval overrides both monthly block and quota shortfall."""
+    (root / ".ui-runtime").mkdir()
+    (root / ".ui-runtime" / "budget.json").write_text(
+        json.dumps({"teto_mensal_usd": 1, "teto_projeto_usd": 50}), encoding="utf-8")
+    # Spend 0.9 to exceed monthly limit
+    budget.registrar(root / "edit-raw", "fal_kling", 1, usd=0.9, root=root)
+    # Insufficient quota: restante 50, creditos 200
+    saldo = {"usados": 0, "limite": 250, "restante": 50, "reset_ts": 0}
+    # Autorizando 1 elevenlabs_sfx (0 USD, 200 creditos): hits both blocks without approval
+    d = budget.autorizar(root, _proj(root), "elevenlabs_sfx", 1, aprovacao=999, saldo=saldo)
+    assert d["status"] == "ok"
+
+
+def test_autorizar_saldo_suficiente_ok(root):
+    """Sufficient saldo and within limits falls through to ok."""
+    saldo = {"usados": 0, "limite": 1000, "restante": 1000, "reset_ts": 0}
+    d = budget.autorizar(root, _proj(root), "elevenlabs_sfx", 1, saldo=saldo)
+    assert d["status"] == "ok" and "dentro dos limites" in d["motivo"]

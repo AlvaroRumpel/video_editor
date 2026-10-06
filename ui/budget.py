@@ -144,7 +144,7 @@ def autorizar(root: Path, proj: Path, provedor: str, unidades: float,
     if aprovacao is not None:
         return _decisao("ok", f"aprovado pelo pedido {aprovacao}", est)
     b = ler_budget(root)
-    pid = proj.name
+    pid = proj.resolve().relative_to(root.resolve()).as_posix()
     teto_proj = float(b["tetos_projeto"].get(pid, b["teto_projeto_usd"]))
     mes = gasto_mes(root)["usd"]
     if mes + est["usd"] > float(b["teto_mensal_usd"]):
