@@ -16,7 +16,7 @@ def _ff(*args):
 def voz(tmp_path) -> Path:
     """8 s: tom 1 kHz ligado 1 s / desligado 1 s, mais ruído branco a ~-50 dB."""
     p = tmp_path / "voz.wav"
-    _ff("-f", "lavfi", "-i", "aevalsrc=0.3*sin(2*PI*1000*t)*gt(mod(t\,2)\,1):s=48000:d=8",
+    _ff("-f", "lavfi", "-i", "aevalsrc=0.3*sin(2*PI*1000*t)*gt(mod(t\\,2)\\,1):s=48000:d=8",
         "-f", "lavfi", "-i", "anoisesrc=a=0.003:c=white:r=48000:d=8",
         "-filter_complex", "[0:a][1:a]amix=inputs=2:normalize=0[a]", "-map", "[a]",
         "-ac", "1", "-c:a", "pcm_s16le", str(p))
