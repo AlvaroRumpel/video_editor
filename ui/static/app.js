@@ -837,6 +837,7 @@ async function openDocsModal() {
     </div>`;
   el('modal').hidden = false;
   const show = async name => {
+    S.docsName = name;
     const d = await getJSON('/api/doc', { id: S.pid, name });
     el('docs-view').innerHTML = d.html;   // servidor já escapou tudo
     el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
@@ -844,7 +845,8 @@ async function openDocsModal() {
   };
   el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
     it.addEventListener('click', () => show(it.dataset.name)));
-  if (docs.length) show(docs[0].name);
+  const ini = docs.find(d => d.name === S.docsName) || docs[0];
+  if (ini) show(ini.name);
   S.docsOpen = true;
 }
 el('btn-docs').addEventListener('click', openDocsModal);
@@ -877,7 +879,7 @@ async function openNewProjectModal() {
       <label class="so-pauta">Marca<input type="text" id="new-marca" placeholder="anotus"></label>
       <label class="so-pauta">Mês<input type="month" id="new-mes"></label>
       <button id="new-send" title="Envia o pedido pra fila do Claude">Enviar</button>
-      <div id="new-confirm" hidden>pedido enviado — Claude vai iniciar a edição</div>
+      <div id="new-confirm" hidden>pedido enviado — veja a fila</div>
     </div>`;
   el('modal').hidden = false;
   const ajustaCampos = () => {
@@ -902,7 +904,7 @@ async function openNewProjectModal() {
     const body = { formato, nome: el('new-nome').value.trim(), descricao: el('new-descricao').value.trim(),
                    fontes: el('new-fontes').value.trim(), bruto: el('new-bruto').value || null };
     if (formato === 'roteiro') { body.duracao_min = +el('new-duracao').value; body.publico = el('new-publico').value.trim();
-      if (!body.descricao) return; }
+      if (!body.descricao || !body.nome) return; }
     else if (formato === 'pauta') { body.marca = el('new-marca').value.trim(); body.mes = el('new-mes').value;
       if (!body.marca || !body.mes) return; }
     else if (!body.nome || (!body.bruto && !body.descricao)) return;

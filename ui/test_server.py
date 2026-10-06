@@ -235,8 +235,11 @@ def test_docs_lista_e_renderiza(client, fake_root):
     proj = fake_root / "edit-fake"
     (proj / "pesquisa.md").write_text("# P\n\n- [F1] x\n", encoding="utf-8")
     (proj / "nota.txt").write_text("nao", encoding="utf-8")
+    (proj / "X.MD").write_text("# up", encoding="utf-8")
+    (proj / "bom.md").write_bytes(b"# B".join([bytes([0xEF, 0xBB, 0xBF]), b""]))
     r = client.get("/api/docs", params={"id": "edit-fake"})
-    assert [d["name"] for d in r.json()] == ["pesquisa.md"]
+    assert sorted(d["name"] for d in r.json()) == ["bom.md", "pesquisa.md"]
+    assert "<h1>B</h1>" in client.get("/api/doc", params={"id": "edit-fake", "name": "bom.md"}).json()["html"]
     r = client.get("/api/doc", params={"id": "edit-fake", "name": "pesquisa.md"})
     assert r.status_code == 200 and "<h1>P</h1>" in r.json()["html"]
 
@@ -256,6 +259,7 @@ def test_new_project_roteiro_e_pauta(client, fake_root):
     e = r.json()
     assert e["type"] == "pauta" and e["target"] == {"marca": "anotus", "mes": "2026-11"}
     assert client.post("/api/new-project", json={"formato": "pauta"}).status_code == 400
+    assert client.post("/api/new-project", json={"formato": "roteiro", "descricao": "t"}).status_code == 400
     q = json.loads((fake_root / ".ui-runtime" / "queue.json").read_text(encoding="utf-8"))
     assert [x["type"] for x in q] == ["roteiro", "pauta"]
 

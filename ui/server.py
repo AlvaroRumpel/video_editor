@@ -74,7 +74,7 @@ def _mtime(p):
 def docs(request: Request, id: str):
     proj = _proj(request, id)
     return [{"name": p.name, "mtime": m}
-            for p, m in ((p, _mtime(p)) for p in sorted(proj.glob("*.md")))
+            for p, m in ((p, _mtime(p)) for p in sorted(proj.glob("*.md")) if p.suffix == ".md")
             if m is not None]
 
 
@@ -88,7 +88,7 @@ def doc(request: Request, id: str, name: str):
         raise HTTPException(400, "nome inválido")
     if not path.is_file():
         raise HTTPException(404, "doc não encontrado")
-    return {"name": name, "html": md_min.render(path.read_text(encoding="utf-8"))}
+    return {"name": name, "html": md_min.render(path.read_text(encoding="utf-8-sig", errors="replace"))}
 
 
 @app.get("/api/formats")
@@ -194,6 +194,8 @@ def new_project(request: Request, body: dict):
         tema = (body.get("descricao") or "").strip()
         if not tema:
             raise HTTPException(400, "roteiro exige tema (descrição)")
+        if not (body.get("nome") or "").strip():
+            raise HTTPException(400, "roteiro exige nome")
         return _append_queue(qpath, _make_entry("roteiro",
             {"tema": tema, "duracao_min": body.get("duracao_min"), "publico": body.get("publico", ""),
              "nome": body.get("nome", "")}, body.get("nome") or tema[:60]))
