@@ -329,7 +329,10 @@ def _cand_por_rotulo(m: dict, rotulo: str | None):
     if not rotulo:
         return None
     try:
-        k = int(rotulo.rsplit("-", 1)[1]) - 1
+        pre, n = rotulo.rsplit("-", 1)
+        k = int(n) - 1
+        if k < 0 or pre != m["id"]:
+            return None
         return m["candidatos"][k]
     except (ValueError, IndexError, KeyError):
         return None
@@ -353,7 +356,7 @@ def _overlay(m: dict, c: dict, proj: Path) -> tuple[Path, list[str]]:
     else:
         frames = int(round(trecho * 60))
         entrada = ["-i", str(src)]
-        base = (f"scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"
+        base = (f"scale=1920:1080:force_original_aspect_ratio=increase:out_range=tv,crop=1920:1080,"
                 f"zoompan=z='min(zoom+0.0004,1.08)':d={frames}:s=1920x1080:fps=60,trim=duration={trecho:.3f}")
     if modo == "janela":
         x, y, w, h = SLOT
@@ -395,6 +398,10 @@ def preparar(broll_json: Path, edl_json: Path, proj: Path) -> dict:
             o0 = float(o["start_in_output"]); o1 = o0 + float(o["duration"])
             if _cruza(t_in, t_out, o0, o1):
                 erros.append(f"{m['id']}: conflita com overlay {o['file']} ({o0:.1f}–{o1:.1f}s)")
+        if c["tipo"] == "video":
+            dur = duracao(proj / c["arq"])
+            if dur < t_out - t_in:
+                erros.append(f"{m['id']}: fonte tem {dur:.1f}s < trecho {t_out - t_in:.1f}s — escolha outro candidato"); continue
         novos.append((m, c))
     if erros:
         return {"ok": False, "gerados": [], "avisos": avisos, "erros": erros}
@@ -404,7 +411,9 @@ def preparar(broll_json: Path, edl_json: Path, proj: Path) -> dict:
         rel = dst.relative_to(proj).as_posix()
         gerados.append(rel)
         ovs.append({"file": rel, "start_in_output": float(m["t_in"]), "duration": round(float(m["t_out"]) - float(m["t_in"]), 3)})
-    edl = pipeline.read_json(Path(edl_json), {})          # reler antes de gravar
+    edl = pipeline.read_json(Path(edl_json), None)        # reler antes de gravar
+    if edl is None:
+        return {"ok": False, "gerados": gerados, "avisos": avisos, "erros": ["edl.json ilegível na releitura — overlays gerados mas não gravados"]}
     edl["overlays"] = [o for o in edl.get("overlays", []) if not str(o.get("file", "")).startswith("broll/out/")] + ovs
     pipeline.atomic_write_json(Path(edl_json), edl)
     return {"ok": True, "gerados": gerados, "avisos": avisos, "erros": []}

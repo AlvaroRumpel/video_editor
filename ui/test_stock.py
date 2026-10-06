@@ -311,6 +311,7 @@ def test_preparar_janela_alpha_e_foto(tmp_path, mp4, jpg):
     _, _, _, pix = _dim(proj / "broll" / "out" / "b01.mov")
     assert pix in ("argb", "rgba", "bgra")
     assert abs(stock.duracao(proj / "broll" / "out" / "b02.mp4") - 3.0) < 0.1
+    assert _dim(proj / "broll" / "out" / "b02.mp4")[3] == "yuv420p"
 
 
 def test_preparar_conflito_nao_escreve(tmp_path, mp4, jpg):
@@ -360,3 +361,32 @@ def test_creditos(tmp_path, mp4, jpg):
     assert r == {"usados": 2, "com_credito": 1}
     assert "b01 · unsplash · Hal · https://unsplash.com/photos/u1" in md
     assert "## Para a descrição" in md and "Hal" in md.split("## Para a descrição")[1]
+
+
+def test_preparar_releitura_falha_nao_apaga_edl(tmp_path, mp4, jpg, monkeypatch):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    _aprova(bj, b01="b01-1")
+    antes = edl.read_text(encoding="utf-8")
+    orig = stock.pipeline.read_json; n = {"i": 0}
+    def rj(p, d):
+        if Path(p) == edl:
+            n["i"] += 1
+            if n["i"] == 2: return None               # 1ª leitura ok, releitura falha
+        return orig(p, d)
+    monkeypatch.setattr(stock.pipeline, "read_json", rj)
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] is False and any("releitura" in e for e in r["erros"])
+    assert edl.read_text(encoding="utf-8") == antes
+
+
+def test_preparar_fonte_curta_e_rotulo_invalido(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0].update(status="aprovado", escolhido="b01-1", t_out=18.0)   # 8 s > fonte 6 s
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] is False and r["gerados"] == [] and any("b01" in e and "fonte tem" in e for e in r["erros"])
+    for rot in ("b01-0", "b02-1"):
+        b["momentos"][0].update(escolhido=rot, t_out=13.0); bj.write_text(json.dumps(b), encoding="utf-8")
+        r = stock.preparar(bj, edl, proj)
+        assert r["ok"] is False and any("não existe" in e for e in r["erros"]), rot
