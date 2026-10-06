@@ -711,8 +711,9 @@ function renderBrollInfo() {
   const b = S.proj.state && S.proj.state.broll;
   const box = el('broll-info');
   if (!b) { box.hidden = true; return; }
+  const cnt = v => Array.isArray(v) ? v.length : (v ?? 0);
   const fontes = Object.entries(b.fontes || {}).map(([k, v]) => `${k} ${v}`).join(', ');
-  box.textContent = `b-roll: ${b.aprovados ?? 0}/${b.momentos ?? 0} aprovados${fontes ? ' · ' + fontes : ''}`;
+  box.textContent = `b-roll: ${cnt(b.aprovados)}/${cnt(b.momentos)} aprovados${fontes ? ' · ' + fontes : ''}`;
   box.hidden = false;
 }
 

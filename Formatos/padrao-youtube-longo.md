@@ -281,6 +281,8 @@ vídeo bom. Termo de busca em inglês, concreto ("gavel on desk", não "justice"
 
 1. Ler `transcripts/<fonte>.json` e `fatos.md`; escrever `edit/<proj>/broll.json`
    (`status: proposto`, `modo`, `termo`, `t_in`/`t_out` na timeline de saída).
+   `t_in`/`t_out` são tempo de SAÍDA: mapear o tempo do transcript (fonte) pelos `ranges`
+   do `edl.json` + `real_durations.json` (§6 — deriva de frame); nunca usar o tempo da fonte direto.
 2. Por momento: `python ui/stock.py buscar "<termo>" --tipo video --fontes pexels,pixabay --n 3 --dst edit/<proj>/broll/cand`
    (foto: `--tipo foto --fontes pexels,unsplash`); copiar `candidatos` para o `broll.json`.
 3. `python ui/stock.py ranquear edit/<proj>/broll.json edit/<proj>` (só reordena se CLIP instalado;
@@ -289,9 +291,12 @@ vídeo bom. Termo de busca em inglês, concreto ("gavel on desk", não "justice"
 5. `waiting_reply`: "b-roll: N momentos — ver Docs › broll/sheet.png. responda `ok`,
    ou `b03:2 b05:não b07:1`". Aplicar: `escolhido = "bNN-k"`, `status = aprovado|vetado`.
 6. `python ui/stock.py preparar edit/<proj>/broll.json edit/<proj>/edl.json edit/<proj>`
-   → `python edit/recomposite.py` (ou render final). Conflito com overlay Remotion = ajustar `t_in/t_out`.
+   → `python video-use/helpers/render.py edit/<proj>/edl.json -o edit/<proj>/final.mp4`
+   (`edit/recomposite.py` tem caminho fixo `F:\…`; só usar depois de corrigir para `Path(__file__).parent`).
+   Conflito com overlay Remotion ou entre b-rolls = ajustar `t_in/t_out`.
 7. `python ui/stock.py creditos edit/<proj>/broll.json edit/<proj>/creditos.md` → bloco "Para a descrição" no export.
-8. `state.json.broll = {"momentos", "aprovados", "fontes": {...}}` (merge).
+8. `state.json.broll = {"momentos", "aprovados", "fontes": {...}}` (merge); `momentos`/`aprovados` são
+   CONTAGENS (`len(...)`), não listas.
 
 Instrução pontual ("b-roll de tribunal no corte 12"): mesmo fluxo com um momento só.
 
