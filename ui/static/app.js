@@ -101,6 +101,7 @@ function connectSSE(pid) {
       const changed = Object.keys(snap.mtimes)
         .filter(k => snap.mtimes[k] !== last.mtimes[k]);
       if (changed.length) await loadProject(pid);   // recarrega tudo (simples)
+      if (changed.includes('docs') && S.docsOpen && !el('modal').hidden) openDocsModal();
     }
     last = snap;
   };
@@ -772,6 +773,7 @@ el('format-select').addEventListener('change', () => {
 });
 
 function closeModal() {
+  S.docsOpen = false;
   el('modal').hidden = true;
   el('modal').innerHTML = '';
 }
@@ -815,6 +817,38 @@ async function openFormatsModal() {
 
 el('btn-formats').addEventListener('click', openFormatsModal);
 
+async function openDocsModal() {
+  if (!S.pid) {
+    el('modal').innerHTML = '<div class="modal-box modal-docs"><button class="modal-close">×</button><div class="modal-docs-empty">abra um projeto primeiro</div></div>';
+    el('modal').hidden = false;
+    return;
+  }
+  const docs = await getJSON('/api/docs', { id: S.pid });
+  el('modal').innerHTML = `
+    <div class="modal-box modal-formats modal-docs">
+      <button class="modal-close">×</button>
+      <h3>Docs — ${escapeHtml(S.pid)}</h3>
+      <div class="modal-formats-body">
+        <div class="modal-formats-list">${docs.map(d =>
+          `<div class="modal-formats-item" data-name="${escapeHtml(d.name)}">${escapeHtml(d.name)}</div>`).join('')
+          || '<div class="modal-docs-empty">nenhum .md no projeto</div>'}</div>
+        <div class="modal-docs-view" id="docs-view"></div>
+      </div>
+    </div>`;
+  el('modal').hidden = false;
+  const show = async name => {
+    const d = await getJSON('/api/doc', { id: S.pid, name });
+    el('docs-view').innerHTML = d.html;   // servidor já escapou tudo
+    el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
+      it.classList.toggle('active', it.dataset.name === name));
+  };
+  el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
+    it.addEventListener('click', () => show(it.dataset.name)));
+  if (docs.length) show(docs[0].name);
+  S.docsOpen = true;
+}
+el('btn-docs').addEventListener('click', openDocsModal);
+
 async function openNewProjectModal() {
   const [brutos, formats] = await Promise.all([getJSON('/api/brutos'), loadFormats()]);
   el('modal').innerHTML = `
@@ -822,7 +856,9 @@ async function openNewProjectModal() {
       <button class="modal-close">×</button>
       <h3>Novo vídeo</h3>
       <label>Formato
-        <select id="new-formato">${formats.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}</select>
+        <select id="new-formato">${formats.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}
+          <option value="roteiro">roteiro (pesquisa + estrutura antes de gravar)</option>
+          <option value="pauta">pauta (ideias do mês com dados)</option></select>
       </label>
       <label>Bruto
         <select id="new-bruto">${brutos.map(b => `<option value="${b}">${b}</option>`).join('')}</select>
@@ -836,30 +872,41 @@ async function openNewProjectModal() {
       <label>Fontes
         <input type="text" id="new-fontes" placeholder="projeto, links, docs de onde tirar as informações">
       </label>
+      <label class="so-roteiro">Duração alvo (min)<input type="number" id="new-duracao" min="1" value="8"></label>
+      <label class="so-roteiro">Público<input type="text" id="new-publico" placeholder="ex.: estudantes de Direito, 1º ano"></label>
+      <label class="so-pauta">Marca<input type="text" id="new-marca" placeholder="anotus"></label>
+      <label class="so-pauta">Mês<input type="month" id="new-mes"></label>
       <button id="new-send" title="Envia o pedido pra fila do Claude">Enviar</button>
       <div id="new-confirm" hidden>pedido enviado — Claude vai iniciar a edição</div>
     </div>`;
   el('modal').hidden = false;
-  const semBruto = () => {
-    // ads é motion puro: bruto vira opcional
-    const isAds = el('new-formato').value === 'padrao-ads';
+  const ajustaCampos = () => {
+    const f = el('new-formato').value;
+    const isAds = f === 'padrao-ads', isRot = f === 'roteiro', isPauta = f === 'pauta';
     const sel = el('new-bruto');
     const has = sel.querySelector('option[value=""]');
-    if (isAds && !has) sel.insertAdjacentHTML('afterbegin',
-      '<option value="" selected>— sem bruto (motion/ads) —</option>');
-    if (!isAds && has) has.remove();
+    if ((isAds || isRot || isPauta) && !has) sel.insertAdjacentHTML('afterbegin',
+      '<option value="" selected>— sem bruto —</option>');
+    if (!(isAds || isRot || isPauta) && has) has.remove();
+    sel.closest('label').hidden = isRot || isPauta;
+    el('modal').querySelectorAll('.so-roteiro').forEach(x => x.hidden = !isRot);
+    el('modal').querySelectorAll('.so-pauta').forEach(x => x.hidden = !isPauta);
+    el('new-nome').closest('label').hidden = isPauta;
+    el('new-fontes').closest('label').hidden = isPauta;
+    el('new-descricao').placeholder = isRot ? 'tema do vídeo' : isPauta ? 'contexto do mês (opcional)' : 'o que você quer no vídeo...';
   };
-  el('new-formato').addEventListener('change', semBruto);
-  semBruto();
+  el('new-formato').addEventListener('change', ajustaCampos);
+  ajustaCampos();
   el('new-send').addEventListener('click', () => {
-    const bruto = el('new-bruto').value || null;
     const formato = el('new-formato').value;
-    const nome = el('new-nome').value.trim();
-    const descricao = el('new-descricao').value.trim();
-    const fontes = el('new-fontes').value.trim();
-    if (!nome || (!bruto && !descricao)) return;   // sem bruto exige descrição
-    postJSON('/api/new-project', {}, { bruto, formato, nome, descricao, fontes })
-      .then(() => { el('new-confirm').hidden = false; });
+    const body = { formato, nome: el('new-nome').value.trim(), descricao: el('new-descricao').value.trim(),
+                   fontes: el('new-fontes').value.trim(), bruto: el('new-bruto').value || null };
+    if (formato === 'roteiro') { body.duracao_min = +el('new-duracao').value; body.publico = el('new-publico').value.trim();
+      if (!body.descricao) return; }
+    else if (formato === 'pauta') { body.marca = el('new-marca').value.trim(); body.mes = el('new-mes').value;
+      if (!body.marca || !body.mes) return; }
+    else if (!body.nome || (!body.bruto && !body.descricao)) return;
+    postJSON('/api/new-project', {}, body).then(() => { el('new-confirm').hidden = false; });
   });
 }
 

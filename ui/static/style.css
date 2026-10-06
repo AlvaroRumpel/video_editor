@@ -472,9 +472,19 @@ footer {
   gap: 6px;
 }
 
+.modal-docs { width: 760px; }
+.modal-docs-view { flex: 1; overflow-y: auto; padding: 0 8px; font-size: 13px; line-height: 1.45; }
+.modal-docs-view table { border-collapse: collapse; margin: 6px 0; }
+.modal-docs-view th, .modal-docs-view td { border: 1px solid var(--border); padding: 2px 6px; }
+.modal-docs-view blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding-left: 8px; opacity: .85; }
+.modal-docs-view code { background: var(--bg); padding: 0 3px; border-radius: 2px; }
+.modal-docs-empty { opacity: .6; padding: 8px; }
+
 #formats-textarea {
   flex: 1;
   resize: none;
   padding: 8px;
   font-family: ui-monospace, monospace;
 }
+
+.modal-box label[hidden] { display: none; }   /* label{display:block} anularia o atributo hidden */
