@@ -62,6 +62,20 @@ def test_denoise_leve_reduz_ruido(voz, tmp_path):
     assert audio.rms_db(dst, 0.0, 1.0) < audio.rms_db(voz, 0.0, 1.0) - 6
 
 
+def test_denoise_forte_sem_modelo(voz, tmp_path, monkeypatch):
+    monkeypatch.setattr(audio, "ROOT", tmp_path)   # sem assets/rnnoise aqui
+    with pytest.raises(FileNotFoundError):
+        audio.denoise(voz, tmp_path / "x.wav", forte=True)
+
+
+def test_denoise_forte_reduz_ruido(voz, tmp_path):
+    if not (audio.ROOT / "assets" / "rnnoise" / "std.rnnn").exists():
+        pytest.skip("modelo RNNoise não baixado")
+    dst = tmp_path / "forte.wav"
+    audio.denoise(voz, dst, forte=True)
+    assert audio.rms_db(dst, 0.0, 1.0) < audio.rms_db(voz, 0.0, 1.0) - 6
+
+
 def test_denoise_forte_escapa_dois_pontos(voz, tmp_path, monkeypatch):
     modelo = tmp_path / "assets" / "rnnoise" / "std.rnnn"
     modelo.parent.mkdir(parents=True)
