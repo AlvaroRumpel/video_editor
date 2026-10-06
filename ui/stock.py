@@ -318,3 +318,113 @@ def sheet(broll_json: Path, dst_png: Path, proj: Path) -> dict:
     for p in tiles: p.unlink(missing_ok=True)
     lista.unlink(missing_ok=True); tmp.rmdir()
     return {"png": str(dst_png), "linhas": len(moms), "colunas": cols}
+
+
+SLOT = (1032, 190, 850, 584)
+ENC = ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart"]
+
+
+def _cand_por_rotulo(m: dict, rotulo: str | None):
+    """'b01-2' → candidatos[1]; None → None."""
+    if not rotulo:
+        return None
+    try:
+        k = int(rotulo.rsplit("-", 1)[1]) - 1
+        return m["candidatos"][k]
+    except (ValueError, IndexError, KeyError):
+        return None
+
+
+def _overlay(m: dict, c: dict, proj: Path) -> tuple[Path, list[str]]:
+    avisos = []
+    trecho = float(m["t_out"]) - float(m["t_in"])
+    src = proj / c["arq"]
+    out_dir = proj / "broll" / "out"; out_dir.mkdir(parents=True, exist_ok=True)
+    modo = m.get("modo", "cutin")
+    al = ":alpha=1" if modo == "janela" else ""
+    fade = f"fade=t=in:d=0.25{al},fade=t=out:st={max(trecho - 0.25, 0):.3f}:d=0.25{al}"
+    if c["tipo"] == "video":
+        dur = duracao(src)
+        off = float(m.get("offset") or 0.0)
+        if off + trecho > dur:
+            off = max(0.0, dur - trecho); avisos.append(f"{m['id']}: offset ajustado para {off:.2f}s (fonte tem {dur:.1f}s)")
+        entrada = ["-ss", f"{off:.3f}", "-t", f"{trecho:.3f}", "-i", str(src)]
+        base = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=60"
+    else:
+        frames = int(round(trecho * 60))
+        entrada = ["-i", str(src)]
+        base = (f"scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"
+                f"zoompan=z='min(zoom+0.0004,1.08)':d={frames}:s=1920x1080:fps=60,trim=duration={trecho:.3f}")
+    if modo == "janela":
+        x, y, w, h = SLOT
+        vf = (f"[0:v]{base},scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=rgba,{fade}[win];"
+              f"color=c=black@0:s=1920x1080:r=60:d={trecho:.3f},format=rgba[bg];[bg][win]overlay={x}:{y}:format=auto,trim=duration={trecho:.3f}[out]")
+        dst = out_dir / f"{m['id']}.mov"
+        _ff([*entrada, "-filter_complex", vf, "-map", "[out]", "-c:v", "qtrle", "-pix_fmt", "argb", "-an", "-t", f"{trecho:.3f}", str(dst)])
+    else:
+        dst = out_dir / f"{m['id']}.mp4"
+        _ff([*entrada, "-vf", f"{base},{fade}", *ENC, "-t", f"{trecho:.3f}", str(dst)])
+    return dst, avisos
+
+
+def _cruza(a0, a1, b0, b1) -> bool:
+    return a0 < b1 and b0 < a1
+
+
+def preparar(broll_json: Path, edl_json: Path, proj: Path) -> dict:
+    b = ler_broll(broll_json)
+    edl = pipeline.read_json(Path(edl_json), None)
+    if edl is None:
+        return {"ok": False, "gerados": [], "avisos": [], "erros": [f"edl.json ilegível: {edl_json}"]}
+    fixos = [o for o in edl.get("overlays", []) if not str(o.get("file", "")).startswith("broll/out/")]
+    erros, avisos, novos, gerados = [], [], [], []
+    for m in b.get("momentos", []):
+        if m.get("status") != "aprovado":
+            continue
+        t_in, t_out = float(m["t_in"]), float(m["t_out"])
+        if t_out <= t_in:
+            erros.append(f"{m['id']}: t_out ({t_out}) <= t_in ({t_in})"); continue
+        c = _cand_por_rotulo(m, m.get("escolhido"))
+        if m.get("escolhido") and c is None:
+            erros.append(f"{m['id']}: escolhido '{m['escolhido']}' não existe nos candidatos"); continue
+        if c is None:
+            if not m.get("candidatos"):
+                erros.append(f"{m['id']}: aprovado sem candidatos"); continue
+            c = m["candidatos"][0]; avisos.append(f"{m['id']}: sem escolhido — usando o primeiro candidato")
+        for o in fixos:
+            o0 = float(o["start_in_output"]); o1 = o0 + float(o["duration"])
+            if _cruza(t_in, t_out, o0, o1):
+                erros.append(f"{m['id']}: conflita com overlay {o['file']} ({o0:.1f}–{o1:.1f}s)")
+        novos.append((m, c))
+    if erros:
+        return {"ok": False, "gerados": [], "avisos": avisos, "erros": erros}
+    ovs = []
+    for m, c in novos:
+        dst, av = _overlay(m, c, proj); avisos += av
+        rel = dst.relative_to(proj).as_posix()
+        gerados.append(rel)
+        ovs.append({"file": rel, "start_in_output": float(m["t_in"]), "duration": round(float(m["t_out"]) - float(m["t_in"]), 3)})
+    edl = pipeline.read_json(Path(edl_json), {})          # reler antes de gravar
+    edl["overlays"] = [o for o in edl.get("overlays", []) if not str(o.get("file", "")).startswith("broll/out/")] + ovs
+    pipeline.atomic_write_json(Path(edl_json), edl)
+    return {"ok": True, "gerados": gerados, "avisos": avisos, "erros": []}
+
+
+EXIGE_CREDITO = ("unsplash", "wikimedia")
+
+
+def creditos(broll_json: Path, dst_md: Path) -> dict:
+    b = ler_broll(broll_json)
+    linhas, desc = [], []
+    for m in b.get("momentos", []):
+        if m.get("status") != "aprovado":
+            continue
+        c = _cand_por_rotulo(m, m.get("escolhido")) or (m.get("candidatos") or [None])[0]
+        if not c:
+            continue
+        linhas.append(f"- {m['id']} · {c['fonte']} · {c['autor']} · {c['url']} · {c['licenca']}")
+        if c["fonte"] in EXIGE_CREDITO or "crédito" in c.get("licenca", "").lower() or c.get("licenca", "").startswith("CC BY"):
+            desc.append(f"{c['autor']} — {c['url']} ({c['licenca']})")
+    md = "# Créditos de b-roll\n\n" + "\n".join(linhas) + "\n\n## Para a descrição\n\n" + ("\n".join(desc) if desc else "(nenhum crédito obrigatório)") + "\n"
+    Path(dst_md).write_text(md, encoding="utf-8")
+    return {"usados": len(linhas), "com_credito": len(desc)}

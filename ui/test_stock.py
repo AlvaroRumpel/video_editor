@@ -265,3 +265,98 @@ def test_sheet_grade(tmp_path, mp4, jpg):
     assert r["linhas"] == 2 and r["colunas"] == 2
     w, h, _, _ = _dim(proj / "broll" / "sheet.png")
     assert (w, h) == (960, 540)
+
+
+def _edl(proj: Path, overlays=None):
+    e = {"version": 1, "sources": {"MAIN": "x.mkv"}, "ranges": [], "grade": "", "total_duration_s": 100.0,
+         "overlays": overlays or [{"file": "animations/remotion/out/Opening.mov", "start_in_output": 0.0, "duration": 5.5}]}
+    p = proj / "edl.json"; p.write_text(json.dumps(e), encoding="utf-8"); return p
+
+
+def _aprova(bj: Path, **por_id):
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    for m in b["momentos"]:
+        if m["id"] in por_id:
+            m["status"] = "aprovado"; m["escolhido"] = por_id[m["id"]]
+    bj.write_text(json.dumps(b), encoding="utf-8")
+
+
+def test_preparar_cutin_e_merge(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    _aprova(bj, b01="b01-1")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] and r["gerados"] == ["broll/out/b01.mp4"]
+    out = proj / "broll" / "out" / "b01.mp4"
+    w, h, fps, _ = _dim(out)
+    assert (w, h) == (1920, 1080) and fps == "60/1"
+    assert abs(stock.duracao(out) - 3.0) < 0.05
+    assert subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(out)],
+                          capture_output=True, text=True).stdout.strip() == ""
+    e = json.loads(edl.read_text(encoding="utf-8"))
+    assert e["overlays"][0]["file"].endswith("Opening.mov")                      # preservado
+    assert {"file": "broll/out/b01.mp4", "start_in_output": 10.0, "duration": 3.0} in e["overlays"]
+    r2 = stock.preparar(bj, edl, proj)                                           # idempotente: substitui, não duplica
+    e = json.loads(edl.read_text(encoding="utf-8"))
+    assert sum(1 for o in e["overlays"] if o["file"].startswith("broll/out/")) == 1
+
+
+def test_preparar_janela_alpha_e_foto(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0]["modo"] = "janela"; b["momentos"][1]["modo"] = "foto"
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    _aprova(bj, b01="b01-1", b02="b02-2")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] and sorted(r["gerados"]) == ["broll/out/b01.mov", "broll/out/b02.mp4"]
+    _, _, _, pix = _dim(proj / "broll" / "out" / "b01.mov")
+    assert pix in ("argb", "rgba", "bgra")
+    assert abs(stock.duracao(proj / "broll" / "out" / "b02.mp4") - 3.0) < 0.1
+
+
+def test_preparar_conflito_nao_escreve(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    edl = _edl(proj, [{"file": "animations/remotion/out/X.mov", "start_in_output": 11.0, "duration": 4.0}])
+    _aprova(bj, b01="b01-1")
+    antes = edl.read_text(encoding="utf-8")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] is False and any("b01" in e and "X.mov" in e for e in r["erros"])
+    assert edl.read_text(encoding="utf-8") == antes
+
+
+def test_preparar_validacoes(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0].update(status="aprovado", escolhido="nao-existe")
+    b["momentos"][1].update(status="aprovado", escolhido=None, t_out=40.0, t_in=45.0)
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] is False
+    assert any("b01" in e and "escolhido" in e for e in r["erros"])
+    assert any("b02" in e and "t_out" in e for e in r["erros"])
+
+
+def test_preparar_sem_escolhido_usa_primeiro_e_offset_curto(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg); edl = _edl(proj)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0].update(status="aprovado", escolhido=None, offset=5.5)    # fonte tem 6 s, trecho 3 s
+    b["momentos"][1]["status"] = "vetado"
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    r = stock.preparar(bj, edl, proj)
+    assert r["ok"] and r["gerados"] == ["broll/out/b01.mp4"]
+    assert any("b01" in a and "primeiro candidato" in a for a in r["avisos"])
+    assert any("offset" in a for a in r["avisos"])
+    assert abs(stock.duracao(proj / "broll" / "out" / "b01.mp4") - 3.0) < 0.05
+
+
+def test_creditos(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0]["candidatos"][0].update(fonte="unsplash", licenca="Unsplash License (crédito obrigatório)", autor="Hal", url="https://unsplash.com/photos/u1")
+    b["momentos"][0].update(status="aprovado", escolhido="b01-1")
+    b["momentos"][1].update(status="aprovado", escolhido="b02-1")
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    r = stock.creditos(bj, proj / "creditos.md")
+    md = (proj / "creditos.md").read_text(encoding="utf-8")
+    assert r == {"usados": 2, "com_credito": 1}
+    assert "b01 · unsplash · Hal · https://unsplash.com/photos/u1" in md
+    assert "## Para a descrição" in md and "Hal" in md.split("## Para a descrição")[1]
