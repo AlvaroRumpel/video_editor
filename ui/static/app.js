@@ -596,6 +596,7 @@ function renderAll() {
   renderQueue();
   renderProgress();
   renderBudget();
+  renderAudioInfo();
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
 
@@ -690,6 +691,18 @@ function renderBudget() {
   el('budget-badge').className = 'budget' + (pct >= 80 ? ' warn' : '');
   el('budget-bar').style.width = `${pct}%`;
   el('budget-label').textContent = `${fmtUSD(c.usd)} / ${fmtUSD(teto)}`;
+}
+
+function renderAudioInfo() {
+  const a = S.proj.state && S.proj.state.audio;
+  const box = el('audio-info');
+  if (!a) { box.hidden = true; return; }
+  const partes = [];
+  if (a.trilha) partes.push(`trilha ${a.trilha} · ${a.nivel_db ?? -18} dB · duck ${a.duck_db ?? -8} dB`);
+  if (a.denoise) partes.push(`denoise ${a.denoise}`);
+  if (a.ruido_db != null) partes.push(`ruído ${Number(a.ruido_db).toFixed(0)} dB`);
+  box.textContent = 'áudio: ' + partes.join(' · ');
+  box.hidden = !partes.length;
 }
 
 function openBudgetModal() {

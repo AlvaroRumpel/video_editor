@@ -74,6 +74,20 @@ Correção: o EDL continua no tempo do áudio (transcript), e a **extração do 
 mudam — só a imagem se desloca. O ar da cabeça fica limitado a `primeira palavra − delay`,
 senão o primeiro segmento pede imagem antes do início do arquivo.
 
+## 0.3 Ruído e limpeza da voz
+
+1. `python ui/audio.py medir-ruido bruto/<nome>.mkv` → anotar em
+   `state.json.audio.ruido_db` (merge; preservar outras chaves).
+2. `< -60 dB`: bruto limpo, pular. Senão
+   `python ui/audio.py denoise bruto/<nome>.mkv edit/<proj>/voz_limpa.wav`.
+3. `> -45 dB`: pedido `waiting_reply` — "ruído de fundo alto (−38 dB); aplicar
+   denoise forte (RNNoise)? pode deixar a voz levemente metálica". Sim →
+   repetir com `--forte`.
+4. **Transcrição e `build_audio.py` usam `voz_limpa.wav`** como fonte de
+   áudio; o vídeo continua vindo do bruto. A regra 6.1 continua valendo: a
+   faixa é reconstruída a partir do WAV limpo, segmento a segmento.
+5. `state.json.audio.denoise` = `"nenhum" | "leve" | "forte"`.
+
 ## 1. Pipeline (ordem obrigatória)
 
 > Ação paga (transcrição Scribe): seguir "Orçamento" do CLAUDE.md (`budget.py autorizar` antes, `registrar` depois).
@@ -276,6 +290,31 @@ no ponto mais frágil do vídeo.
 
 ---
 
+## 8.1 Trilha de fundo com ducking
+
+Entra **depois** do `final.mp4` pronto e da conferência 6.1 (voz já reconstruída).
+
+1. Guardar `edit/<proj>/final_sem_trilha.mp4` (cópia) — toda remixagem parte dele.
+2. Escolher 1 trilha de `assets/music/` pelo tom do vídeo:
+
+   | Tom | Trilha |
+   |---|---|
+   | calmo / explicativo | sb-Amberlight, sb-ClearSkies |
+   | otimista / lançamento | sb-Phoenix2026, sb-LifeInMotion |
+   | reflexivo | sb-HomeWasYou, sb-EchoesOfHome |
+   | tensão / problema | sb-Incredulity, sb-Unraveling |
+   | leve / humor | sb-IceCream, sb-Felicity |
+
+3. `waiting_reply`: "trilha: sb-Amberlight (calma, piano). responda `ok`,
+   `outra: <nome>` ou `gerar: <descrição>`".
+4. `gerar` → ação paga (ver "Orçamento" no CLAUDE.md):
+   `python ui/audio.py gerar-musica edit/<proj> "<descrição>, instrumental, sem vocal, loopável" <dur_s> edit/<proj>/trilha_gerada.wav`
+   (exit 2/3 → `waiting_reply` com o motivo; depois `--aprovacao <id>`).
+5. `python ui/audio.py mix-trilha edit/<proj>/final_sem_trilha.mp4 <trilha> edit/<proj>/final.mp4`
+   (padrão −18 dB, duck −8 dB; "trilha mais baixa/alta" = `--nivel` ±3 e remixar).
+6. `state.json.audio` ← `{trilha, nivel_db, duck_db}` (merge).
+7. Refazer a seção 9 (a mixagem não pode mover a voz).
+
 ## 9. Verificação antes de entregar
 
 1. `verify_text.py` — nenhuma frase quebrada
@@ -284,6 +323,7 @@ no ponto mais frágil do vídeo.
 4. `ffprobe`: duração bate com o esperado, 60 fps, `yuv420p`
 5. SRT: último cue fecha junto com a última fala
 6. Grade consistente entre início, meio e fim
+7. Loudness integrada −14 LUFS (ffmpeg loudnorm print_format=json) e correlação cruzada da voz em 3 pontos após a trilha
 
 ---
 

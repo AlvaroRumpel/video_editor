@@ -41,6 +41,16 @@ Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue
 2. Captura: Playwright chromium headless, `viewport 540x960, deviceScaleFactor: 2` → screenshot por frame = 1080x1920 nítido. Exemplos: `edit/shorts/anotus/r8v2/capture.js`, `features/motion/`, `cronograma/`, `reler/`.
 3. Montagem: `ffmpeg -framerate 30 -i frames/f_%04d.png` + encode padrão.
 
+**SFX** (biblioteca da marca em `assets/sfx/`, gerada uma vez — ver `assets/sfx/CREDITS.md`):
+- Cada `anim.html` exporta `cues.json` ao lado: `[{"t": 1.23, "som": "pop-dourado", "ganho_db": -6}]`,
+  derivado dos frames dos eventos (ponto dourado = `pop-dourado`, reveal = `whoosh-reveal`,
+  pill = `click-pill`, end card = `sting-endcard`, contagem = `tick`, subida = `rise`).
+- Após montar o vídeo mudo: `python ui/audio.py mix-sfx <mudo.mp4> cues.json assets/sfx <com_sfx.mp4>`;
+  só então a trilha (linha **Áudio** abaixo), com a trilha a −20 dB enquanto houver SFX
+  (`sidechaincompress` com os SFX como sidechain).
+- Biblioteca ausente: gerar os 6 sons com `python ui/audio.py gerar-sfx edit/shorts/<proj> "<prompt>" 1.0 assets/sfx/<nome>.wav`
+  — ação paga, uma aprovação única na UI com o custo total das 6 chamadas.
+
 **Footage do app** (dash.anotus.app):
 - Login de automação: Turnstile bloqueia senha; usar **magic link** via admin API (`edit/shorts/anotus-r8/magic_link.js`, lê `justmind/.env`) e salvar `state.json` (sessão reutilizável).
 - Flutter = canvas: cliques por coordenada (mapear com screenshots antes). Upload via evento `filechooser` normal.
@@ -50,7 +60,7 @@ Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue
 **Encode padrão** (tudo igual → concat `-c copy`):
 `-r 30 -c:v libx264 -crf 18 -preset medium -pix_fmt yuv420p -profile:v high -an`, 1080x1920.
 
-**Áudio**: música de `assets/music/`, `loudnorm=I=-15:TP=-1.5:LRA=11`, fade out 1.2s no fim, aac 192k, `+faststart`. Trilha diferente por vídeo (usadas: Phoenix2026=01, Incredulity=02, Unraveling=03, bed-unraveling=04).
+**Áudio**: música de `assets/music/`, `loudnorm=I=-15:TP=-1.5:LRA=11`, fade out 1.2s no fim, aac 192k, `+faststart`. Trilha diferente por vídeo (usadas: Phoenix2026=01, Incredulity=02, Unraveling=03, bed-unraveling=04). Música gerada (quando o briefing pede tom específico): `python ui/audio.py gerar-musica edit/shorts/<proj> "<descrição da descricao>" <dur> edit/shorts/<proj>/trilha_gerada.wav` — ação paga.
 
 > Ação paga (SFX/trilha/vídeo IA, quando houver): seguir "Orçamento" do CLAUDE.md (`budget.py autorizar` antes, `registrar` depois).
 

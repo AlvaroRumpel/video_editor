@@ -1,9 +1,11 @@
 # Conteúdo pessoal / mídia — nunca publicar
 bruto/
 Export/
-assets/
+assets/*
 !assets/rnnoise/
 !assets/rnnoise/**
+!assets/sfx/
+!assets/sfx/CREDITS.md
 edit/
 edit-the-goat/
 

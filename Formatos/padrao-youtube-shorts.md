@@ -17,7 +17,7 @@ re-encode, não uma re-edição. Receita provada em `edit/shorts/build_shorts.py
 
 ## Método
 
-1. **Fonte**: o export horizontal em `Export/<nome> - horizontal.mp4`.
+1. **Fonte**: o export horizontal em `Export/<nome> - horizontal.mp4`. O export já traz voz limpa (0.3 do longo) e trilha com ducking (8.1); não reaplicar denoise nem trilha.
 2. **Timings**: `words_out.py` mapeia os tempos de palavra do Scribe para a
    timeline do export — toda borda de corte senta em fronteira de palavra
    (padding 50ms antes / 80ms depois).
