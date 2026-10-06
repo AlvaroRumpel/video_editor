@@ -117,6 +117,7 @@ def candidatos(words: list[dict], n: int = 20, min_s: float = 25, max_s: float =
 PLATAFORMAS = {"shorts": (20, 60), "reels": (20, 90), "tiktok": (20, 60)}
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 TOL = 0.005
+NOME_CLIPE_RE = re.compile(r"^\d{2}-[a-z0-9-]+-(shorts|reels|tiktok)\.mp4$")
 STATUS = {"proposto", "aprovado", "vetado"}
 
 
@@ -299,7 +300,7 @@ def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _ru
     ok, erros, esperados = [], [], set()
     aps = _aprovados(clips)
     if not aps:
-        return {"renderizados": [], "erros": ["0 clipes aprovados — aplique a resposta da aprovação (status: aprovado) antes de renderizar"]}
+        return {"renderizados": [], "erros": ["0 clipes aprovados — aplique a resposta da aprovação (status: aprovado) antes de renderizar"], "removidos": []}
     for n, c in enumerate(aps, 1):
         for plat in c.get("plataformas", []):
             nome = f"{n:02d}-{c['slug']}-{plat}"
@@ -317,7 +318,7 @@ def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _ru
     removidos = []
     if not preview:
         for f in sorted(export_dir.glob("*.mp4")):
-            if f.name not in esperados:
+            if f.name not in esperados and NOME_CLIPE_RE.match(f.name):
                 f.unlink(); removidos.append(f.name)
     return {"renderizados": ok, "erros": erros, "removidos": removidos}
 

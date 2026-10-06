@@ -268,12 +268,13 @@ def test_zero_aprovados(tmp_path, words60):
 @pytest.mark.parametrize("preview", [False, True])
 def test_render_remove_obsoletos(tmp_path, words60, preview):
     proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
-    c = _clips(words60); out = tmp_path / "out"; out.mkdir(); (out / "stale.mp4").write_bytes(b"0")
+    c = _clips(words60); out = tmp_path / "out"; out.mkdir(); (out / "stale.mp4").write_bytes(b"0"); (out / "99-velho-shorts.mp4").write_bytes(b"0")
     clips.edl(c, proj, export, words60)
     class R: returncode = 0; stderr = ""
     r = clips.render(c, proj, out, preview=preview, _run=lambda cmd: R())
-    assert (out / "stale.mp4").exists() == preview
-    assert r["removidos"] == ([] if preview else ["stale.mp4"])
+    assert (out / "stale.mp4").exists()
+    assert (out / "99-velho-shorts.mp4").exists() == preview
+    assert r["removidos"] == ([] if preview else ["99-velho-shorts.mp4"])
 
 
 def test_srt_fecha_antes_de_1_2s():
