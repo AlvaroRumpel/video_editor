@@ -77,6 +77,7 @@ async function loadProjectInner(pid) {
   S.wave = await getJSON('/api/waveform', { id: pid });
   S.globalQueue = await getJSON('/api/global-queue');
   S.activity = await getJSON('/api/activity');
+  S.budget = await getJSON('/api/budget');
   refreshProjectList();   // projeto novo criado pelo Claude aparece sem F5
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
@@ -594,6 +595,7 @@ function renderAll() {
   renderTimeline();
   renderQueue();
   renderProgress();
+  renderBudget();
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
 
@@ -678,6 +680,47 @@ function renderProgress() {
   el('render-bar').style.width = `${r.pct}%`;
   el('render-label').textContent = `${r.fase} · ${r.pct}% · ${fmtMSS(r.eta)}`;
 }
+
+const fmtUSD = v => `US$ ${(v || 0).toFixed(2)}`;
+
+function renderBudget() {
+  const c = S.proj.custos || { usd: 0, creditos: 0 };
+  const teto = S.proj.teto_projeto || 0;
+  const pct = teto ? Math.min(100, c.usd / teto * 100) : 0;
+  el('budget-badge').className = 'budget' + (pct >= 80 ? ' warn' : '');
+  el('budget-bar').style.width = `${pct}%`;
+  el('budget-label').textContent = `${fmtUSD(c.usd)} / ${fmtUSD(teto)}`;
+}
+
+function openBudgetModal() {
+  const b = S.budget || {}; const bb = b.budget || {}; const m = b.gasto_mes || {};
+  const ev = b.elevenlabs;
+  const cota = ev ? `${ev.usados.toLocaleString('pt-BR')} / ${ev.limite.toLocaleString('pt-BR')} créditos` : 'saldo indisponível';
+  el('modal').innerHTML = `
+    <div class="modal-box budget-modal">
+      <button class="modal-close">×</button>
+      <h3>Orçamento</h3>
+      <div>Mês ${escapeHtml(b.mes || '')}: <b>${fmtUSD(m.usd)}</b> / ${fmtUSD(bb.teto_mensal_usd)} · ElevenLabs ${cota}</div>
+      <div>Projeto atual: <b>${fmtUSD((S.proj.custos || {}).usd)}</b> / ${fmtUSD(S.proj.teto_projeto)}</div>
+      <label>Teto mensal (US$) <input type="number" min="0" step="0.5" id="b-mensal" value="${bb.teto_mensal_usd}"></label>
+      <label>Teto padrão por projeto (US$) <input type="number" min="0" step="0.5" id="b-proj" value="${bb.teto_projeto_usd}"></label>
+      <label>Teto deste projeto (US$) <input type="number" min="0" step="0.5" id="b-este" value="${S.proj.teto_projeto}"></label>
+      <label>Pedir aprovação acima de (US$) <input type="number" min="0" step="0.1" id="b-acima" value="${bb.aprovar_acima_usd}"></label>
+      <button id="b-save">Salvar</button>
+    </div>`;
+  el('modal').hidden = false;
+  el('b-save').onclick = () => {
+    const body = {
+      teto_mensal_usd: +el('b-mensal').value,
+      teto_projeto_usd: +el('b-proj').value,
+      aprovar_acima_usd: +el('b-acima').value,
+      tetos_projeto: { [S.pid]: +el('b-este').value },
+    };
+    putJSON('/api/budget', {}, body).then(() => { closeModal(); loadProject(S.pid); });
+  };
+}
+
+el('budget-badge').addEventListener('click', openBudgetModal);
 
 function requestRender(kind) {
   postJSON('/api/queue', { id: S.pid }, { type: 'render', target: null, text: kind })

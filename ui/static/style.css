@@ -104,6 +104,28 @@ header .spacer {
   font-size: 11px;
 }
 
+#budget-badge {
+  position: relative;
+  width: 150px;
+  height: 18px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg);
+  overflow: hidden;
+}
+#budget-bar {
+  position: absolute; inset: 0; width: 0%;
+  background: rgba(76, 175, 80, 0.35);
+}
+#budget-badge.warn #budget-bar { background: rgba(224, 82, 82, 0.45); }
+#budget-label { position: relative; line-height: 18px; }
+.budget-modal label { display: block; margin: 6px 0; }
+.budget-modal input { width: 80px; }
+
 /* main */
 
 main {
