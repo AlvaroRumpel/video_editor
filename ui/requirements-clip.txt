@@ -1,0 +1,5 @@
+# opcional: ranqueamento de b-roll por similaridade texto↔frame
+# instalar com: pip install -r ui/requirements-clip.txt  (~2 GB; CPU ok, lento)
+torch
+open_clip_torch
+pillow

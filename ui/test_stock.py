@@ -1,6 +1,8 @@
 # ui/test_stock.py
 import json
+import os
 import shutil
+import sys
 import subprocess
 from pathlib import Path
 import pytest
@@ -390,3 +392,27 @@ def test_preparar_fonte_curta_e_rotulo_invalido(tmp_path, mp4, jpg):
         b["momentos"][0].update(escolhido=rot, t_out=13.0); bj.write_text(json.dumps(b), encoding="utf-8")
         r = stock.preparar(bj, edl, proj)
         assert r["ok"] is False and any("não existe" in e for e in r["erros"]), rot
+
+
+def test_ranquear_sem_clip(tmp_path, mp4, jpg, monkeypatch):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    antes = bj.read_text(encoding="utf-8")
+    monkeypatch.setitem(sys.modules, "open_clip", None)   # import falha
+    r = stock.ranquear(bj, proj)
+    assert r["ok"] is False and "CLIP" in r["motivo"]
+    assert bj.read_text(encoding="utf-8") == antes
+
+
+def test_cli_ranquear_e_preparar_conflito(tmp_path, mp4, jpg, monkeypatch):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    exe = [sys.executable, str(Path(stock.__file__))]
+    r = subprocess.run([*exe, "ranquear", str(bj), str(proj)], capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, "PYTHONPATH": str(Path(stock.__file__).parent)})
+    assert r.returncode == 0 and json.loads(r.stdout)["ok"] in (True, False)
+    edl = _edl(proj, [{"file": "animations/remotion/out/X.mov", "start_in_output": 11.0, "duration": 4.0}])
+    _aprova(bj, b01="b01-1")
+    r = subprocess.run([*exe, "preparar", str(bj), str(edl), str(proj)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 1 and json.loads(r.stdout)["ok"] is False
+    r = subprocess.run([*exe, "sheet", str(tmp_path / "nao.json"), str(tmp_path / "x.png"), str(proj)],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2 and "erro" in json.loads(r.stdout)

@@ -12,6 +12,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
 import pipeline
 
 ROOT = pipeline.ROOT
@@ -437,3 +438,72 @@ def creditos(broll_json: Path, dst_md: Path) -> dict:
     md = "# Créditos de b-roll\n\n" + "\n".join(linhas) + "\n\n## Para a descrição\n\n" + ("\n".join(desc) if desc else "(nenhum crédito obrigatório)") + "\n"
     Path(dst_md).write_text(md, encoding="utf-8")
     return {"usados": len(linhas), "com_credito": len(desc)}
+
+
+def ranquear(broll_json: Path, proj: Path) -> dict:
+    try:
+        import torch
+        import open_clip
+        from PIL import Image
+    except Exception as e:   # ImportError ou None em sys.modules
+        return {"ok": False, "motivo": f"CLIP não instalado ({type(e).__name__}); pip install -r ui/requirements-clip.txt"}
+    modelo, _, pre = open_clip.create_model_and_transforms("ViT-B-32", pretrained="laion2b_s34b_b79k")
+    tok = open_clip.get_tokenizer("ViT-B-32")
+    modelo.eval()
+    b = ler_broll(broll_json)
+    tmp = Path(proj) / "broll" / ".rank"; tmp.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with torch.no_grad():
+        for m in b.get("momentos", []):
+            txt = modelo.encode_text(tok([m.get("termo") or m.get("frase", "")]))
+            txt = txt / txt.norm(dim=-1, keepdim=True)
+            for i, c in enumerate(m.get("candidatos", [])):
+                src = Path(proj) / c["arq"]
+                frames = []
+                if c["tipo"] == "video":
+                    for pos in (0.1, 0.5, 0.9):
+                        png = tmp / f"{m['id']}-{i}-{pos}.png"
+                        _ff(["-ss", f"{duracao(src) * pos:.3f}", "-i", str(src), "-frames:v", "1", "-vf", "scale=224:-2", str(png)])
+                        frames.append(png)
+                else:
+                    frames.append(src)
+                imgs = torch.stack([pre(Image.open(f).convert("RGB")) for f in frames])
+                emb = modelo.encode_image(imgs); emb = emb / emb.norm(dim=-1, keepdim=True)
+                c["score"] = round(float((emb @ txt.T).mean()), 4); n += 1
+            m["candidatos"].sort(key=lambda c: -(c.get("score") or 0))
+    for p in tmp.glob("*.png"): p.unlink()
+    tmp.rmdir()
+    Path(broll_json).write_text(json.dumps(b, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"ok": True, "ranqueados": n}
+
+
+def _cli(ns):
+    if ns.cmd == "buscar":
+        return buscar(ns.termo, ns.tipo, ns.fontes.split(","), ns.n, Path(ns.dst)), 0
+    if ns.cmd == "sheet":
+        return sheet(Path(ns.broll), Path(ns.png), Path(ns.proj)), 0
+    if ns.cmd == "ranquear":
+        return ranquear(Path(ns.broll), Path(ns.proj)), 0
+    if ns.cmd == "preparar":
+        r = preparar(Path(ns.broll), Path(ns.edl), Path(ns.proj)); return r, (0 if r["ok"] else 1)
+    return creditos(Path(ns.broll), Path(ns.md)), 0
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="b-roll de stock")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("buscar"); p.add_argument("termo"); p.add_argument("--tipo", choices=["video", "foto"], default="video")
+    p.add_argument("--fontes", default="pexels,pixabay"); p.add_argument("--n", type=int, default=3); p.add_argument("--dst", required=True)
+    p = sub.add_parser("sheet"); p.add_argument("broll"); p.add_argument("png"); p.add_argument("proj")
+    p = sub.add_parser("ranquear"); p.add_argument("broll"); p.add_argument("proj")
+    p = sub.add_parser("preparar"); p.add_argument("broll"); p.add_argument("edl"); p.add_argument("proj")
+    p = sub.add_parser("creditos"); p.add_argument("broll"); p.add_argument("md")
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns)
+    except Exception as e:
+        print(json.dumps({"erro": f"{type(e).__name__}: {e}"}, ensure_ascii=False)); sys.exit(2)
+    print(json.dumps(out, ensure_ascii=False)); sys.exit(code)
