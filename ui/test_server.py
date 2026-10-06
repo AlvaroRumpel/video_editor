@@ -201,6 +201,21 @@ def test_budget_put_rejeita_invalido(client, fake_root):
     assert not (fake_root / ".ui-runtime" / "budget.json").exists()
 
 
+def test_budget_put_infinity_400(client):
+    r = client.put("/api/budget", content='{"teto_mensal_usd": Infinity}',
+                   headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+
+
+def test_budget_put_null_remove_override(client, fake_root):
+    (fake_root / ".ui-runtime").mkdir()
+    bp = fake_root / ".ui-runtime" / "budget.json"
+    bp.write_text(json.dumps({"tetos_projeto": {"edit-fake": 12, "edit-raw": 7}}), encoding="utf-8")
+    r = client.put("/api/budget", json={"tetos_projeto": {"edit-fake": None}})
+    assert r.status_code == 200
+    assert json.loads(bp.read_text(encoding="utf-8"))["tetos_projeto"] == {"edit-raw": 7}
+
+
 def test_project_tem_custos(client, fake_root):
     (fake_root / "edit-fake" / "ui").mkdir(exist_ok=True)
     (fake_root / "edit-fake" / "ui" / "costs.jsonl").write_text(

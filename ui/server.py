@@ -1,5 +1,6 @@
 """Servidor da UI do video_editor. Roda: python ui/server.py"""
 from pathlib import Path
+import math
 import re
 import time
 import asyncio
@@ -186,7 +187,7 @@ BUDGET_NUM = ("teto_mensal_usd", "teto_projeto_usd", "aprovar_acima_usd")
 
 
 def _num_ok(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
 
 
 @app.get("/api/budget")
@@ -204,7 +205,7 @@ def budget_put(request: Request, body: dict):
             raise HTTPException(400, f"{k} inválido")
     tp = body.get("tetos_projeto")
     if tp is not None and (not isinstance(tp, dict)
-                           or not all(_num_ok(v) for v in tp.values())):
+                           or not all(v is None or _num_ok(v) for v in tp.values())):
         raise HTTPException(400, "tetos_projeto inválido")
     path = _root(request) / ".ui-runtime" / "budget.json"
     cur = pipeline.read_json(path, {})      # reler antes de gravar
@@ -212,7 +213,12 @@ def budget_put(request: Request, body: dict):
         if k in body:
             cur[k] = body[k]
     if tp is not None:
-        cur.setdefault("tetos_projeto", {}).update(tp)
+        cur_tp = cur.setdefault("tetos_projeto", {})
+        for k, v in tp.items():
+            if v is None:
+                cur_tp.pop(k, None)   # null remove o teto próprio do projeto
+            else:
+                cur_tp[k] = v
     pipeline.atomic_write_json(path, cur)
     return budget.ler_budget(_root(request))
 

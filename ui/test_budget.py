@@ -74,6 +74,12 @@ def _proj(root):
     return root / "edit-fake"
 
 
+def _aprova(root, id_, reply="pode", global_=False):
+    q = (root / ".ui-runtime" / "queue.json") if global_ else (_proj(root) / "ui" / "queue.json")
+    q.parent.mkdir(parents=True, exist_ok=True)
+    q.write_text(json.dumps([{"id": id_, "status": "pending", "reply": reply}]), encoding="utf-8")
+
+
 def test_autorizar_ok(root):
     d = budget.autorizar(root, _proj(root), "fal_kling", 1)
     assert d["status"] == "ok" and d["estimativa"]["usd"] == 0.28
@@ -101,6 +107,7 @@ def test_autorizar_bloqueado_teto_mensal(root):
 
 def test_autorizar_aprovacao_libera(root):
     budget.registrar(_proj(root), "fal_kling", 1, usd=4.9, root=root)
+    _aprova(root, 777)
     d = budget.autorizar(root, _proj(root), "fal_kling", 1, aprovacao=777)
     assert d["status"] == "ok"
 
@@ -190,6 +197,7 @@ def test_autorizar_aprovacao_ignora_mensal_e_cota(root):
     # Insufficient quota: restante 50, creditos 200
     saldo = {"usados": 0, "limite": 250, "restante": 50, "reset_ts": 0}
     # Autorizando 1 elevenlabs_sfx (0 USD, 200 creditos): hits both blocks without approval
+    _aprova(root, 999, global_=True)
     d = budget.autorizar(root, _proj(root), "elevenlabs_sfx", 1, aprovacao=999, saldo=saldo)
     assert d["status"] == "ok"
 
@@ -213,3 +221,77 @@ def test_cli_autorizar_e_registrar(root):
     r = run("registrar", str(proj), "fal_kling", "1", "--usd", "0.3")
     assert r.returncode == 0 and json.loads(r.stdout)["usd"] == 0.3
     assert budget.gasto_projeto(proj)["usd"] == 0.3
+
+
+def test_autorizar_aprovacao_desconhecida_ou_sem_reply(root):
+    budget.registrar(_proj(root), "fal_kling", 1, usd=4.9, root=root)
+    d = budget.autorizar(root, _proj(root), "fal_kling", 1, aprovacao=5)
+    assert d["status"] == "bloqueado" and "não encontrada" in d["motivo"]
+    _aprova(root, 5, reply="")
+    assert budget.autorizar(root, _proj(root), "fal_kling", 1, aprovacao=5)["status"] == "bloqueado"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+def test_registrar_rejeita_usd_invalido(root, bad):
+    with pytest.raises(ValueError):
+        budget.registrar(_proj(root), "fal_kling", 1, usd=bad, root=root)
+    with pytest.raises(ValueError):
+        budget.registrar(_proj(root), "fal_kling", 1, creditos=bad, root=root)
+
+
+@pytest.mark.parametrize("bad", [0, -2, float("nan"), float("inf")])
+def test_unidades_invalidas(root, bad):
+    with pytest.raises(ValueError):
+        budget.autorizar(root, _proj(root), "fal_kling", bad)
+    with pytest.raises(ValueError):
+        budget.registrar(_proj(root), "fal_kling", bad, root=root)
+
+
+def test_projeto_inexistente(root):
+    with pytest.raises(ValueError, match="projeto não existe"):
+        budget.registrar(root / "typo", "fal_kling", 1, root=root)
+    with pytest.raises(ValueError, match="projeto não existe"):
+        budget.autorizar(root, root / "typo", "fal_kling", 1)
+    assert not (root / "typo").exists()
+
+
+def test_gasto_projeto_ignora_valores_invalidos(root):
+    proj = _proj(root)
+    (proj / "ui").mkdir(exist_ok=True)
+    (proj / "ui" / "costs.jsonl").write_text(
+        '{"usd": NaN}\n{"usd": null}\n123\n[]\n{"usd": Infinity}\n'
+        '{"usd": 1, "creditos": 2}\n', encoding="utf-8")
+    assert budget.gasto_projeto(proj) == {"usd": 1.0, "creditos": 2}
+
+
+def test_saldo_cache_parcial_nao_quebra(root, monkeypatch):
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "")
+    (root / ".ui-runtime").mkdir(exist_ok=True)
+    (root / ".ui-runtime" / "quota.json").write_text(
+        '{"elevenlabs": {"lido_em": 999999999999}}', encoding="utf-8")
+    assert budget.saldo_elevenlabs(root) is None
+    (root / ".ui-runtime" / "quota.json").write_text('[1]', encoding="utf-8")
+    assert budget.saldo_elevenlabs(root) is None
+
+
+def test_saldo_falha_e_cacheada(root, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
+    n = []
+
+    def ruim(key):
+        n.append(1)
+        raise OSError("fora")
+    assert budget.saldo_elevenlabs(root, _fetch=ruim) is None
+    assert budget.saldo_elevenlabs(root, _fetch=ruim) is None
+    assert len(n) == 1
+
+
+def test_cli_erro_json(root):
+    cli = str(Path(budget.__file__))
+    r = subprocess.run([sys.executable, cli, "--root", str(root), "registrar",
+                        str(root / "typo"), "fal_kling", "1"], capture_output=True, text=True)
+    assert r.returncode == 1 and "erro" in json.loads(r.stdout)
+    r = subprocess.run([sys.executable, cli, "--root", str(root), "registrar",
+                        str(_proj(root)), "fal_kling", "1", "--usd", "nan"],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "erro" in json.loads(r.stdout)

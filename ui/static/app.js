@@ -77,7 +77,7 @@ async function loadProjectInner(pid) {
   S.wave = await getJSON('/api/waveform', { id: pid });
   S.globalQueue = await getJSON('/api/global-queue');
   S.activity = await getJSON('/api/activity');
-  S.budget = await getJSON('/api/budget');
+  S.budget = await getJSON('/api/budget').catch(() => null);
   refreshProjectList();   // projeto novo criado pelo Claude aparece sem F5
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
@@ -702,21 +702,32 @@ function openBudgetModal() {
       <h3>Orçamento</h3>
       <div>Mês ${escapeHtml(b.mes || '')}: <b>${fmtUSD(m.usd)}</b> / ${fmtUSD(bb.teto_mensal_usd)} · ElevenLabs ${cota}</div>
       <div>Projeto atual: <b>${fmtUSD((S.proj.custos || {}).usd)}</b> / ${fmtUSD(S.proj.teto_projeto)}</div>
-      <label>Teto mensal (US$) <input type="number" min="0" step="0.5" id="b-mensal" value="${bb.teto_mensal_usd}"></label>
-      <label>Teto padrão por projeto (US$) <input type="number" min="0" step="0.5" id="b-proj" value="${bb.teto_projeto_usd}"></label>
-      <label>Teto deste projeto (US$) <input type="number" min="0" step="0.5" id="b-este" value="${S.proj.teto_projeto}"></label>
-      <label>Pedir aprovação acima de (US$) <input type="number" min="0" step="0.1" id="b-acima" value="${bb.aprovar_acima_usd}"></label>
+      <label>Teto mensal (US$) <input type="number" min="0" step="0.5" id="b-mensal" value="${bb.teto_mensal_usd ?? ''}"></label>
+      <label>Teto padrão por projeto (US$) <input type="number" min="0" step="0.5" id="b-proj" value="${bb.teto_projeto_usd ?? ''}"></label>
+      <label>Teto deste projeto (US$) <input type="number" min="0" step="0.5" id="b-este" value="${S.proj.teto_projeto ?? ''}"></label>
+      <label>Pedir aprovação acima de (US$) <input type="number" min="0" step="0.1" id="b-acima" value="${bb.aprovar_acima_usd ?? ''}"></label>
+      <div id="b-erro" class="error" style="color:#c33"></div>
       <button id="b-save">Salvar</button>
     </div>`;
   el('modal').hidden = false;
+  const inicialEste = el('b-este').value;
   el('b-save').onclick = () => {
     const body = {
       teto_mensal_usd: +el('b-mensal').value,
       teto_projeto_usd: +el('b-proj').value,
       aprovar_acima_usd: +el('b-acima').value,
-      tetos_projeto: { [S.pid]: +el('b-este').value },
     };
-    putJSON('/api/budget', {}, body).then(() => { closeModal(); loadProject(S.pid); });
+    const este = el('b-este').value;
+    if (este !== inicialEste)   // só fixa/remove o teto próprio se o campo mudou
+      body.tetos_projeto = { [S.pid]: este === '' ? null : +este };
+    putJSON('/api/budget', {}, body).then(async r => {
+      if (r && r.ok === false) {
+        const j = await r.json().catch(() => ({}));
+        el('b-erro').textContent = j.detail || 'erro ao salvar';
+        return;
+      }
+      closeModal(); loadProject(S.pid);
+    }).catch(e => { el('b-erro').textContent = String(e); });
   };
 }
 
