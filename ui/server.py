@@ -63,16 +63,24 @@ def video(request: Request, id: str, kind: str = "preview"):
     return FileResponse(path, media_type="video/mp4")
 
 
+def _mtime(p):
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return None
+
+
 @app.get("/api/docs")
 def docs(request: Request, id: str):
     proj = _proj(request, id)
-    return [{"name": p.name, "mtime": p.stat().st_mtime}
-            for p in sorted(proj.glob("*.md"))]
+    return [{"name": p.name, "mtime": m}
+            for p, m in ((p, _mtime(p)) for p in sorted(proj.glob("*.md")))
+            if m is not None]
 
 
 @app.get("/api/doc")
 def doc(request: Request, id: str, name: str):
-    if not DOC_NAME.match(name) or "/" in name or "\\" in name or name.startswith("."):
+    if not DOC_NAME.fullmatch(name) or "/" in name or "\\" in name or name.startswith("."):
         raise HTTPException(400, "nome inválido")
     proj = _proj(request, id)
     path = proj / name
@@ -270,7 +278,7 @@ def _snapshot(proj, root):
             mtimes[key] = (proj / rel).stat().st_mtime
         except OSError:
             mtimes[key] = None
-    mds = [p.stat().st_mtime for p in proj.glob("*.md")]
+    mds = [m for m in map(_mtime, proj.glob("*.md")) if m is not None]
     mtimes["docs"] = max(mds) if mds else None
     for key, rel in (("global_queue", "queue.json"),
                      ("activity", "activity.json"),

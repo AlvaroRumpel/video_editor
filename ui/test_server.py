@@ -269,3 +269,22 @@ def test_events_inclui_docs(client, fake_root):
     r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
     snap = json.loads(r.text.split("data: ", 1)[1].strip())
     assert snap["mtimes"]["docs"] is not None
+
+
+def test_docs_tolera_md_sumido(client, fake_root, monkeypatch):
+    import pathlib
+    proj = fake_root / "edit-fake"
+    (proj / "ok.md").write_text("a", encoding="utf-8")
+    (proj / "sumiu.md").write_text("b", encoding="utf-8")
+    orig = pathlib.Path.stat
+
+    def stat(self, *a, **k):
+        if self.name == "sumiu.md":
+            raise OSError("vanished")
+        return orig(self, *a, **k)
+    monkeypatch.setattr(pathlib.Path, "stat", stat)
+    r = client.get("/api/docs", params={"id": "edit-fake"})
+    assert r.status_code == 200 and [d["name"] for d in r.json()] == ["ok.md"]
+    r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
+    snap = json.loads(r.text.split("data: ", 1)[1].strip())
+    assert snap["mtimes"]["docs"] is not None
