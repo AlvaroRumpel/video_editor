@@ -76,6 +76,20 @@ def test_candidatos_dedupe_e_curto():
             assert inter / min(a["t_out"] - a["t_in"], b["t_out"] - b["t_in"]) <= 0.6 + 1e-9
 
 
+def test_candidatos_espalha_no_tempo():
+    bloco = lambda t0: _words_from(_tr(["uma frase de teste sem gancho nenhum vai"], t0=t0))
+    words = bloco(0.0) + bloco(60.0) + bloco(660.0)
+    c = clips.candidatos(words, n=2, min_s=1, max_s=20)
+    assert [round(x["t_in"]) for x in c] == [0, 660]
+    assert not any("perto" in m for m in c[0]["motivos"])
+
+
+def test_eu_sozinho_nao_e_gancho():
+    words = _words_from(_tr(["eu fiz meu trabalho comigo mesmo hoje"]))
+    _, motivos = clips._score(words, 0, len(words) - 1, 1.0)
+    assert "primeira pessoa" not in motivos
+
+
 def _clips(words, **over):
     """clips.json mínimo com 1 clipe aprovado de ~30 s sentado em palavras."""
     t_in = words[0]["t"] - clips.PAD_IN

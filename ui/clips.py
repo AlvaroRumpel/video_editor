@@ -2,6 +2,7 @@
 heurística, validação do clips.json curado, EDLs por clipe×plataforma e
 render via render.py. Sem FastAPI."""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -45,7 +46,6 @@ def frases(words: list[dict], pausa: float = 0.6) -> list[dict]:
 GANCHO_RE = {
     "pergunta": re.compile(r"\?"),
     "número": re.compile(r"\b\d+([.,]\d+)?\b|\b(mil|milh[ãa]o|milh[õo]es)\b", re.I),
-    "primeira pessoa": re.compile(r"\b(eu|minha|meu|comigo)\b", re.I),
     "absoluto": re.compile(r"\b(sempre|nunca|todo|toda|todos|ningu[ée]m|nada)\b", re.I),
 }
 DEITICO_RE = re.compile(r"\b(isso|esse|essa|aqui|aquilo|ele|ela|disso|desse|dessa)\b", re.I)
@@ -65,7 +65,7 @@ def _score(words, i0, i1, fr_fim_pausa: float) -> tuple[float, list[str]]:
             motivos.append(nome); g += 0.5
     gancho = min(1.0, g)
     fim = words[i1]["w"].endswith(PONT_FIM)
-    fechamento = 1.0 if (fim and fr_fim_pausa >= 0.8) else 0.6 if fim else 0.2
+    fechamento = 1.0 if (fim and fr_fim_pausa >= 0.3) else 0.6 if fim else 0.2
     if fim: motivos.append("fecha em ponto")
     wps = (i1 - i0 + 1) / dur if dur else 0
     densidade = 1.0 if 2.0 <= wps <= 3.5 else max(0.0, 1.0 - abs(wps - 2.75) / 2.75)
@@ -94,15 +94,23 @@ def candidatos(words: list[dict], n: int = 20, min_s: float = 25, max_s: float =
             if a > 0: motivos.insert(0, "pausa antes")
             janelas.append({"t_in": round(words[i0]["t"] - PAD_IN, 3), "t_out": round(words[i1]["e"] + PAD_OUT, 3),
                             "texto": _texto(words, i0, i1), "score": sc, "motivos": motivos})
-    janelas.sort(key=lambda j: -j["score"])
     out = []
-    for j in janelas:
-        dj = j["t_out"] - j["t_in"]
-        if any((min(j["t_out"], o["t_out"]) - max(j["t_in"], o["t_in"])) / min(dj, o["t_out"] - o["t_in"]) > 0.6
-               for o in out):
-            continue
-        out.append(j)
-        if len(out) >= n: break
+    restantes = sorted(janelas, key=lambda j: -j["score"])
+    while restantes and len(out) < n:
+        melhor = None  # (score_eff, j, k)
+        for j in restantes:
+            dj = j["t_out"] - j["t_in"]
+            if any((min(j["t_out"], o["t_out"]) - max(j["t_in"], o["t_in"])) / min(dj, o["t_out"] - o["t_in"]) > 0.6
+                   for o in out):
+                continue
+            k = sum(1 for o in out if abs(o["t_in"] - j["t_in"]) <= 180)
+            eff = j["score"] - 0.05 * k
+            if melhor is None or eff > melhor[0]:
+                melhor = (eff, j, k)
+        if melhor is None: break
+        _, j, k = melhor
+        if k: j["motivos"].append(f"perto de {k} aceitos")
+        out.append(j); restantes.remove(j)
     return out
 
 
@@ -260,7 +268,7 @@ def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
 
 def _run_padrao(cmd):
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          env={**__import__("os").environ, "PYTHONIOENCODING": "utf-8"})
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _run=None) -> dict:
