@@ -111,3 +111,45 @@ def test_mix_trilha_nivel_mais_baixo(video, trilha, tmp_path):
     audio.mix_trilha(video, trilha, a, nivel_db=-18)
     audio.mix_trilha(video, trilha, b, nivel_db=-24)
     assert audio.rms_db(b, 4.2, 4.9, BP100) < audio.rms_db(a, 4.2, 4.9, BP100) - 3
+
+
+@pytest.fixture
+def sfx_dir(tmp_path) -> Path:
+    d = tmp_path / "sfx"; d.mkdir()
+    _ff("-f", "lavfi", "-i", "sine=f=2000:r=48000:d=0.5", "-ac", "2", "-c:a", "pcm_s16le", str(d / "pop.wav"))
+    return d
+
+
+@pytest.fixture
+def video_mudo(tmp_path) -> Path:
+    p = tmp_path / "mudo.mp4"
+    _ff("-f", "lavfi", "-i", "color=c=gray:s=320x240:r=30:d=6",
+        "-c:v", "libx264", "-preset", "ultrafast", "-an", str(p))
+    return p
+
+
+BP2K = "bandpass=f=2000:w=200"
+
+
+def test_mix_sfx_video_mudo(video_mudo, sfx_dir, tmp_path):
+    dst = tmp_path / "sfx.mp4"
+    audio.mix_sfx(video_mudo, [{"t": 2.0, "som": "pop", "ganho_db": -3}], sfx_dir, dst)
+    assert abs(audio.duracao(dst) - 6.0) < 0.1
+    assert audio.rms_db(dst, 2.0, 2.4, BP2K) > audio.rms_db(dst, 0.5, 1.5, BP2K) + 20
+
+
+def test_mix_sfx_video_com_audio_e_cues_em_arquivo(video, sfx_dir, tmp_path):
+    cues = tmp_path / "cues.json"
+    cues.write_text(json.dumps([{"t": 0.2, "som": "pop"}]), encoding="utf-8")
+    dst = tmp_path / "sfx2.mp4"
+    audio.mix_sfx(video, cues, sfx_dir, dst)
+    assert audio.rms_db(dst, 0.2, 0.6, BP2K) > audio.rms_db(dst, 1.0, 1.4, BP2K) + 20
+    assert audio.rms_db(dst, 1.0, 2.0) > -40        # voz original preservada (ligada em 1-2 s)
+
+
+def test_mix_sfx_som_inexistente(video_mudo, sfx_dir, tmp_path, monkeypatch):
+    chamado = []
+    monkeypatch.setattr(audio, "_ff", lambda args: chamado.append(args))
+    with pytest.raises(ValueError, match="nao-existe"):
+        audio.mix_sfx(video_mudo, [{"t": 1, "som": "nao-existe"}], sfx_dir, tmp_path / "x.mp4")
+    assert chamado == []

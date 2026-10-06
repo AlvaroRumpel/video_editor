@@ -83,3 +83,45 @@ def mix_trilha(video: Path, trilha: Path, dst: Path, nivel_db: float = -18.0,
     _ff(["-i", str(video), "-i", str(trilha), "-filter_complex", graph,
          "-map", "0:v", "-map", "[out]", "-c:v", "copy", *AAC, "-movflags", "+faststart", str(dst)])
     return dst
+
+
+def _tem_audio(path: Path) -> bool:
+    r = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "a", "-show_entries",
+                        "stream=index", "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    return bool(r.stdout.strip())
+
+
+def mix_sfx(video: Path, cues, sfx_dir: Path, dst: Path) -> Path:
+    if isinstance(cues, (str, Path)):
+        cues = json.loads(Path(cues).read_text(encoding="utf-8"))
+    if not cues:
+        raise ValueError("cues vazio")
+    entradas = []
+    for c in cues:
+        p = sfx_dir / f"{c['som']}.wav"
+        if not p.exists():
+            raise ValueError(f"SFX não encontrado: {c['som']} ({p})")
+        entradas.append((p, float(c["t"]), float(c.get("ganho_db", 0))))
+    dur = duracao(video)
+    fmt = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+    args = ["-i", str(video)]
+    n_inputs = 1
+    partes = []
+    if _tem_audio(video):
+        partes.append(f"[0:a]{fmt}[base]")
+    else:
+        args += ["-f", "lavfi", "-t", f"{dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+        n_inputs += 1
+        partes.append(f"[1:a]{fmt}[base]")
+    rotulos = ["[base]"]
+    for i, (p, t, g) in enumerate(entradas):
+        args += ["-i", str(p)]
+        ms = int(round(t * 1000))
+        partes.append(f"[{n_inputs}:a]{fmt},adelay={ms}|{ms},volume={g}dB[s{i}]")
+        n_inputs += 1
+        rotulos.append(f"[s{i}]")
+    partes.append("".join(rotulos) + f"amix=inputs={len(rotulos)}:duration=first:normalize=0[out]")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    _ff([*args, "-filter_complex", ";".join(partes), "-map", "0:v", "-map", "[out]",
+         "-c:v", "copy", *AAC, "-movflags", "+faststart", str(dst)])
+    return dst
