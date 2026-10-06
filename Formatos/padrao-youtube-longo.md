@@ -76,10 +76,12 @@ senão o primeiro segmento pede imagem antes do início do arquivo.
 
 ## 0.3 Ruído e limpeza da voz
 
-1. `python ui/audio.py medir-ruido bruto/<nome>.mkv` → anotar em
-   `state.json.audio.ruido_db` (merge; preservar outras chaves).
+1. `python ui/audio.py medir-ruido bruto/<nome>.mkv --track N` → anotar em
+   `state.json.audio.ruido_db` (merge; preservar outras chaves). Usar `--track N` com o
+   mesmo índice do `transcribe.py --audio-track` (bruto OBS: mic costuma ser track 1);
+   sem isso o ffmpeg pega a faixa com mais canais, que pode ser o jogo.
 2. `< -60 dB`: bruto limpo, pular. Senão
-   `python ui/audio.py denoise bruto/<nome>.mkv edit/<proj>/voz_limpa.wav`.
+   `python ui/audio.py denoise bruto/<nome>.mkv edit/<proj>/voz_limpa.wav --track N`.
 3. `> -45 dB`: pedido `waiting_reply` — "ruído de fundo alto (−38 dB); aplicar
    denoise forte (RNNoise)? pode deixar a voz levemente metálica". Sim →
    repetir com `--forte`.
@@ -294,7 +296,9 @@ no ponto mais frágil do vídeo.
 
 Entra **depois** do `final.mp4` pronto e da conferência 6.1 (voz já reconstruída).
 
-1. Guardar `edit/<proj>/final_sem_trilha.mp4` (cópia) — toda remixagem parte dele.
+1. Se `state.audio.trilha` ainda não existe (final.mp4 veio direto do render/recomposite),
+   guardar cópia `edit/<proj>/final_sem_trilha.mp4`; se já existe, NÃO copiar (a cópia limpa já está lá).
+   Toda remixagem parte dele.
 2. Escolher 1 trilha de `assets/music/` pelo tom do vídeo:
 
    | Tom | Trilha |
@@ -307,11 +311,12 @@ Entra **depois** do `final.mp4` pronto e da conferência 6.1 (voz já reconstru�
 
 3. `waiting_reply`: "trilha: sb-Amberlight (calma, piano). responda `ok`,
    `outra: <nome>` ou `gerar: <descrição>`".
-4. `gerar` → ação paga (ver "Orçamento" no CLAUDE.md):
+4. `gerar` → ação paga:
    `python ui/audio.py gerar-musica edit/<proj> "<descrição>, instrumental, sem vocal, loopável" <dur_s> edit/<proj>/trilha_gerada.wav`
-   (exit 2/3 → `waiting_reply` com o motivo; depois `--aprovacao <id>`).
+   `gerar-*` já autoriza e registra no orçamento — NÃO chamar `budget.py autorizar/registrar` por fora. Exit 2/3 → `waiting_reply` com o motivo, depois repetir com `--aprovacao <id>`. 1ª rodada de cada provedor: `python ui/budget.py saldo` antes e depois → anotar `creditos` por unidade em `ui/precos.json`.
 5. `python ui/audio.py mix-trilha edit/<proj>/final_sem_trilha.mp4 <trilha> edit/<proj>/final.mp4`
    (padrão −18 dB, duck −8 dB; "trilha mais baixa/alta" = `--nivel` ±3 e remixar).
+   `--duck` é limitado a 11 dB por `_ratio` (valores maiores valem 11).
 6. `state.json.audio` ← `{trilha, nivel_db, duck_db}` (merge).
 7. Refazer a seção 9 (a mixagem não pode mover a voz).
 
@@ -333,5 +338,7 @@ Entra **depois** do `final.mp4` pronto e da conferência 6.1 (voz já reconstru�
 |---|---|
 | Overlay, legenda, áudio | ~20 min (reaproveita `base_final.mp4` via `recomposite.py`) |
 | Corte, grade, zoom | +40 min (re-extrai os 196 segmentos) |
+
+Após qualquer re-render/recomposite, `final_sem_trilha.mp4` fica velho: apagar e refazer 8.1.
 
 Agrupar pedidos que tocam o corte. Nunca re-transcrever.

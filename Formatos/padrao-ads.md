@@ -46,10 +46,12 @@ Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue
   derivado dos frames dos eventos (ponto dourado = `pop-dourado`, reveal = `whoosh-reveal`,
   pill = `click-pill`, end card = `sting-endcard`, contagem = `tick`, subida = `rise`).
 - Após montar o vídeo mudo: `python ui/audio.py mix-sfx <mudo.mp4> cues.json assets/sfx <com_sfx.mp4>`;
-  só então a trilha (linha **Áudio** abaixo), com a trilha a −20 dB enquanto houver SFX
-  (`sidechaincompress` com os SFX como sidechain).
-- Biblioteca ausente: gerar os 6 sons com `python ui/audio.py gerar-sfx edit/shorts/<proj> "<prompt>" 1.0 assets/sfx/<nome>.wav`
-  — ação paga, uma aprovação única na UI com o custo total das 6 chamadas.
+  só então a trilha (linha **Áudio** abaixo):
+  `python ui/audio.py mix-trilha <com_sfx.mp4> assets/music/<trilha>.mp3 <final.mp4> --nivel -18 --duck -8`
+  — resultado sai a −14 LUFS (padrão do mix-trilha); para os ads a −15 LUFS da linha Áudio,
+  aplicar `loudnorm=I=-15:TP=-1.5:LRA=11` depois, ou aceitar −14.
+- Biblioteca ausente: gerar os 6 sons com `python ui/audio.py gerar-sfx edit/shorts/<proj> "<prompt>" <dur> assets/sfx/<nome>.wav`
+  (`<dur>` da tabela de `assets/sfx/CREDITS.md`) — ação paga, uma aprovação única na UI com o custo total das 6 chamadas.
 
 **Footage do app** (dash.anotus.app):
 - Login de automação: Turnstile bloqueia senha; usar **magic link** via admin API (`edit/shorts/anotus-r8/magic_link.js`, lê `justmind/.env`) e salvar `state.json` (sessão reutilizável).
@@ -62,7 +64,7 @@ Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue
 
 **Áudio**: música de `assets/music/`, `loudnorm=I=-15:TP=-1.5:LRA=11`, fade out 1.2s no fim, aac 192k, `+faststart`. Trilha diferente por vídeo (usadas: Phoenix2026=01, Incredulity=02, Unraveling=03, bed-unraveling=04). Música gerada (quando o briefing pede tom específico): `python ui/audio.py gerar-musica edit/shorts/<proj> "<descrição da descricao>" <dur> edit/shorts/<proj>/trilha_gerada.wav` — ação paga.
 
-> Ação paga (SFX/trilha/vídeo IA, quando houver): seguir "Orçamento" do CLAUDE.md (`budget.py autorizar` antes, `registrar` depois).
+> Ação paga (SFX/música via `gerar-*`): `gerar-*` já autoriza e registra no orçamento — NÃO chamar `budget.py autorizar/registrar` por fora. Exit 2/3 → `waiting_reply` com o motivo, depois repetir com `--aprovacao <id>`. 1ª rodada de cada provedor: `python ui/budget.py saldo` antes e depois → anotar `creditos` por unidade em `ui/precos.json`.
 
 **Duração alvo**: 27-35s.
 
