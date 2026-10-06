@@ -132,6 +132,8 @@ def load_project(root: Path, pid: str) -> dict:
     source_duration = max(
         [tr.get("audio_duration_secs", 0.0)] +
         [r["end"] for r in ranges] or [0.0])
+    import budget  # import local: budget.py importa pipeline
+    b = budget.ler_budget(root)
     return {
         "id": pid,
         "edl": edl,
@@ -144,4 +146,6 @@ def load_project(root: Path, pid: str) -> dict:
         "source_duration": source_duration,
         "has_preview": (proj / "preview.mp4").exists(),
         "has_final": (proj / "final.mp4").exists(),
+        "custos": budget.gasto_projeto(proj),
+        "teto_projeto": float(b["tetos_projeto"].get(pid, b["teto_projeto_usd"])),
     }

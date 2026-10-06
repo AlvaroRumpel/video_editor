@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import budget
 import pipeline
 import waveform as wf
 
@@ -181,9 +182,44 @@ def global_queue(request: Request):
                               [])
 
 
+BUDGET_NUM = ("teto_mensal_usd", "teto_projeto_usd", "aprovar_acima_usd")
+
+
+def _num_ok(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+
+
+@app.get("/api/budget")
+def budget_get(request: Request):
+    root = _root(request)
+    return {"budget": budget.ler_budget(root), "mes": budget._ano_mes_atual(),
+            "gasto_mes": budget.gasto_mes(root),
+            "elevenlabs": budget.saldo_elevenlabs(root)}
+
+
+@app.put("/api/budget")
+def budget_put(request: Request, body: dict):
+    for k in BUDGET_NUM:
+        if k in body and not _num_ok(body[k]):
+            raise HTTPException(400, f"{k} inválido")
+    tp = body.get("tetos_projeto")
+    if tp is not None and (not isinstance(tp, dict)
+                           or not all(_num_ok(v) for v in tp.values())):
+        raise HTTPException(400, "tetos_projeto inválido")
+    path = _root(request) / ".ui-runtime" / "budget.json"
+    cur = pipeline.read_json(path, {})      # reler antes de gravar
+    for k in BUDGET_NUM:
+        if k in body:
+            cur[k] = body[k]
+    if tp is not None:
+        cur.setdefault("tetos_projeto", {}).update(tp)
+    pipeline.atomic_write_json(path, cur)
+    return budget.ler_budget(_root(request))
+
+
 WATCH = {"edl": "edl.json", "queue": "ui/queue.json",
          "state": "ui/state.json", "preview": "preview.mp4",
-         "final": "final.mp4"}
+         "final": "final.mp4", "costs": "ui/costs.jsonl"}
 
 
 def _snapshot(proj, root):
@@ -194,7 +230,8 @@ def _snapshot(proj, root):
         except OSError:
             mtimes[key] = None
     for key, rel in (("global_queue", "queue.json"),
-                     ("activity", "activity.json")):
+                     ("activity", "activity.json"),
+                     ("budget", "budget.json")):
         try:  # fila global + atividade: refletem ao vivo na UI
             mtimes[key] = (root / ".ui-runtime" / rel).stat().st_mtime
         except OSError:

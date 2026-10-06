@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -171,3 +172,45 @@ def test_activity(client, fake_root):
                    '"ts": "2026-09-01T22:00:00+00:00"}', encoding="utf-8")
     a = client.get("/api/activity").json()
     assert a["atual"] == "renderizando 3/5" and a["anterior"] == "cortes"
+
+
+def test_budget_get(client, fake_root, monkeypatch):
+    monkeypatch.setattr(server.budget, "saldo_elevenlabs", lambda root: None)
+    r = client.get("/api/budget")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["budget"]["teto_mensal_usd"] == 30.0
+    assert j["gasto_mes"] == {"usd": 0.0, "creditos": 0}
+    assert "elevenlabs" in j
+
+
+def test_budget_put_merge(client, fake_root):
+    (fake_root / ".ui-runtime").mkdir()
+    (fake_root / ".ui-runtime" / "budget.json").write_text(
+        json.dumps({"tetos_projeto": {"edit-fake": 12}}), encoding="utf-8")
+    r = client.put("/api/budget", json={"teto_mensal_usd": 40})
+    assert r.status_code == 200
+    saved = json.loads((fake_root / ".ui-runtime" / "budget.json").read_text(encoding="utf-8"))
+    assert saved["teto_mensal_usd"] == 40 and saved["tetos_projeto"] == {"edit-fake": 12}
+
+
+def test_budget_put_rejeita_invalido(client, fake_root):
+    assert client.put("/api/budget", json={"teto_mensal_usd": "abc"}).status_code == 400
+    assert client.put("/api/budget", json={"teto_projeto_usd": -1}).status_code == 400
+    assert client.put("/api/budget", json={"tetos_projeto": {"x": "y"}}).status_code == 400
+    assert not (fake_root / ".ui-runtime" / "budget.json").exists()
+
+
+def test_project_tem_custos(client, fake_root):
+    (fake_root / "edit-fake" / "ui").mkdir(exist_ok=True)
+    (fake_root / "edit-fake" / "ui" / "costs.jsonl").write_text(
+        '{"ts":"2099-01-01T00:00:00+00:00","usd":2.5,"creditos":3}\n', encoding="utf-8")
+    j = client.get("/api/project", params={"id": "edit-fake"}).json()
+    assert j["custos"] == {"usd": 2.5, "creditos": 3}
+    assert j["teto_projeto"] == 5.0
+
+
+def test_events_inclui_costs_e_budget(client):
+    r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
+    snap = json.loads(r.text.split("data: ", 1)[1].strip())
+    assert "costs" in snap["mtimes"] and "budget" in snap["mtimes"]
