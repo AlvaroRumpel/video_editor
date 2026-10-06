@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -138,8 +139,13 @@ def _fetch_elevenlabs(key: str, url: str, body: dict) -> bytes:
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"),
         headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"ElevenLabs HTTP {e.code}: {e.read()[:300]!r}") from e
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise RuntimeError(f"ElevenLabs inacessível: {e}") from e
 
 
 def _gerar(root: Path, proj: Path, provedor: str, url: str, body: dict, dst: Path,
@@ -152,14 +158,18 @@ def _gerar(root: Path, proj: Path, provedor: str, url: str, body: dict, dst: Pat
     if not key:
         raise RuntimeError("ELEVENLABS_API_KEY ausente")
     dados = (_fetch or _fetch_elevenlabs)(key, url, body)
+    # fetch ok = créditos já consumidos: registrar antes de converter
+    budget.registrar(proj, provedor, 1, aprovacao=aprovacao, nota=prompt[:80], root=root)
     bruto = dst.with_suffix(dst.suffix + ".bin")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    bruto.write_bytes(dados)
     try:
+        bruto.write_bytes(dados)
         _ff(["-i", str(bruto), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(dst)])
+    except Exception:
+        dst.unlink(missing_ok=True)
+        raise
     finally:
         bruto.unlink(missing_ok=True)
-    budget.registrar(proj, provedor, 1, aprovacao=aprovacao, nota=prompt[:80], root=root)
     return {"status": "ok", "path": str(dst), "estimativa": d["estimativa"]}
 
 
@@ -212,6 +222,6 @@ if __name__ == "__main__":
     ns = ap.parse_args()
     try:
         out, code = _cli(ns, Path(ns.root))
-    except (ValueError, FileNotFoundError, RuntimeError) as e:
+    except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
         print(json.dumps({"erro": str(e)}, ensure_ascii=False)); sys.exit(1)
     print(json.dumps(out, ensure_ascii=False)); sys.exit(code)

@@ -227,3 +227,27 @@ def test_cli_gerar_sfx_projeto_inexistente(root, tmp_path):
                         "gerar-sfx", str(root / "nao-existe"), "x", "1", str(tmp_path / "x.wav")],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "erro" in json.loads(r.stdout)
+
+
+def test_gerar_sfx_conversao_falha_registra_gasto(root, tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "k")
+    monkeypatch.setattr(budget, "saldo_elevenlabs",
+                        lambda *a, **k: {"usados": 0, "limite": 10000, "restante": 10000, "reset_ts": 0})
+    proj, dst = root / "edit-fake", tmp_path / "x.wav"
+    with pytest.raises(RuntimeError):
+        audio.gerar_sfx(root, proj, "x", 1, dst, _fetch=lambda *a: b"not audio")
+    assert not dst.exists()
+    assert budget.gasto_projeto(proj)["creditos"] == 100
+
+
+def test_gerar_sfx_fetch_falha_nao_registra(root, tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "k")
+    monkeypatch.setattr(budget, "saldo_elevenlabs",
+                        lambda *a, **k: {"usados": 0, "limite": 10000, "restante": 10000, "reset_ts": 0})
+    def fetch(*a):
+        raise RuntimeError("ElevenLabs HTTP 429")
+    proj, dst = root / "edit-fake", tmp_path / "x.wav"
+    with pytest.raises(RuntimeError, match="429"):
+        audio.gerar_sfx(root, proj, "x", 1, dst, _fetch=fetch)
+    assert not dst.exists()
+    assert not (proj / "ui" / "costs.jsonl").exists()
