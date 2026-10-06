@@ -135,3 +135,43 @@ def test_snapshot(md, tmp_path):
     idx = json.loads((tmp_path / "fontes" / "index.json").read_text(encoding="utf-8"))
     assert [i["id"] for i in idx] == ["F1", "F2"] and idx[0]["titulo"] == "T"
     assert out == idx
+
+
+import subprocess, sys
+
+
+def _tr(frases):
+    """transcript sintético: cada frase vira palavras com gap 1 s entre frases."""
+    words, t = [], 0.0
+    for f in frases:
+        for w in f.split():
+            words.append({"text": w, "start": t, "end": t + 0.2, "type": "word"}); t += 0.25
+        t += 1.0
+    return {"words": words}
+
+
+def test_extrair_fatos():
+    tr = _tr(["eu acho que vale a pena estudar cedo",
+              "o prazo da apelação é de 15 dias",
+              "isso está no art. 1003 do CPC",
+              "todo recurso precisa de preparo sempre"])
+    out = pesquisa.extrair_fatos(tr)
+    assert [o["gatilho"] for o in out] == ["numero", "lei", "absoluto"]
+    assert out[0]["trecho"].startswith("o prazo") and out[0]["t"] > 0
+
+
+def test_extrair_fatos_vazio():
+    assert pesquisa.extrair_fatos({}) == [] and pesquisa.extrair_fatos({"words": []}) == []
+
+
+def test_cli_validar_e_extrair(md, tmp_path):
+    exe = [sys.executable, str(Path(pesquisa.__file__))]
+    r = subprocess.run([*exe, "--root", str(tmp_path), "validar", str(md), "--sem-rede"],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 1 and json.loads(r.stdout)["ok"] is False
+    trp = tmp_path / "t.json"
+    trp.write_text(json.dumps(_tr(["o prazo é de 15 dias"])), encoding="utf-8")
+    r = subprocess.run([*exe, "extrair-fatos", str(trp)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0 and json.loads(r.stdout)[0]["gatilho"] == "numero"
+    r = subprocess.run([*exe, "validar", str(tmp_path / "nao-existe.md")], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2 and "erro" in json.loads(r.stdout)

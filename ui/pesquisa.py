@@ -3,6 +3,7 @@ snapshot e extração heurística de fatos. Não busca na web — a busca é da
 sessão (WebSearch). Sem FastAPI."""
 import json
 import re
+import sys
 import urllib.error
 import urllib.request
 from datetime import date, datetime
@@ -142,3 +143,51 @@ def snapshot(md_path: Path, dir: Path, _fetch=None) -> list[dict]:
                     "salvo_em": datetime.now().isoformat(timespec="seconds")})
     (dir / "index.json").write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
     return idx
+
+
+GATILHOS = [
+    ("lei", re.compile(r"\b(art\.?|artigo|lei\s*n[ºo.]?|s[úu]mula|inciso|§|par[áa]grafo)\b", re.I)),
+    ("numero", re.compile(r"\b\d+([.,]\d+)?\s*(%|dias?|anos?|meses|horas?|reais|mil|milh[õo]es|vezes)\b", re.I)),
+    ("absoluto", re.compile(r"\b(sempre|nunca|todos?|todas?|proibido|vedado|obrigat[óo]ri[oa])\b", re.I)),
+]
+
+
+def extrair_fatos(tr: dict) -> list[dict]:
+    out = []
+    for ph in pipeline.phrases_from_transcript(tr or {}):
+        for nome, rx in GATILHOS:
+            if rx.search(ph["text"]):
+                out.append({"t": round(ph["start"], 2), "trecho": ph["text"], "gatilho": nome})
+                break
+    return out
+
+
+def _cli(ns, root: Path):
+    if ns.cmd == "validar":
+        fetch = (lambda u, *a: (200, b"")) if ns.sem_rede else None
+        r = validar(Path(ns.md), roteiro=Path(ns.roteiro) if ns.roteiro else None,
+                    fatos=Path(ns.fatos) if ns.fatos else None, root=root, _fetch=fetch)
+        return r, (0 if r["ok"] else 1)
+    if ns.cmd == "snapshot":
+        return snapshot(Path(ns.md), Path(ns.dir)), 0
+    tr = json.loads(Path(ns.transcript).read_text(encoding="utf-8"))
+    return extrair_fatos(tr), 0
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="pesquisa do video_editor")
+    ap.add_argument("--root", default=str(ROOT))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("validar"); p.add_argument("md"); p.add_argument("--roteiro"); p.add_argument("--fatos")
+    p.add_argument("--sem-rede", action="store_true")
+    p = sub.add_parser("snapshot"); p.add_argument("md"); p.add_argument("dir")
+    p = sub.add_parser("extrair-fatos"); p.add_argument("transcript")
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns, Path(ns.root))
+    except Exception as e:   # execução (arquivo ausente, JSON inválido...)
+        print(json.dumps({"erro": f"{type(e).__name__}: {e}"}, ensure_ascii=False)); sys.exit(2)
+    print(json.dumps(out, ensure_ascii=False)); sys.exit(code)
