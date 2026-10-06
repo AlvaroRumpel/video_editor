@@ -18,9 +18,12 @@ Pedido `roteiro` na fila (`target = {tema, duracao_min, publico, nome}`):
    gravando em `edit/<slug>/pesquisa.md`.
 3. `roteiro.md` formato `longo`: estrutura em blocos (abertura, 3–5 blocos,
    fechamento), bullets por bloco com `[F#]`, duração alvo por bloco.
-   `validar --roteiro`.
+   `python ui/pesquisa.py validar edit/<slug>/pesquisa.md --roteiro edit/<slug>/roteiro.md`.
 4. `waiting_reply`: "roteiro pronto — ver Docs. `ok` / `mudar: ...`".
 5. Fim: "grave e crie o projeto com o bruto (Novo vídeo → mesmo nome)".
+   `novo-projeto` com o mesmo nome reaproveita `edit/<slug>/` (mantém
+   pesquisa.md/roteiro.md); renomear o bruto direto para esse nome, sem
+   esperar a transcrição (exceção ao §0.1).
 
 ## 0. Entrega
 
@@ -139,14 +142,15 @@ recomposite.py           → final.mp4                    (overlays + loudnorm)
 
 Depois de `transcribe.py`:
 
-1. `python ui/pesquisa.py extrair-fatos transcripts/<fonte>.json` → trechos
+1. `python ui/pesquisa.py extrair-fatos edit/<proj>/transcripts/<fonte>.json` → trechos
    com número, lei/artigo/súmula ou absoluto (sempre/nunca/todo/vedado).
+   Conferir também números por extenso (quinze dias): a heurística não os pega.
 2. Para cada trecho: buscar fonte `oficial`/`doutrina`; gravar em
-   `pesquisa.md` (achados) e em `fatos.md`:
+   `edit/<proj>/pesquisa.md` (achados) e em `edit/<proj>/fatos.md`:
    `| t (s) | trecho | status | fonte | ação |` com
    `status ∈ {ok, impreciso, errado, sem_fonte}`,
    `ação ∈ {nada, overlay: <texto>, corte}`.
-3. `validar pesquisa.md --fatos fatos.md`.
+3. `python ui/pesquisa.py validar edit/<proj>/pesquisa.md --fatos edit/<proj>/fatos.md`.
 4. Houver `errado`/`impreciso`: `waiting_reply` listando-os com a ação;
    `ok` → overlays (Remotion, texto curto no canto, ≤ 6 palavras) ou cortes
    pelo EDL (regras de palavra). Tudo `ok`: só registrar.

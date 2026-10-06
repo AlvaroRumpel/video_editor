@@ -37,6 +37,8 @@ em vez de sobrescrever o objeto inteiro.
      `Formatos/padrao-ads.md` usando `descricao` + `fontes` como briefing.
    - `roteiro` — `target` = `{tema, duracao_min, publico, nome}`; fila global;
      seguir `padrao-youtube-longo.md` §0.0 (pesquisa → roteiro.md → aprovação).
+     `novo-projeto` com o mesmo nome reaproveita `edit/<slug>/` (mantém
+     pesquisa.md/roteiro.md).
    - `pauta` — `target` = `{marca, mes}`; fila global; seguir `Formatos/pauta.md`.
 4. Pedido grande/ambíguo → `status: "waiting_reply"` + pergunta em
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.

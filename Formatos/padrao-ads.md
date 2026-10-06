@@ -49,7 +49,8 @@ Nada de afirmação factual sem fonte. Busca = WebSearch da sessão (sem custo).
 5. `waiting_reply`: "pesquisa: N achados, M ângulos, R riscos — ver Docs.
    `seguir` / `aprofundar: <o quê>`".
 6. `roteiro.md`: hook (≤ 2 s) → cenas com texto/fala e `[F#]` em toda
-   afirmação factual → CTA → `cues` de SFX. `validar --roteiro roteiro.md`.
+   afirmação factual → CTA → `cues` de SFX. `python ui/pesquisa.py validar edit/shorts/<proj>/pesquisa.md --roteiro edit/shorts/<proj>/roteiro.md`
+   (erro se linha factual sem `[F#]`).
 7. `waiting_reply`: "roteiro pronto — ver Docs. `ok` / `mudar: ...`".
 8. Produção (motion → SFX → trilha).
 
