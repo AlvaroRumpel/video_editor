@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -59,3 +60,16 @@ def test_denoise_leve_reduz_ruido(voz, tmp_path):
     assert out == dst and dst.exists()
     assert abs(audio.duracao(dst) - audio.duracao(voz)) < 0.05
     assert audio.rms_db(dst, 0.0, 1.0) < audio.rms_db(voz, 0.0, 1.0) - 6
+
+
+def test_denoise_forte_escapa_dois_pontos(voz, tmp_path, monkeypatch):
+    modelo = tmp_path / "assets" / "rnnoise" / "std.rnnn"
+    modelo.parent.mkdir(parents=True)
+    modelo.write_bytes(b"x")
+    monkeypatch.setattr(audio, "ROOT", tmp_path)
+    capt = []
+    monkeypatch.setattr(audio, "_ff", lambda args: capt.append(args) or "")
+    audio.denoise(voz, tmp_path / "o.wav", forte=True)
+    af = capt[0][capt[0].index("-af") + 1]
+    assert "\\:" in af
+    assert re.search(r"(?<!\\):", af.split("m=", 1)[1]) is None

@@ -50,7 +50,7 @@ def denoise(src: Path, dst: Path, forte: bool = False) -> Path:
         modelo = ROOT / "assets" / "rnnoise" / "std.rnnn"
         if not modelo.exists():
             raise FileNotFoundError(f"modelo RNNoise ausente: {modelo}")
-        af = f"arnndn=m={modelo.as_posix()}"
+        af = "arnndn=m=" + modelo.as_posix().replace(":", r"\:")
     else:
         af = "afftdn=nf=-25:nt=w"
     dst.parent.mkdir(parents=True, exist_ok=True)
