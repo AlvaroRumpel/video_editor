@@ -104,3 +104,80 @@ def candidatos(words: list[dict], n: int = 20, min_s: float = 25, max_s: float =
         out.append(j)
         if len(out) >= n: break
     return out
+
+
+PLATAFORMAS = {"shorts": (20, 60), "reels": (20, 90), "tiktok": (20, 60)}
+SLUG_RE = re.compile(r"^[a-z0-9-]+$")
+TOL = 0.005
+
+
+def dur_clipe(c: dict) -> float:
+    return sum(float(r["t_out"]) - float(r["t_in"]) for r in c.get("ranges", []))
+
+
+def _aprovados(clips: dict) -> list[dict]:
+    aps = [c for c in clips.get("clipes", []) if c.get("status") == "aprovado"]
+    return sorted(aps, key=lambda c: (-(c.get("nota") or 0), min((float(r["t_in"]) for r in c.get("ranges", [])), default=0)))
+
+
+def _em_palavra(t: float, words, borda: str) -> bool:
+    if borda == "in":
+        return any(abs((t + PAD_IN) - w["t"]) <= TOL for w in words)
+    return any(abs((t - PAD_OUT) - w["e"]) <= TOL for w in words)
+
+
+def _palavras_de(c: dict, words) -> set[str]:
+    out = set()
+    for r in c.get("ranges", []):
+        out |= {f"{w['t']}:{w['w']}" for w in words if w["t"] >= float(r["t_in"]) and w["e"] <= float(r["t_out"])}
+    return out
+
+
+def validar(clips: dict, words: list[dict]) -> dict:
+    erros, avisos, slugs = [], [], set()
+    for c in clips.get("clipes", []):
+        cid = c.get("id", "?")
+        if not SLUG_RE.match(str(c.get("slug", ""))):
+            erros.append(f"{cid}: slug inválido {c.get('slug')!r}")
+        if c.get("slug") in slugs:
+            erros.append(f"{cid}: slug repetido {c['slug']}")
+        slugs.add(c.get("slug"))
+        x = c.get("x", clips.get("x_padrao", 636))
+        if not isinstance(x, int) or x % 2 or not 0 <= x <= 1312:
+            erros.append(f"{cid}: x deve ser par entre 0 e 1312 (x={x})")
+        rs = c.get("ranges") or []
+        if not rs:
+            erros.append(f"{cid}: sem ranges"); continue
+        for r in rs:
+            try:
+                ti, to = float(r["t_in"]), float(r["t_out"])
+            except (KeyError, TypeError, ValueError):
+                erros.append(f"{cid}: range malformado {r}"); continue
+            if to <= ti:
+                erros.append(f"{cid}: t_out ({to}) <= t_in ({ti})"); continue
+            if not _em_palavra(ti, words, "in"):
+                erros.append(f"{cid}: t_in {ti} não está em fronteira de palavra")
+            if not _em_palavra(to, words, "out"):
+                erros.append(f"{cid}: t_out {to} não está em fronteira de palavra")
+        for i in range(len(rs)):
+            for j in range(i + 1, len(rs)):
+                a, b = rs[i], rs[j]
+                if float(a["t_in"]) < float(b["t_out"]) and float(b["t_in"]) < float(a["t_out"]):
+                    erros.append(f"{cid}: ranges {i} e {j} se sobrepõem")
+        d = dur_clipe(c)
+        for p in c.get("plataformas", []):
+            if p not in PLATAFORMAS:
+                erros.append(f"{cid}: plataforma desconhecida {p}"); continue
+            lo, hi = PLATAFORMAS[p]
+            if not lo <= d <= hi:
+                erros.append(f"{cid}: {d:.1f}s fora de {lo}–{hi}s para {p}")
+    aps = _aprovados(clips)
+    meta = int(clips.get("meta_n", 0) or 0)
+    if len(aps) > meta + 2:
+        erros.append(f"{len(aps)} aprovados > meta_n + 2 ({meta + 2})")
+    for i in range(len(aps)):
+        for j in range(i + 1, len(aps)):
+            pa, pb = _palavras_de(aps[i], words), _palavras_de(aps[j], words)
+            if pa and pb and len(pa & pb) / min(len(pa), len(pb)) > 0.5:
+                erros.append(f"{aps[i]['id']} e {aps[j]['id']}: > 50% de palavras em comum")
+    return {"ok": not erros, "erros": erros, "avisos": avisos}

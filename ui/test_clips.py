@@ -74,3 +74,58 @@ def test_candidatos_dedupe_e_curto():
             if a is b: continue
             inter = max(0, min(a["t_out"], b["t_out"]) - max(a["t_in"], b["t_in"]))
             assert inter / min(a["t_out"] - a["t_in"], b["t_out"] - b["t_in"]) <= 0.6 + 1e-9
+
+
+def _clips(words, **over):
+    """clips.json mínimo com 1 clipe aprovado de ~30 s sentado em palavras."""
+    t_in = words[0]["t"] - clips.PAD_IN
+    fim = next(w for w in words if w["e"] - words[0]["t"] >= 30)
+    base = {"fonte": "Export/x.mp4", "meta_n": 3, "x_padrao": 636, "clipes": [
+        {"id": "c01", "slug": "um", "nota": 5, "gancho": "g", "ranges": [{"t_in": t_in, "t_out": fim["e"] + clips.PAD_OUT, "beat": "HOOK"}],
+         "x": 636, "legenda": False, "plataformas": ["shorts"], "status": "aprovado"}]}
+    base["clipes"][0].update(over)
+    return base
+
+
+@pytest.fixture
+def words60():
+    return _words_from(_tr(["palavra " * 9 + "fim."] * 12, gap=0.5))     # ~60 s
+
+
+def test_validar_ok(words60):
+    assert clips.validar(_clips(words60), words60)["ok"]
+
+
+def test_validar_borda_e_duracao(words60):
+    c = _clips(words60); c["clipes"][0]["ranges"][0]["t_in"] += 0.2          # fora da palavra
+    r = clips.validar(c, words60); assert not r["ok"] and any("c01" in e and "palavra" in e for e in r["erros"])
+    c = _clips(words60)
+    c["clipes"][0]["ranges"][0]["t_out"] = c["clipes"][0]["ranges"][0]["t_in"] + 0.0 + 70 + clips.PAD_IN + clips.PAD_OUT
+    c["clipes"][0]["plataformas"] = ["shorts", "reels"]
+    r = clips.validar(c, words60)
+    assert any("shorts" in e and "60" in e for e in r["erros"]) and not any("reels" in e for e in r["erros"])
+
+
+def test_validar_sobreposicao_duplicata_x_meta(words60):
+    c = _clips(words60)
+    r0 = c["clipes"][0]["ranges"][0]
+    c["clipes"][0]["ranges"].append({"t_in": r0["t_in"] + 5, "t_out": r0["t_out"], "beat": "X"})
+    assert any("sobrep" in e for e in clips.validar(c, words60)["erros"])
+    c = _clips(words60)
+    dup = json.loads(json.dumps(c["clipes"][0])); dup["id"] = "c02"; dup["slug"] = "dois"
+    c["clipes"].append(dup)
+    assert any("comum" in e for e in clips.validar(c, words60)["erros"])
+    c = _clips(words60, x=637)
+    assert any("x" in e and "par" in e for e in clips.validar(c, words60)["erros"])
+    c = _clips(words60); c["meta_n"] = 0
+    for k in range(3):
+        d = json.loads(json.dumps(c["clipes"][0])); d["id"] = f"c0{k + 2}"; d["slug"] = f"s{k}"
+        d["ranges"][0]["t_in"] += 0.0; c["clipes"].append(d)
+    assert any("meta" in e for e in clips.validar(c, words60)["erros"])
+
+
+def test_validar_sem_ranges_ou_invertido(words60):
+    c = _clips(words60, ranges=[])
+    r = clips.validar(c, words60); assert not r["ok"] and any("c01" in e and "ranges" in e for e in r["erros"])
+    c = _clips(words60); r0 = c["clipes"][0]["ranges"][0]; r0["t_in"], r0["t_out"] = r0["t_out"], r0["t_in"]
+    r = clips.validar(c, words60); assert any("c01" in e and "t_out" in e for e in r["erros"])
