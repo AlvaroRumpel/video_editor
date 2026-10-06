@@ -1,6 +1,7 @@
 """Áudio: denoise, trilha com ducking, SFX por cues, geração ElevenLabs.
 Sem FastAPI. ffmpeg por subprocess; HTTP por urllib (_fetch injetável)."""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -30,26 +31,27 @@ def duracao(path: Path) -> float:
     return float(json.loads(r.stdout)["format"]["duration"])
 
 
-def rms_db(path: Path, inicio: float, fim: float, filtro: str = "") -> float:
-    """RMS geral (dB) da janela [inicio, fim). `filtro` entra antes do astats."""
-    cadeia = f"atrim={inicio}:{fim},asetpts=PTS-STARTPTS," + (filtro + "," if filtro else "") \
-        + "astats=measure_perchannel=none:measure_overall=RMS_level"
-    err = _ff(["-i", str(path), "-af", cadeia, "-f", "null", "-"])
+def rms_db(path: Path, inicio: float, fim: float, filtro: str = "", track: int = 0) -> float:
+    """RMS geral (dB) da janela [inicio, fim) da faixa de áudio `track`. `filtro` entra antes do astats."""
+    cadeia = (filtro + "," if filtro else "") + "astats=measure_perchannel=none:measure_overall=RMS_level"
+    err = _ff(["-vn", "-ss", f"{inicio}", "-t", f"{fim - inicio}", "-i", str(path),
+               "-map", f"0:a:{track}", "-af", cadeia, "-f", "null", "-"])
     m = re.search(r"RMS level dB:\s*(-?[\d.]+|-inf)", err)
     if not m:
         raise RuntimeError("astats sem RMS: " + err[-400:])
     return -120.0 if m.group(1) == "-inf" else float(m.group(1))
 
 
-def medir_ruido(src: Path) -> float:
-    """RMS (dB) do primeiro trecho silencioso (< -40 dB por >= 0.4 s); sem silêncio, 0-0.5 s."""
-    err = _ff(["-i", str(src), "-af", "silencedetect=n=-40dB:d=0.4", "-f", "null", "-"])
+def medir_ruido(src: Path, track: int = 0) -> float:
+    """RMS (dB) do primeiro trecho silencioso (< -40 dB por >= 0.4 s, nos 2 primeiros min); sem silêncio, 0-0.5 s."""
+    err = _ff(["-vn", "-t", "120", "-i", str(src), "-map", f"0:a:{track}",
+               "-af", "silencedetect=n=-40dB:d=0.4", "-f", "null", "-"])
     m = re.search(r"silence_start:\s*([\d.]+)", err)
     ini = float(m.group(1)) if m else 0.0
-    return rms_db(src, ini, ini + 0.4 if m else 0.5)
+    return rms_db(src, ini, ini + 0.4 if m else 0.5, track=track)
 
 
-def denoise(src: Path, dst: Path, forte: bool = False) -> Path:
+def denoise(src: Path, dst: Path, forte: bool = False, track: int = 0) -> Path:
     if forte:
         modelo = ROOT / "assets" / "rnnoise" / "std.rnnn"
         if not modelo.exists():
@@ -59,7 +61,20 @@ def denoise(src: Path, dst: Path, forte: bool = False) -> Path:
     else:
         af = "afftdn=nf=-25:nt=w"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    _ff(["-i", str(src), "-af", af, "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(dst)])
+    _ff(["-i", str(src), "-map", f"0:a:{track}", "-af", af, "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(dst)])
+    return dst
+
+
+def _atomico(dst: Path, args: list[str]) -> Path:
+    """Encoda em dst.tmp e troca por dst; falha não toca no dst existente."""
+    tmp = dst.with_name(dst.stem + ".tmp" + dst.suffix)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _ff([*args, str(tmp)])
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return dst
 
 
@@ -83,10 +98,8 @@ def mix_trilha(video: Path, trilha: Path, dst: Path, nivel_db: float = -18.0,
         f"[tr][sc]sidechaincompress=threshold=0.05:ratio={_ratio(duck_db):.3f}:attack=200:release=800[duck];"
         f"[voz][duck]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1:LRA=11[out]"
     )
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _ff(["-i", str(video), "-i", str(trilha), "-filter_complex", graph,
-         "-map", "0:v", "-map", "[out]", "-c:v", "copy", *AAC, "-movflags", "+faststart", str(dst)])
-    return dst
+    return _atomico(dst, ["-i", str(video), "-i", str(trilha), "-filter_complex", graph,
+                          "-map", "0:v", "-map", "[out]", "-c:v", "copy", *AAC, "-movflags", "+faststart"])
 
 
 def _tem_audio(path: Path) -> bool:
@@ -102,6 +115,10 @@ def mix_sfx(video: Path, cues, sfx_dir: Path, dst: Path) -> Path:
         raise ValueError("cues vazio")
     entradas = []
     for c in cues:
+        if "t" not in c or "som" not in c:
+            raise ValueError(f"cue sem chave 't' ou 'som': {c}")
+        if float(c["t"]) < 0:
+            raise ValueError(f"cue com t negativo: {c}")
         p = sfx_dir / f"{c['som']}.wav"
         if not p.exists():
             raise ValueError(f"SFX não encontrado: {c['som']} ({p})")
@@ -125,10 +142,8 @@ def mix_sfx(video: Path, cues, sfx_dir: Path, dst: Path) -> Path:
         n_inputs += 1
         rotulos.append(f"[s{i}]")
     partes.append("".join(rotulos) + f"amix=inputs={len(rotulos)}:duration=first:normalize=0[out]")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _ff([*args, "-filter_complex", ";".join(partes), "-map", "0:v", "-map", "[out]",
-         "-c:v", "copy", *AAC, "-movflags", "+faststart", str(dst)])
-    return dst
+    return _atomico(dst, [*args, "-filter_complex", ";".join(partes), "-map", "0:v", "-map", "[out]",
+                          "-c:v", "copy", *AAC, "-movflags", "+faststart"])
 
 
 ELEVEN_SFX_URL = "https://api.elevenlabs.io/v1/sound-generation"
@@ -159,11 +174,12 @@ def _gerar(root: Path, proj: Path, provedor: str, url: str, body: dict, dst: Pat
         raise RuntimeError("ELEVENLABS_API_KEY ausente")
     dados = (_fetch or _fetch_elevenlabs)(key, url, body)
     # fetch ok = créditos já consumidos: registrar antes de converter
-    budget.registrar(proj, provedor, 1, aprovacao=aprovacao, nota=prompt[:80], root=root)
     bruto = dst.with_suffix(dst.suffix + ".bin")
     dst.parent.mkdir(parents=True, exist_ok=True)
+    bruto.write_bytes(dados)       # bytes pagos nunca se perdem, mesmo se registrar falhar
+    # se registrar falhar, o .bin pago fica no disco (não entra no try/finally abaixo)
+    budget.registrar(proj, provedor, 1, aprovacao=aprovacao, nota=prompt[:80], root=root)
     try:
-        bruto.write_bytes(dados)
         _ff(["-i", str(bruto), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(dst)])
     except Exception:
         dst.unlink(missing_ok=True)
@@ -191,9 +207,9 @@ EXIT = {"ok": 0, "precisa_aprovacao": 2, "bloqueado": 3}
 
 def _cli(ns, root: Path):
     if ns.cmd == "medir-ruido":
-        return {"ruido_db": medir_ruido(Path(ns.src))}, 0
+        return {"ruido_db": medir_ruido(Path(ns.src), track=ns.track)}, 0
     if ns.cmd == "denoise":
-        return {"path": str(denoise(Path(ns.src), Path(ns.dst), forte=ns.forte))}, 0
+        return {"path": str(denoise(Path(ns.src), Path(ns.dst), forte=ns.forte, track=ns.track))}, 0
     if ns.cmd == "mix-trilha":
         return {"path": str(mix_trilha(Path(ns.video), Path(ns.trilha), Path(ns.dst),
                                        nivel_db=ns.nivel, duck_db=ns.duck))}, 0
@@ -211,8 +227,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="áudio do video_editor")
     ap.add_argument("--root", default=str(ROOT))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("medir-ruido"); p.add_argument("src")
-    p = sub.add_parser("denoise"); p.add_argument("src"); p.add_argument("dst"); p.add_argument("--forte", action="store_true")
+    p = sub.add_parser("medir-ruido"); p.add_argument("src"); p.add_argument("--track", type=int, default=0)
+    p = sub.add_parser("denoise"); p.add_argument("src"); p.add_argument("dst"); p.add_argument("--forte", action="store_true"); p.add_argument("--track", type=int, default=0)
     p = sub.add_parser("mix-trilha"); p.add_argument("video"); p.add_argument("trilha"); p.add_argument("dst")
     p.add_argument("--nivel", type=float, default=-18.0); p.add_argument("--duck", type=float, default=-8.0)
     p = sub.add_parser("mix-sfx"); p.add_argument("video"); p.add_argument("cues"); p.add_argument("sfx_dir"); p.add_argument("dst")
@@ -222,6 +238,8 @@ if __name__ == "__main__":
     ns = ap.parse_args()
     try:
         out, code = _cli(ns, Path(ns.root))
-    except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
+    except KeyError as e:
+        print(json.dumps({"erro": f"cue sem chave: {e}"}, ensure_ascii=False)); sys.exit(1)
+    except (ValueError, FileNotFoundError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
         print(json.dumps({"erro": str(e)}, ensure_ascii=False)); sys.exit(1)
     print(json.dumps(out, ensure_ascii=False)); sys.exit(code)

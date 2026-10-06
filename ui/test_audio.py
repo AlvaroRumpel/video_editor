@@ -218,14 +218,14 @@ def test_gerar_sfx_bloqueado_nao_busca(root, tmp_path, monkeypatch):
 
 def test_cli_medir_ruido(voz):
     r = subprocess.run([sys.executable, str(Path(audio.__file__)), "medir-ruido", str(voz)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0 and -56 < json.loads(r.stdout)["ruido_db"] < -44
 
 
 def test_cli_gerar_sfx_projeto_inexistente(root, tmp_path):
     r = subprocess.run([sys.executable, str(Path(audio.__file__)), "--root", str(root),
                         "gerar-sfx", str(root / "nao-existe"), "x", "1", str(tmp_path / "x.wav")],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 1 and "erro" in json.loads(r.stdout)
 
 
@@ -251,3 +251,57 @@ def test_gerar_sfx_fetch_falha_nao_registra(root, tmp_path, monkeypatch):
         audio.gerar_sfx(root, proj, "x", 1, dst, _fetch=fetch)
     assert not dst.exists()
     assert not (proj / "ui" / "costs.jsonl").exists()
+
+
+@pytest.fixture
+def duas_faixas(tmp_path, voz) -> Path:
+    """Faixa 0: tom 1 kHz alto contínuo (jogo); faixa 1: a voz (mic)."""
+    p = tmp_path / "obs.mkv"
+    _ff("-f", "lavfi", "-i", "sine=f=1000:r=48000:d=8", "-i", str(voz),
+        "-map", "0:a", "-map", "1:a", "-c:a", "pcm_s16le", str(p))
+    return p
+
+
+def test_medir_ruido_track(duas_faixas, tmp_path):
+    assert -56 < audio.medir_ruido(duas_faixas, track=1) < -44
+    assert audio.medir_ruido(duas_faixas, track=0) > -30
+    dst = tmp_path / "t1.wav"
+    audio.denoise(duas_faixas, dst, track=1)
+    assert audio.rms_db(dst, 0.0, 1.0) < -44
+    assert audio.rms_db(duas_faixas, 0.0, 1.0, track=0) > audio.rms_db(duas_faixas, 0.0, 1.0, track=1) + 30
+
+
+def test_mix_trilha_dst_igual_video(video, trilha):
+    audio.mix_trilha(video, trilha, video)
+    assert audio.rms_db(video, 6.5, 7.5, BP100) > -60
+    assert not video.with_name(video.stem + ".tmp.mp4").exists()
+
+
+def test_mix_trilha_falha_preserva_dst(video, tmp_path):
+    antes = video.read_bytes()
+    with pytest.raises(RuntimeError):
+        audio.mix_trilha(video, tmp_path / "nao-existe.wav", video)
+    assert video.read_bytes() == antes
+    assert not video.with_name(video.stem + ".tmp.mp4").exists()
+
+
+@pytest.mark.parametrize("cue", [{"som": "pop"}, {"t": 1}, {"t": -1, "som": "pop"}])
+def test_mix_sfx_cue_invalido(video_mudo, sfx_dir, tmp_path, monkeypatch, cue):
+    chamado = []
+    monkeypatch.setattr(audio, "_ff", lambda args: chamado.append(args))
+    with pytest.raises(ValueError):
+        audio.mix_sfx(video_mudo, [cue], sfx_dir, tmp_path / "x.mp4")
+    assert chamado == []
+
+
+def test_gerar_sfx_registrar_falha_mantem_bytes(root, tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "k")
+    monkeypatch.setattr(budget, "saldo_elevenlabs",
+                        lambda *a, **k: {"usados": 0, "limite": 10000, "restante": 10000, "reset_ts": 0})
+    def boom(*a, **k):
+        raise OSError("disco")
+    monkeypatch.setattr(budget, "registrar", boom)
+    dst = tmp_path / "x.wav"
+    with pytest.raises(OSError):
+        audio.gerar_sfx(root, root / "edit-fake", "x", 1, dst, _fetch=lambda *a: b"pago")
+    assert dst.with_suffix(".wav.bin").read_bytes() == b"pago"
