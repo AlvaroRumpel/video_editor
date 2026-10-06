@@ -35,6 +35,9 @@ em vez de sobrescrever o objeto inteiro.
      (memória "renomear-bruto"), criar dir de edição, iniciar pipeline.
      Sem bruto (formato ads): criar `edit/shorts/<slug>/` com `ui/`, seguir
      `Formatos/padrao-ads.md` usando `descricao` + `fontes` como briefing.
+   - `roteiro` — `target` = `{tema, duracao_min, publico, nome}`; fila global;
+     seguir `padrao-youtube-longo.md` §0.0 (pesquisa → roteiro.md → aprovação).
+   - `pauta` — `target` = `{marca, mes}`; fila global; seguir `Formatos/pauta.md`.
 4. Pedido grande/ambíguo → `status: "waiting_reply"` + pergunta em
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
    TODA pergunta ao usuário passa por aqui — nunca só no chat: o usuário
@@ -68,6 +71,14 @@ Provedores e preços: `ui/precos.json` (provedor novo = entrada nova antes de
 usar). Transcrição Scribe: registrar `elevenlabs_scribe` com minutos do áudio
 após `transcribe.py`; na primeira rodada, medir `python ui/budget.py saldo`
 antes/depois e anotar `creditos` por minuto em `precos.json`.
+
+## Fontes (pesquisa e roteiro)
+
+Fato citado em roteiro, overlay ou pauta exige `[F#]` em `pesquisa.md` com
+fonte `oficial` ou `doutrina` (`ui/fontes.json`). Blog, vídeo, rede social =
+inspiração de ângulo, nunca fato. `python ui/pesquisa.py validar` antes de
+pedir aprovação; `snapshot` guarda as páginas em `fontes/`. Busca =
+WebSearch/WebFetch da sessão (sem custo, sem orçamento).
 
 ## Regras
 

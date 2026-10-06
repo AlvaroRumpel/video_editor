@@ -34,6 +34,28 @@ Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue
 
 **Copy**: PT-BR, sem travessão (regra do repo), gancho direto nos 2 primeiros segundos, CTA sempre alinhado à estratégia (`justmind/divulgacao/INSTAGRAM.md`): produto no máx. 1 a cada 4 posts; CTA de salvar nos de método.
 
+## Pesquisa e roteiro
+
+Nada de afirmação factual sem fonte. Busca = WebSearch da sessão (sem custo).
+
+1. Ler `descricao` + `fontes` do pedido e a `PAUTA.md` da marca.
+2. 5–15 buscas: fato central; lei/artigo citado (texto no planalto.gov.br);
+   jurisprudência recente (STF/STJ); o que outros postaram sobre o tema
+   (ângulos, só inspiração); perguntas do público.
+3. Escrever `edit/shorts/<proj>/pesquisa.md` no formato do spec
+   (`- [F#] fato — fonte: nome (tipo) — URL — acesso AAAA-MM-DD` + `> trecho`).
+4. `python ui/pesquisa.py validar edit/shorts/<proj>/pesquisa.md` → corrigir
+   até `ok`; `python ui/pesquisa.py snapshot <pesquisa.md> edit/shorts/<proj>/fontes`.
+5. `waiting_reply`: "pesquisa: N achados, M ângulos, R riscos — ver Docs.
+   `seguir` / `aprofundar: <o quê>`".
+6. `roteiro.md`: hook (≤ 2 s) → cenas com texto/fala e `[F#]` em toda
+   afirmação factual → CTA → `cues` de SFX. `validar --roteiro roteiro.md`.
+7. `waiting_reply`: "roteiro pronto — ver Docs. `ok` / `mudar: ...`".
+8. Produção (motion → SFX → trilha).
+
+Fonte aceita para fato: `oficial` ou `doutrina` (`ui/fontes.json`). Blog,
+vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
+
 ## Técnica de produção
 
 **Motion graphics** (100% determinístico, sem GSAP/Remotion):

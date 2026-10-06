@@ -9,6 +9,19 @@ motion graphics, Edge headless para captura de site.
 
 ---
 
+## 0.0 Roteiro antes de gravar (opcional)
+
+Pedido `roteiro` na fila (`target = {tema, duracao_min, publico, nome}`):
+
+1. Criar `edit/<slug>/ui/` (projeto aparece como "não iniciado").
+2. Pesquisa como em `padrao-ads.md` → "Pesquisa e roteiro" (passos 2–5),
+   gravando em `edit/<slug>/pesquisa.md`.
+3. `roteiro.md` formato `longo`: estrutura em blocos (abertura, 3–5 blocos,
+   fechamento), bullets por bloco com `[F#]`, duração alvo por bloco.
+   `validar --roteiro`.
+4. `waiting_reply`: "roteiro pronto — ver Docs. `ok` / `mudar: ...`".
+5. Fim: "grave e crie o projeto com o bruto (Novo vídeo → mesmo nome)".
+
 ## 0. Entrega
 
 | | |
@@ -121,6 +134,23 @@ recomposite.py           → final.mp4                    (overlays + loudnorm)
 8. **Deriva de frame** (§6) — recalcular sempre que o EDL mudar.
 
 ---
+
+## 1.1 Checagem de fatos
+
+Depois de `transcribe.py`:
+
+1. `python ui/pesquisa.py extrair-fatos transcripts/<fonte>.json` → trechos
+   com número, lei/artigo/súmula ou absoluto (sempre/nunca/todo/vedado).
+2. Para cada trecho: buscar fonte `oficial`/`doutrina`; gravar em
+   `pesquisa.md` (achados) e em `fatos.md`:
+   `| t (s) | trecho | status | fonte | ação |` com
+   `status ∈ {ok, impreciso, errado, sem_fonte}`,
+   `ação ∈ {nada, overlay: <texto>, corte}`.
+3. `validar pesquisa.md --fatos fatos.md`.
+4. Houver `errado`/`impreciso`: `waiting_reply` listando-os com a ação;
+   `ok` → overlays (Remotion, texto curto no canto, ≤ 6 palavras) ou cortes
+   pelo EDL (regras de palavra). Tudo `ok`: só registrar.
+5. `state.json.fatos = {"total", "errados", "imprecisos"}` (merge).
 
 ## 2. Corte de fala
 
