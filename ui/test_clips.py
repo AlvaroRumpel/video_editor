@@ -39,3 +39,38 @@ def test_frases_pausa_e_pontuacao():
     tr2 = _tr(["um dois", "tres quatro"], gap=0.7)
     words2 = [{"t": w["start"], "e": w["end"], "w": w["text"]} for w in tr2["words"] if w["type"] == "word"]
     assert len(clips.frases(words2)) == 2                                                   # pausa 0.7 quebra
+
+
+def _words_from(tr):
+    return [{"t": w["start"], "e": w["end"], "w": w["text"]} for w in tr["words"] if w["type"] == "word"]
+
+
+def test_candidatos_acha_trecho_forte():
+    enchimento = ["isso aqui é um detalhe menor que a gente vê depois"] * 6          # ~16 s, dêitico, sem gancho
+    forte = ["Você sabe por que eu perdi 10 mil reais em duas semanas?"] + \
+            ["a resposta é simples e eu vou explicar agora com calma"] * 7 + ["e foi assim que eu aprendi."]
+    tr = _tr(enchimento + forte + enchimento, gap=0.9)
+    words = _words_from(tr)
+    c = clips.candidatos(words, n=5)
+    assert c, "nenhum candidato"
+    top = c[0]
+    assert top["texto"].startswith("Você sabe por que")
+    assert top["texto"].endswith("aprendi.")
+    assert 25 <= top["t_out"] - top["t_in"] <= 60
+    assert "pergunta" in top["motivos"] and "número" in top["motivos"]
+    assert all(25 - 0.2 <= x["t_out"] - x["t_in"] <= 60 + 0.2 for x in c)
+    # bordas com padding sentadas em palavra
+    assert any(abs(top["t_in"] + clips.PAD_IN - w["t"]) < 1e-6 for w in words)
+    assert any(abs(top["t_out"] - clips.PAD_OUT - w["e"]) < 1e-6 for w in words)
+
+
+def test_candidatos_dedupe_e_curto():
+    tr = _tr(["uma frase curta só."], gap=1.0)
+    assert clips.candidatos(_words_from(tr)) == []
+    tr2 = _tr(["frase de teste numero um aqui vai."] * 12, gap=0.7)        # várias janelas sobrepostas
+    c = clips.candidatos(_words_from(tr2), n=20)
+    for a in c:
+        for b in c:
+            if a is b: continue
+            inter = max(0, min(a["t_out"], b["t_out"]) - max(a["t_in"], b["t_in"]))
+            assert inter / min(a["t_out"] - a["t_in"], b["t_out"] - b["t_in"]) <= 0.6 + 1e-9
