@@ -292,3 +292,21 @@ def test_docs_tolera_md_sumido(client, fake_root, monkeypatch):
     r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
     snap = json.loads(r.text.split("data: ", 1)[1].strip())
     assert snap["mtimes"]["docs"] is not None
+
+
+def test_file_png_broll(client, fake_root):
+    d = fake_root / "edit-fake" / "broll"; d.mkdir()
+    (d / "sheet.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    r = client.get("/api/file", params={"id": "edit-fake", "name": "broll/sheet.png"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("image/png")
+    for nome in ("broll/../x.png", "sheet.png", "broll/a.md", "broll/sub/a.png", "broll/x.PNG"):
+        assert client.get("/api/file", params={"id": "edit-fake", "name": nome}).status_code == 400
+    assert client.get("/api/file", params={"id": "edit-fake", "name": "broll/nao.png"}).status_code == 404
+
+
+def test_docs_lista_sheet(client, fake_root):
+    d = fake_root / "edit-fake" / "broll"; d.mkdir()
+    (d / "sheet.png").write_bytes(b"\x89PNG")
+    (fake_root / "edit-fake" / "a.md").write_text("# a", encoding="utf-8")
+    nomes = [x["name"] for x in client.get("/api/docs", params={"id": "edit-fake"}).json()]
+    assert nomes == ["a.md", "broll/sheet.png"]

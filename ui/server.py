@@ -73,9 +73,13 @@ def _mtime(p):
 @app.get("/api/docs")
 def docs(request: Request, id: str):
     proj = _proj(request, id)
-    return [{"name": p.name, "mtime": m}
-            for p, m in ((p, _mtime(p)) for p in sorted(proj.glob("*.md")) if p.suffix == ".md")
+    out = [{"name": p.name, "mtime": m}
+           for p, m in ((p, _mtime(p)) for p in sorted(proj.glob("*.md")) if p.suffix == ".md")
+           if m is not None]
+    out += [{"name": f"broll/{p.name}", "mtime": m}
+            for p, m in ((p, _mtime(p)) for p in sorted((proj / "broll").glob("*.png")))
             if m is not None]
+    return out
 
 
 @app.get("/api/doc")
@@ -89,6 +93,19 @@ def doc(request: Request, id: str, name: str):
     if not path.is_file():
         raise HTTPException(404, "doc não encontrado")
     return {"name": name, "html": md_min.render(path.read_text(encoding="utf-8-sig", errors="replace"))}
+
+
+@app.get("/api/file")
+def file_(request: Request, id: str, name: str):
+    if not FILE_NAME.fullmatch(name):
+        raise HTTPException(400, "nome inválido")
+    proj = _proj(request, id)
+    path = proj / "broll" / name.split("/", 1)[1]
+    if path.resolve().parent != (proj / "broll").resolve():
+        raise HTTPException(400, "nome inválido")
+    if not path.is_file():
+        raise HTTPException(404, "arquivo não encontrado")
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/api/formats")
@@ -109,6 +126,7 @@ def brutos(request: Request):
 HIDDEN_FORMATS = {"thumbnail", "pauta"}  # receitas internas, fora do dropdown
 QUEUE_TYPES = {"instrucao", "render", "borda", "veto", "roteiro", "pauta"}
 DOC_NAME = re.compile(r"^[\w\-. ]+\.md$")
+FILE_NAME = re.compile(r"^broll/[\w\-]+\.png$")
 
 
 def _append_queue(qpath, entry):

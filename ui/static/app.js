@@ -378,7 +378,7 @@ function drawFX(y, h) {
     const x1 = (srcEnd - view.t0) * view.pxPerSec;
     if (x1 < 0 || x0 > layout.cssW) continue;
     const w = Math.max(1, x1 - x0);
-    ctx.fillStyle = 'rgba(79,140,255,0.4)';
+    ctx.fillStyle = (o.file || '').startsWith('broll/out/') ? 'rgba(255,170,60,0.55)' : 'rgba(79,140,255,0.4)';
     ctx.fillRect(x0, oy, w, bandH - 2);
     ctx.fillStyle = '#ccc';
     ctx.fillText(truncateText(o.file || '', w - 4), x0 + 2, oy + 1);
@@ -598,6 +598,7 @@ function renderAll() {
   renderProgress();
   renderBudget();
   renderAudioInfo();
+  renderBrollInfo();
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
 
@@ -704,6 +705,15 @@ function renderAudioInfo() {
   if (a.ruido_db != null) partes.push(`ruído ${Number(a.ruido_db).toFixed(0)} dB`);
   box.textContent = 'áudio: ' + partes.join(' · ');
   box.hidden = !partes.length;
+}
+
+function renderBrollInfo() {
+  const b = S.proj.state && S.proj.state.broll;
+  const box = el('broll-info');
+  if (!b) { box.hidden = true; return; }
+  const fontes = Object.entries(b.fontes || {}).map(([k, v]) => `${k} ${v}`).join(', ');
+  box.textContent = `b-roll: ${b.aprovados ?? 0}/${b.momentos ?? 0} aprovados${fontes ? ' · ' + fontes : ''}`;
+  box.hidden = false;
 }
 
 function openBudgetModal() {
@@ -838,8 +848,12 @@ async function openDocsModal() {
   el('modal').hidden = false;
   const show = async name => {
     S.docsName = name;
-    const d = await getJSON('/api/doc', { id: S.pid, name });
-    el('docs-view').innerHTML = d.html;   // servidor já escapou tudo
+    if (name.endsWith('.png')) {
+      el('docs-view').innerHTML = '<img style="max-width:100%" src="' + api('/api/file', { id: S.pid, name }) + '">';
+    } else {
+      const d = await getJSON('/api/doc', { id: S.pid, name });
+      el('docs-view').innerHTML = d.html;   // servidor já escapou tudo
+    }
     el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
       it.classList.toggle('active', it.dataset.name === name));
   };

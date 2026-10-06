@@ -269,6 +269,32 @@ fallback. Landing page: capturar com
 
 ---
 
+## 5.1 B-roll de stock
+
+Footage/foto de bancos gratuitos sobre a fala, como overlay do EDL. Sem custo;
+só via `ui/stock.py` (licença e crédito ficam registrados).
+
+**Regras de momento:** 6–12 por vídeo; 2–4 s cada; ≥ 20 s entre b-rolls; nunca
+sobre overlay Remotion nem frase de ênfase 1.12; cut-in para ação/lugar,
+janela (slot 1032,190 850×584) para "olha isso", foto Ken Burns quando não há
+vídeo bom. Termo de busca em inglês, concreto ("gavel on desk", não "justice").
+
+1. Ler `transcripts/<fonte>.json` e `fatos.md`; escrever `edit/<proj>/broll.json`
+   (`status: proposto`, `modo`, `termo`, `t_in`/`t_out` na timeline de saída).
+2. Por momento: `python ui/stock.py buscar "<termo>" --tipo video --fontes pexels,pixabay --n 3 --dst edit/<proj>/broll/cand`
+   (foto: `--tipo foto --fontes pexels,unsplash`); copiar `candidatos` para o `broll.json`.
+3. `python ui/stock.py ranquear edit/<proj>/broll.json edit/<proj>` (só reordena se CLIP instalado;
+   senão escolher olhando o sheet).
+4. `python ui/stock.py sheet edit/<proj>/broll.json edit/<proj>/broll/sheet.png edit/<proj>`.
+5. `waiting_reply`: "b-roll: N momentos — ver Docs › broll/sheet.png. responda `ok`,
+   ou `b03:2 b05:não b07:1`". Aplicar: `escolhido = "bNN-k"`, `status = aprovado|vetado`.
+6. `python ui/stock.py preparar edit/<proj>/broll.json edit/<proj>/edl.json edit/<proj>`
+   → `python edit/recomposite.py` (ou render final). Conflito com overlay Remotion = ajustar `t_in/t_out`.
+7. `python ui/stock.py creditos edit/<proj>/broll.json edit/<proj>/creditos.md` → bloco "Para a descrição" no export.
+8. `state.json.broll = {"momentos", "aprovados", "fontes": {...}}` (merge).
+
+Instrução pontual ("b-roll de tribunal no corte 12"): mesmo fluxo com um momento só.
+
 ## 6. Deriva de timeline (a armadilha)
 
 Cada segmento extraído fecha em fronteira de frame, então a saída codificada fica **mais
@@ -363,6 +389,7 @@ Entra **depois** do `final.mp4` pronto e da conferência 6.1 (voz já reconstru�
 5. SRT: último cue fecha junto com a última fala
 6. Grade consistente entre início, meio e fim
 7. Loudness integrada −14 LUFS (ffmpeg loudnorm print_format=json) e correlação cruzada da voz em 3 pontos após a trilha
+8. Overlays de b-roll: um frame no meio de cada um (nada cortado; modo janela não cobre o rosto); creditos.md colado na descrição.
 
 ---
 

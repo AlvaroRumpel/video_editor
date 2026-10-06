@@ -82,6 +82,10 @@ inspiração de ângulo, nunca fato. `python ui/pesquisa.py validar` antes de
 pedir aprovação; `snapshot` guarda as páginas em `fontes/`. Busca =
 WebSearch/WebFetch da sessão (sem custo, sem orçamento).
 
+Footage/foto de terceiros (b-roll) só via `python ui/stock.py` — licença e
+crédito ficam em `broll.json`/`creditos.md`; nunca baixar à mão. Sem custo,
+sem orçamento. Fluxo: `padrao-youtube-longo.md` §5.1.
+
 ## Regras
 
 - Confirmação de estratégia do video-use continua valendo (via waiting_reply).
