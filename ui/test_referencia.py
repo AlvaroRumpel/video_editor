@@ -166,3 +166,76 @@ def test_analisar(video3cortes, tmp_path):
                                      "cortes_por_min", "audio", "sheet", "transcript"}
     assert (a["largura"], a["altura"]) == (540, 960) and (proj / "ref" / "sheet.png").exists()
     assert referencia.analisar(video3cortes, proj)["fala"] is None
+
+
+ROTEIRO = """# Roteiro — teste
+<!-- formato: ads -->
+
+## Hook (≤ 2 s)
+Você perde prazo?
+
+## Cenas
+1. Tela: "Prazo é de 15 dias úteis" [F1]
+   sfx: pop-dourado
+2. Flashcard aparece com a regra
+3. Pergunta na tela: e o recesso?
+
+## CTA
+Teste grátis — link na bio
+"""
+
+
+def test_cenas_de(tmp_path):
+    p = tmp_path / "r.md"; p.write_text(ROTEIRO, encoding="utf-8")
+    c = referencia.cenas_de(p)
+    assert [x["n"] for x in c] == [1, 2, 3]
+    assert c[0]["texto"].startswith('Tela: "Prazo') and c[0]["sfx"] == "pop-dourado" and c[1]["sfx"] is None
+    assert "[F1]" not in c[0]["texto"]
+    p2 = tmp_path / "vazio.md"; p2.write_text("# nada\n", encoding="utf-8")
+    assert referencia.cenas_de(p2) == []
+
+
+def _tem_chromium():
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(); b.close()
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or not _tem_chromium(), reason="sem ffmpeg/chromium")
+def test_animatic(tmp_path):
+    p = tmp_path / "roteiro-A.md"; p.write_text(ROTEIRO, encoding="utf-8")
+    r = referencia.animatic(p, tmp_path / "animatic-A.png")
+    assert r["cenas"] == 3 and (tmp_path / "animatic-A.png").exists()
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                          "-of", "csv=p=0", str(tmp_path / "animatic-A.png")], capture_output=True, text=True).stdout.strip()
+    assert out == "1080,960"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or not _tem_chromium(), reason="sem ffmpeg/chromium")
+def test_animatic_mais_de_8_cenas(tmp_path):
+    md = "## Cenas\n" + "".join(f"{i}. cena {i}\n" for i in range(1, 11))
+    p = tmp_path / "r.md"; p.write_text(md, encoding="utf-8")
+    r = referencia.animatic(p, tmp_path / "a.png")
+    assert r["cenas"] == 8 and any("8" in a for a in r["avisos"])
+
+
+def test_animatic_sem_cenas(tmp_path):
+    p = tmp_path / "r.md"; p.write_text("# x\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="sem cenas"):
+        referencia.animatic(p, tmp_path / "a.png")
+
+
+def test_cli(tmp_path):
+    exe = [sys.executable, str(Path(referencia.__file__))]
+    r = subprocess.run([*exe, "analisar", str(tmp_path / "nao.mp4"), str(tmp_path / "p")], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2 and "erro" in json.loads(r.stdout)
+    p = tmp_path / "r.md"; p.write_text("# x\n", encoding="utf-8")
+    r = subprocess.run([*exe, "animatic", str(p), str(tmp_path / "a.png")], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 1 and "sem cenas" in json.loads(r.stdout)["erro"]
+    src = tmp_path / "v.mp4"; src.write_bytes(b"0")
+    r = subprocess.run([*exe, "baixar", str(src), str(tmp_path / "ref")], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0 and json.loads(r.stdout)["slug"] == "v"

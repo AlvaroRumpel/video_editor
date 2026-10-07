@@ -198,3 +198,101 @@ def analisar(video: Path, proj: Path, transcript_json: Path | None = None) -> di
          "transcript": str(transcript_json) if transcript_json else None}
     pipeline.atomic_write_json(ref / "analise.json", a)
     return a
+
+
+CENA_RE = re.compile(r"^\s*(\d+)\.\s+(.*?)\s*$")
+REF_RE = re.compile(r"\s*\[F\d+\]")
+PALETAS = {"anotus": {"fundo": "#F3F2FA", "tinta": "#2B215C", "acento": "#D4A017", "pill": "#4A3D8F", "serif": "Fraunces, Georgia, serif", "sans": "Inter, 'Segoe UI', sans-serif", "marca": "Anotus"},
+           "neutra": {"fundo": "#F5F5F5", "tinta": "#222222", "acento": "#666666", "pill": "#444444", "serif": "Georgia, serif", "sans": "'Segoe UI', sans-serif", "marca": ""}}
+
+
+def cenas_de(roteiro_md: Path) -> list[dict]:
+    texto = Path(roteiro_md).read_text(encoding="utf-8-sig")
+    out, dentro = [], False
+    for ln in texto.splitlines():
+        if ln.startswith("## "):
+            dentro = ln.strip().lower().startswith("## cenas"); continue
+        if not dentro:
+            continue
+        m = CENA_RE.match(ln)
+        if m:
+            out.append({"n": int(m.group(1)), "texto": REF_RE.sub("", m.group(2)).strip(), "sfx": None}); continue
+        s = ln.strip()
+        if s.lower().startswith("sfx:") and out:
+            out[-1]["sfx"] = s[4:].strip()
+    return out
+
+
+def _html_cena(c: dict, total: int, pal: dict) -> str:
+    import html
+    marca = f"<div class='wm'>{html.escape(pal['marca'])}<span class='dot'></span></div>" if pal["marca"] else ""
+    return f"""<!doctype html><html><head><meta charset='utf-8'><style>
+html,body{{margin:0;width:540px;height:960px;background:{pal['fundo']};font-family:{pal['sans']};}}
+.pill{{position:absolute;top:26px;left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:999px;background:#fff;border:1px solid #B9B3E6;color:{pal['pill']};font-weight:700;font-size:14px}}
+.pill::before{{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:{pal['acento']};margin-right:8px}}
+.txt{{position:absolute;left:40px;right:40px;top:50%;transform:translateY(-50%);font-family:{pal['serif']};font-weight:700;font-size:40px;line-height:1.15;color:{pal['tinta']}}}
+.sfx{{position:absolute;left:40px;bottom:90px;font-size:14px;color:{pal['pill']};opacity:.8}}
+.wm{{position:absolute;bottom:40px;left:50%;transform:translateX(-50%);font-family:{pal['serif']};font-style:italic;font-size:26px;color:{pal['tinta']};opacity:.55}}
+.dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:{pal['acento']};margin-left:2px}}
+</style></head><body>
+<div class='pill'>cena {c['n']} / {total}</div>
+<div class='txt'>{html.escape(c['texto'][:120])}</div>
+{f"<div class='sfx'>sfx: {html.escape(c['sfx'])}</div>" if c.get('sfx') else ''}
+{marca}
+</body></html>"""
+
+
+def animatic(roteiro_md: Path, dst_png: Path, marca: str = "anotus") -> dict:
+    cenas = cenas_de(roteiro_md)
+    if not cenas:
+        raise ValueError("roteiro sem cenas (## Cenas com itens numerados)")
+    avisos = []
+    if len(cenas) > 8:
+        avisos.append(f"{len(cenas)} cenas — animatic usa as 8 primeiras"); cenas = cenas[:8]
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        raise RuntimeError(f"playwright não instalado ({type(e).__name__}): pip install playwright && playwright install chromium")
+    pal = PALETAS.get(marca, PALETAS["neutra"])
+    tmp = Path(dst_png).with_suffix(".cenas"); tmp.mkdir(parents=True, exist_ok=True)
+    pngs = []
+    with sync_playwright() as pw:
+        b = pw.chromium.launch()
+        pg = b.new_context(viewport={"width": 540, "height": 960}, device_scale_factor=2).new_page()
+        for i, c in enumerate(cenas):
+            pg.set_content(_html_cena(c, len(cenas), pal)); pg.wait_for_timeout(100)
+            png = tmp / f"c_{i:02d}.png"; pg.screenshot(path=str(png)); pngs.append(png)
+        b.close()
+    lista = tmp / "lista.txt"
+    lista.write_text("".join(f"file '{p.as_posix()}'\n" for p in pngs), encoding="utf-8")
+    _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", "scale=270:480,tile=4x2:color=black", "-frames:v", "1", str(dst_png)])
+    shutil.rmtree(tmp, ignore_errors=True)
+    return {"png": str(dst_png), "cenas": len(cenas), "avisos": avisos}
+
+
+def _cli(ns):
+    if ns.cmd == "analisar":
+        return analisar(Path(ns.video), Path(ns.proj), Path(ns.transcript) if ns.transcript else None), 0
+    try:
+        if ns.cmd == "baixar":
+            return baixar(ns.origem, Path(ns.dst_dir)), 0
+        return animatic(Path(ns.roteiro), Path(ns.dst), marca=ns.marca), 0
+    except ValueError as e:
+        return {"erro": str(e)}, 1
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="vídeo de referência")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("baixar"); p.add_argument("origem"); p.add_argument("dst_dir")
+    p = sub.add_parser("analisar"); p.add_argument("video"); p.add_argument("proj"); p.add_argument("--transcript")
+    p = sub.add_parser("animatic"); p.add_argument("roteiro"); p.add_argument("dst"); p.add_argument("--marca", default="anotus")
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns)
+    except Exception as e:
+        print(json.dumps({"erro": f"{type(e).__name__}: {e}"}, ensure_ascii=False)); sys.exit(2)
+    print(json.dumps(out, ensure_ascii=False)); sys.exit(code)
