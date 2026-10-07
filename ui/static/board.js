@@ -60,11 +60,18 @@ function boardCard(e, infos, pedido, fora) {
     : e.inicio && e.status === 'andamento' ? `${fmtHora(e.inicio)} · ${fmtDur(e.inicio)}`
     : fmtHora(e.inicio || e.fim);
   const linhas = (infos[e.id] || []).map(t => `<div class="info-line">${escapeHtml(t)}</div>`).join('');
-  const perg = pedido ? `<div class="board-pergunta">
-      <div class="board-q">${escapeHtml(pedido.resultado || pedido.text || '')}</div>
-      <textarea class="board-reply-input" data-pid="${escapeHtml(S.pid)}" data-qid="${pedido.id}" rows="2" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)"></textarea>
-      <button class="board-reply-send" data-qid="${pedido.id}">Enviar</button>
-    </div>` : '';
+  const pergunta = pedido ? escapeHtml(pedido.resultado || pedido.text || '') : '';
+  const perg = !pedido ? ''
+    : FOLHAS.includes(pedido.folha)
+      ? `<div class="board-pergunta">
+          <div class="board-q">${pergunta}</div>
+          <a class="board-folha" href="${hashFor(S.pid, 'aprovacao')}">abrir folha ›</a>
+        </div>`
+      : `<div class="board-pergunta">
+          <div class="board-q">${pergunta}</div>
+          <textarea class="board-reply-input" data-pid="${escapeHtml(S.pid)}" data-qid="${pedido.id}" rows="2" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)"></textarea>
+          <button class="board-reply-send" data-qid="${pedido.id}">Enviar</button>
+        </div>`;
   return `<div class="board-card st-${e.status}" id="card-${escapeHtml(e.id)}">
       <div class="bc-head"><span class="bc-rot">${escapeHtml(e.rotulo)}</span>
         <span class="bc-status">${STATUS_LABEL[e.status] || e.status}</span>

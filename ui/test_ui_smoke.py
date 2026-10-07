@@ -223,3 +223,124 @@ def test_board_falha_sem_duracao_crescente(page, ui_url, fake_root):
     page.wait_for_selector("#card-cortes.st-falha")
     tempo = page.locator("#card-cortes .bc-head .mono.dim").inner_text()
     assert tempo and "·" not in tempo   # só a hora de início
+
+
+def _pedido_folha(proj, folha, qid=9, resultado="aprova?"):
+    (proj / "ui" / "queue.json").write_text(json.dumps([
+        {"id": qid, "status": "waiting_reply", "type": "instrucao", "text": "x",
+         "resultado": resultado, "folha": folha}]), encoding="utf-8")
+
+
+def _broll_fixture(proj):
+    cand = proj / "broll" / "cand"
+    cand.mkdir(parents=True)
+    for n in ("a.mp4", "b.mp4", "c.jpg"):
+        (cand / n).write_bytes(b"x")
+    (proj / "broll.json").write_text(json.dumps({"momentos": [
+        {"id": "b01", "t_in": 42, "t_out": 45, "termo": "gavel", "modo": "cut-in", "status": "proposto",
+         "candidatos": [{"fonte": "pexels", "tipo": "video", "arq": "broll/cand/a.mp4", "dur": 6},
+                        {"fonte": "pixabay", "tipo": "video", "arq": "broll/cand/b.mp4", "dur": 8}]},
+        {"id": "b02", "t_in": 75, "t_out": 78, "termo": "court", "modo": "janela", "status": "proposto",
+         "candidatos": [{"fonte": "pexels", "tipo": "foto", "arq": "broll/cand/c.jpg"}]}]}), encoding="utf-8")
+
+
+def _queue(proj):
+    return json.loads((proj / "ui" / "queue.json").read_text(encoding="utf-8"))
+
+
+def test_folha_broll(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _broll_fixture(proj)
+    _pedido_folha(proj, "broll")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-row")
+    assert page.locator("#tabs a[data-tab=aprovacao]").is_visible()
+    assert page.locator("#fl-resp").inner_text() == "ok"
+    page.click(".fl-row[data-m=b01] .fl-cand[data-k='2']")
+    page.click(".fl-row[data-m=b02] .fl-veto")
+    assert page.locator("#fl-resp").inner_text() == "ok b01:2 b02:não"
+    page.fill("#fl-coment", "valeu")
+    page.click("#fl-enviar")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    q = _queue(proj)
+    assert q[0]["reply"] == "ok b01:2 b02:não\nvaleu" and q[0]["status"] == "pending"
+    assert not page.locator("#tabs a[data-tab=aprovacao]").is_visible()
+
+
+def test_folha_ausente_esconde_aba(page, ui_url):
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_function("location.hash === '#/p/edit-fake/board'")
+    assert not page.locator("#tabs a[data-tab=aprovacao]").is_visible()
+
+
+def test_folha_link_no_board(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _broll_fixture(proj)
+    with (proj / "ui" / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:06:00+00:00", "tipo": "etapa", "etapa": "cortes", "status": "espera"}) + "\n")
+    _pedido_folha(proj, "broll")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes .board-folha")
+    assert page.locator("#card-cortes .board-reply-input").count() == 0
+    page.click("#card-cortes .board-folha")
+    page.wait_for_function("document.body.dataset.tab === 'aprovacao'")
+    page.wait_for_selector(".fl-row")
+
+
+def test_folha_indisponivel(page, ui_url, fake_root):
+    _pedido_folha(fake_root / "edit-fake", "clips")        # sem clips/clips.json
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-erro")
+    txt = page.locator(".fl-erro").inner_text()
+    assert "folha indisponível" in txt and "não encontrado" in txt
+    assert "aprova?" in page.locator("#tab-aprovacao").inner_text()
+
+
+def test_folha_selecao_sobrevive_troca_de_aba(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _broll_fixture(proj)
+    _pedido_folha(proj, "broll")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-row")
+    page.click(".fl-row[data-m=b01] .fl-cand[data-k='2']")
+    page.fill("#fl-coment", "rascunho")
+    page.click("#tabs a[data-tab=custos]")
+    page.wait_for_function("document.body.dataset.tab === 'custos'")
+    (proj / "ui" / "state.json").write_text(json.dumps({"formato": "teste", "x": 1}), encoding="utf-8")   # SSE
+    page.wait_for_timeout(1500)
+    page.click("#tabs a[data-tab=aprovacao]")
+    page.wait_for_function("document.body.dataset.tab === 'aprovacao'")
+    assert page.locator("#fl-resp").inner_text() == "ok b01:2"
+    assert page.locator("#fl-coment").input_value() == "rascunho"
+
+
+def test_folha_some_quando_respondida_pela_fila(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _broll_fixture(proj)
+    _pedido_folha(proj, "broll")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-row")
+    page.fill(".queue-reply-input", "ok")
+    page.click(".queue-reply-send")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    assert _queue(proj)[0]["reply"] == "ok"
+
+
+def test_folha_mesmo_pedido_reaberto_redesenha(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _broll_fixture(proj)
+    _pedido_folha(proj, "broll")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-row")
+    page.click(".fl-row[data-m=b02] .fl-veto")
+    page.click("#fl-enviar")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    b = json.loads((proj / "broll.json").read_text(encoding="utf-8"))
+    b["momentos"] = b["momentos"][:1]                      # Claude refaz o artefato e pergunta de novo
+    (proj / "broll.json").write_text(json.dumps(b), encoding="utf-8")
+    _pedido_folha(proj, "broll", resultado="e agora?")
+    page.wait_for_selector("#tabs a[data-tab=aprovacao]:not([hidden])")
+    page.click("#tabs a[data-tab=aprovacao]")
+    page.wait_for_function("document.querySelectorAll('.fl-row').length === 1")
+    assert page.locator("#fl-resp").inner_text() == "ok"
+    assert "e agora?" in page.locator(".fl-perg").inner_text()

@@ -17,7 +17,8 @@ const putJSON = (path, params, body) =>
 const escapeHtml = s => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const TABS = ['board', 'edicao', 'docs', 'custos'];
+const TABS = ['board', 'edicao', 'aprovacao', 'docs', 'custos'];
+const FOLHAS = ['broll', 'clips', 'conceitos', 'overlays'];   // campo `folha` do pedido waiting_reply
 const STATUS_LABEL = { pendente: 'pendente', andamento: 'em andamento', fim: 'ok',
   espera: 'esperando você', pulada: 'pulada', falha: 'falha' };
 const hashFor = (pid, tab) => `#/p/${encodeURIComponent(pid)}/${tab}`;
@@ -640,6 +641,14 @@ function renderAll() {
     saveTab(S.pid, 'board');
     history.replaceState(null, '', hashFor(S.pid, 'board'));
   }
+  if (!pedidoFolha()) {   // sem folha aberta: esquece a anterior e sai da aba Aprovação
+    esqueceFolha();
+    if (body.dataset.tab === 'aprovacao') {
+      body.dataset.tab = 'board';
+      saveTab(S.pid, 'board');
+      history.replaceState(null, '', hashFor(S.pid, 'board'));
+    }
+  }
   buildTimeMap();
   initTimelineOnce();
   if (S.pid !== lastFitPid) { fitView(); lastFitPid = S.pid; }
@@ -654,6 +663,7 @@ function renderAll() {
   const tab = body.dataset.tab;
   if (tab === 'board') renderBoard();
   if (tab === 'custos') renderCustosTab();
+  if (tab === 'aprovacao') renderFolha();
   if (tab === 'docs' && S.docsPid !== S.pid) { S.docsPid = S.pid; renderDocsTab(); }
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
@@ -670,6 +680,7 @@ function renderTabs() {
     a.href = hashFor(S.pid, a.dataset.tab);
     a.classList.toggle('on', a.dataset.tab === tab);
     a.classList.toggle('off', a.dataset.tab === 'edicao' && !(S.proj && S.proj.has_edl));
+    if (a.dataset.tab === 'aprovacao') a.hidden = !pedidoFolha();
   });
 }
 
@@ -678,6 +689,7 @@ function renderTab(tab, prev) {
   if (tab === 'board') renderBoard();
   else if (tab === 'custos') renderCustosTab();
   else if (tab === 'docs') { S.docsPid = S.pid; renderDocsTab(); }
+  else if (tab === 'aprovacao') { if (pedidoFolha()) renderFolha(); else goTab('board'); }
   else if (tab === 'edicao' && prev !== 'edicao')
     requestAnimationFrame(() => { fitView(); renderTimeline(); });
 }
