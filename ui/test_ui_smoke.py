@@ -344,3 +344,76 @@ def test_folha_mesmo_pedido_reaberto_redesenha(page, ui_url, fake_root):
     page.wait_for_function("document.querySelectorAll('.fl-row').length === 1")
     assert page.locator("#fl-resp").inner_text() == "ok"
     assert "e agora?" in page.locator(".fl-perg").inner_text()
+
+
+def test_folha_clips(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "clips").mkdir()
+    (proj / "clips" / "clips.json").write_text(json.dumps({"x_padrao": 636, "clipes": [
+        {"id": "c01", "slug": "a", "status": "proposto", "nota": 4, "gancho": "Zero inscritos", "x": 636,
+         "legenda": False, "plataformas": ["shorts"], "ranges": [{"t_in": 1, "t_out": 3}]},
+        {"id": "c02", "slug": "b", "status": "proposto", "nota": 3, "gancho": "Canal deletado",
+         "plataformas": ["reels"], "ranges": [{"t_in": 5, "t_out": 7}]},
+        {"id": "c03", "slug": "c", "status": "proposto", "nota": 2, "gancho": "g", "ranges": [{"t_in": 8, "t_out": 9}]}]}),
+        encoding="utf-8")
+    _pedido_folha(proj, "clips")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-clip")
+    assert page.locator("#fl-resp").inner_text() == "ok"
+    page.click(".fl-clip[data-c=c01] [data-nota='3']")
+    page.eval_on_selector(".fl-clip[data-c=c02] .fl-x",
+                          "el => { el.value = 700; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    page.click(".fl-clip[data-c=c02] .fl-legenda")
+    page.click(".fl-clip[data-c=c03] .fl-veto")
+    assert page.locator("#fl-resp").inner_text() == "ok c01:nota 3 c02:x=700 c02:legenda c03:não"
+    assert page.locator(".fl-clip[data-c=c02] .fl-xv").inner_text() == "700"
+    tr = page.eval_on_selector(".fl-clip[data-c=c02] .fl-916 video", "v => v.style.transform")
+    assert tr.startswith("translateX(-")
+    page.click("#fl-enviar")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    assert _queue(proj)[0]["reply"] == "ok c01:nota 3 c02:x=700 c02:legenda c03:não"
+
+
+def test_folha_conceitos(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "animatic-A.png").write_bytes(b"\x89PNG")
+    (proj / "conceitos.json").write_text(json.dumps({"conceitos": [
+        {"id": "A", "ideia": "mesmo mecanismo", "custo": "US$ 0,40", "horas": 2, "animatic": "animatic-A.png"},
+        {"id": "B", "ideia": "mesmo tema", "exige_ia": True},
+        {"id": "C", "ideia": "o contrário"}]}), encoding="utf-8")
+    _pedido_folha(proj, "conceitos")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-col")
+    assert page.locator("#fl-enviar").is_disabled()
+    assert "exige IA" in page.locator(".fl-col[data-cc=B]").inner_text()
+    page.click(".fl-col[data-cc=B] input[name=fl-um]")
+    assert page.locator("#fl-resp").inner_text() == "B"
+    page.click(".fl-varios-cb")
+    page.click(".fl-col[data-cc=C] .fl-mult-cb")
+    page.click(".fl-col[data-cc=A] .fl-mult-cb")
+    assert page.locator("#fl-resp").inner_text() == "produzir: A C"
+    page.fill(".fl-ajuste", "mais curto")
+    assert page.locator("#fl-resp").inner_text() == "ajuste: mais curto"
+    page.click("#fl-enviar")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    assert _queue(proj)[0]["reply"] == "ajuste: mais curto"
+
+
+def test_folha_overlays(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "overlays").mkdir()
+    (proj / "overlays" / "o01.png").write_bytes(b"\x89PNG")
+    (proj / "overlays" / "folha.json").write_text(json.dumps({"overlays": [
+        {"id": "o01", "arquivo": "anim/A.mov", "t": 4, "dur": 2, "png": "overlays/o01.png"},
+        {"id": "o02", "arquivo": "anim/B.mov", "t": 30, "dur": 3, "png": None, "erro": "arquivo do overlay não encontrado"},
+        {"id": "o03", "arquivo": "anim/C.mov", "t": 60, "dur": 1, "png": None}]}), encoding="utf-8")
+    _pedido_folha(proj, "overlays")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-ov")
+    assert "não encontrado" in page.locator(".fl-ov[data-o=o02]").inner_text()
+    page.click(".fl-ov[data-o=o01] .fl-veto")
+    page.fill(".fl-ov[data-o=o03] .fl-otexto", "cor âmbar")
+    assert page.locator("#fl-resp").inner_text() == "ok o01:não o03: cor âmbar"
+    page.click("#fl-enviar")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    assert _queue(proj)[0]["reply"] == "ok o01:não o03: cor âmbar"
