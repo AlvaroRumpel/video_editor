@@ -61,8 +61,9 @@ etapas: roteiro?, transcricao=transcrição, cortes, fatos, visual, audio=áudio
 - `/api/formats` devolve o texto cru (com front-matter): o editor de
   Formatos salva o `content` inteiro via `PUT`, então esconder o
   front-matter o apagaria no próximo salvar.
-- Cada seção da receita correspondente recebe a marca `[etapa: <id>]` no
-  título ou na primeira linha, para o Claude saber quando logar.
+- Logo abaixo do título, cada receita ganha um bloco `> Etapas:` mapeando
+  cada id para as seções da receita (ex.: `cortes = §2`), para o Claude
+  saber quando logar.
 
 Listas iniciais:
 
