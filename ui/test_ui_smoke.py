@@ -194,3 +194,32 @@ def test_board_info_no_card_da_etapa(page, ui_url, fake_root):
     page.wait_for_selector("#card-audio")
     assert "denoise forte" in page.locator("#card-audio").inner_text()
     assert "2 aprovados" in page.locator("#card-outros").inner_text()   # sem etapa candidatos
+
+
+def test_board_rascunho_sobrevive_troca_de_aba(page, ui_url, fake_root):
+    ui = fake_root / "edit-fake" / "ui"
+    with (ui / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:06:00+00:00", "tipo": "etapa", "etapa": "cortes", "status": "espera"}) + "\n")
+    (ui / "queue.json").write_text(json.dumps([
+        {"id": 7, "status": "waiting_reply", "type": "instrucao", "text": "x", "resultado": "?"}]), encoding="utf-8")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes .board-reply-input")
+    page.fill("#card-cortes .board-reply-input", "linha1")
+    page.press("#card-cortes .board-reply-input", "Control+Enter")
+    page.type("#card-cortes .board-reply-input", "linha2")
+    page.click("#tabs a[data-tab=custos]")
+    page.wait_for_function("document.body.dataset.tab === 'custos'")
+    (ui / "state.json").write_text(json.dumps({"formato": "teste", "x": 2}), encoding="utf-8")   # SSE fora do board
+    page.wait_for_timeout(1500)
+    page.click("#tabs a[data-tab=board]")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    assert page.locator("#card-cortes .board-reply-input").input_value() == "linha1\nlinha2"
+
+
+def test_board_falha_sem_duracao_crescente(page, ui_url, fake_root):
+    with (fake_root / "edit-fake" / "ui" / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:06:00+00:00", "tipo": "etapa", "etapa": "cortes", "status": "falha"}) + "\n")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes.st-falha")
+    tempo = page.locator("#card-cortes .bc-head .mono.dim").inner_text()
+    assert tempo and "·" not in tempo   # só a hora de início

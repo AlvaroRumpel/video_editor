@@ -52,15 +52,17 @@ el('stepper').addEventListener('click', e => {
 });
 
 const fmtHora = ts => ts ? new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-const fmtDur = (a, b) => a ? fmtMSS(((b ? new Date(b) : new Date()) - new Date(a)) / 1000) : '';
+const fmtDur = (a, b) => fmtMSS(((b ? new Date(b) : new Date()) - new Date(a)) / 1000);
 
 function boardCard(e, infos, pedido, fora) {
-  const tempo = e.inicio ? `${fmtHora(e.inicio)}${e.fim ? '–' + fmtHora(e.fim) : ''} · ${fmtDur(e.inicio, e.fim)}`
-    : e.fim ? fmtHora(e.fim) : '';
+  // duração só com fim (inicio→fim) ou em andamento (inicio→agora); falha/pulada/espera = só a hora de início
+  const tempo = e.inicio && e.fim ? `${fmtHora(e.inicio)}–${fmtHora(e.fim)} · ${fmtDur(e.inicio, e.fim)}`
+    : e.inicio && e.status === 'andamento' ? `${fmtHora(e.inicio)} · ${fmtDur(e.inicio)}`
+    : fmtHora(e.inicio || e.fim);
   const linhas = (infos[e.id] || []).map(t => `<div class="info-line">${escapeHtml(t)}</div>`).join('');
   const perg = pedido ? `<div class="board-pergunta">
       <div class="board-q">${escapeHtml(pedido.resultado || pedido.text || '')}</div>
-      <textarea class="board-reply-input" data-qid="${pedido.id}" rows="2" placeholder="responder... (Enter envia)"></textarea>
+      <textarea class="board-reply-input" data-pid="${escapeHtml(S.pid)}" data-qid="${pedido.id}" rows="2" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)"></textarea>
       <button class="board-reply-send" data-qid="${pedido.id}">Enviar</button>
     </div>` : '';
   return `<div class="board-card st-${e.status}" id="card-${escapeHtml(e.id)}">
@@ -74,10 +76,16 @@ function boardCard(e, infos, pedido, fora) {
     </div>`;
 }
 
+// rascunhos de resposta por `${pid}:${qid}` — sobrevivem a redesenho e troca de aba
+const boardDrafts = {};
+const draftKey = t => t.dataset.pid + ':' + t.dataset.qid;   // pid gravado no DOM: troca de projeto não mistura
+
 function renderBoard() {
   const box = el('tab-board');
-  const foco = document.activeElement;
-  if (box.contains(foco) && foco.tagName === 'TEXTAREA') return;   // não apagar o que o usuário digita
+  box.querySelectorAll('.board-reply-input').forEach(t => { boardDrafts[draftKey(t)] = t.value; });
+  const ae = document.activeElement;
+  const foco = ae && ae.classList.contains('board-reply-input')
+    ? { k: draftKey(ae), a: ae.selectionStart, b: ae.selectionEnd } : null;
   const q = S.quadro || { etapas: [], fora_da_receita: [], atual: null };
   const st = (S.proj && S.proj.state) || {};
   const ids = new Set(q.etapas.map(e => e.id));
@@ -97,6 +105,11 @@ function renderBoard() {
   if (outros.length) html += `<div class="board-card" id="card-outros"><div class="bc-head"><span class="bc-rot">outros</span></div>` +
     outros.map(t => `<div class="info-line">${escapeHtml(t)}</div>`).join('') + '</div>';
   box.innerHTML = html || '<div class="board-vazio dim">sem etapas — o formato deste projeto não declara etapas</div>';
+  box.querySelectorAll('.board-reply-input').forEach(t => {
+    const k = draftKey(t);
+    if (boardDrafts[k]) t.value = boardDrafts[k];
+    if (foco && foco.k === k) { t.focus(); t.setSelectionRange(foco.a, foco.b); }
+  });
   let alvoScroll = null;
   if (S.scrollTo) { alvoScroll = S.scrollTo; S.scrollTo = null; }
   else if (S.boardScrolled !== S.pid) { S.boardScrolled = S.pid; alvoScroll = q.atual; }
@@ -107,7 +120,8 @@ function renderBoard() {
 function boardReply(input) {
   const text = input.value.trim();
   if (!text) return;
-  input.blur();   // libera a guarda de foco para o redesenho pós-envio
+  delete boardDrafts[draftKey(input)];
+  input.value = '';
   sendReply(+input.dataset.qid, text, 'proj');
 }
 
@@ -116,7 +130,13 @@ el('tab-board').addEventListener('click', e => {
   if (b) boardReply(b.closest('.board-pergunta').querySelector('.board-reply-input'));
 });
 el('tab-board').addEventListener('keydown', e => {
-  if (e.key !== 'Enter' || e.ctrlKey || !e.target.classList.contains('board-reply-input')) return;
+  if (e.key !== 'Enter' || !e.target.classList.contains('board-reply-input')) return;
   e.preventDefault();
-  boardReply(e.target);
+  if (e.ctrlKey) {   // Ctrl+Enter = quebra de linha (como no painel da fila)
+    const ta = e.target, p = ta.selectionStart;
+    ta.value = ta.value.slice(0, p) + '\n' + ta.value.slice(ta.selectionEnd);
+    ta.selectionStart = ta.selectionEnd = p + 1;
+    return;
+  }
+  boardReply(e.target);   // Enter puro = envia
 });
