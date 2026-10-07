@@ -315,7 +315,7 @@ def test_docs_lista_sheet(client, fake_root):
 
 def test_new_project_referencia(client, fake_root):
     r = client.post("/api/new-project", json={"formato": "referencia", "origem": "https://www.youtube.com/shorts/x",
-                                              "marca": "anotus", "nome": "Prazos", "descricao": "briefing"})
+                                              "marca": " Anotus ", "nome": "Prazos", "descricao": "briefing"})
     e = r.json()
     assert e["type"] == "referencia" and e["target"] == {"origem": "https://www.youtube.com/shorts/x", "marca": "anotus",
                                                            "nome": "Prazos", "briefing": "briefing"}

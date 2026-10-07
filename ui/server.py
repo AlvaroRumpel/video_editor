@@ -236,7 +236,7 @@ def new_project(request: Request, body: dict):
         if not origem or not nome:
             raise HTTPException(400, "referência exige origem (URL ou arquivo) e nome")
         return _append_queue(qpath, _make_entry("referencia",
-            {"origem": origem, "marca": body.get("marca", ""), "nome": nome,
+            {"origem": origem, "marca": (body.get("marca") or "anotus").strip().lower(), "nome": nome,
              "briefing": (body.get("descricao") or "").strip()}, f"referência: {nome}"))
     if formato == "pauta":
         if not body.get("marca") or not body.get("mes"):
