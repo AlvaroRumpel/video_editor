@@ -58,6 +58,7 @@ async function route() {
   body.dataset.route = 'project';
   body.dataset.tab = tab;
   saveTab(r.pid, tab);
+  if (tab !== 'edicao') el('player').pause();   // player só toca na aba Edição
   if (S.pid !== r.pid || !S.proj) await loadProject(r.pid);
   else renderTab(tab, prev);
 }
@@ -205,7 +206,8 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey && e.key.toLowerCase() === 'z' && !typing) {
     e.preventDefault(); undoLast();
   }
-  if (e.key === ' ' && !typing) {           // espaço = play/pause
+  const naEdicao = document.body.dataset.route === 'project' && document.body.dataset.tab === 'edicao';
+  if (e.key === ' ' && !typing && naEdicao) {   // espaço = play/pause
     e.preventDefault();
     const p = el('player');
     if (p && p.src) { if (p.paused) p.play(); else p.pause(); }
@@ -634,6 +636,7 @@ function renderAll() {
   const body = document.body;
   if (body.dataset.tab === 'edicao' && !S.proj.has_edl) {   // sem edl.json: Edição desabilitada
     body.dataset.tab = 'board';
+    saveTab(S.pid, 'board');
     history.replaceState(null, '', hashFor(S.pid, 'board'));
   }
   buildTimeMap();
@@ -728,8 +731,7 @@ function sendReply(qid, text, scope) {
 el('queue-panel').addEventListener('click', e => {
   const btn = e.target.closest('.queue-reply-send');
   if (!btn) return;
-  const input = el('queue-panel').querySelector(
-    `.queue-reply-input[data-qid="${btn.dataset.qid}"][data-scope="${btn.dataset.scope}"]`);
+  const input = btn.closest('.queue-reply').querySelector('.queue-reply-input');
   const text = input.value.trim();
   if (text) sendReply(+btn.dataset.qid, text, btn.dataset.scope);
 });

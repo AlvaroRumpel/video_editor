@@ -83,7 +83,9 @@ def test_aba_lembrada_e_edicao_desabilitada(page, ui_url):
 
 
 def test_hash_vazio_vai_para_biblioteca(page, ui_url):
-    page.goto(ui_url + "/", wait_until="domcontentloaded")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_function("document.body.dataset.route === 'project'")
+    page.evaluate("location.hash = '#/'")
     page.wait_for_function("document.body.dataset.route === 'library'")
     assert page.locator("#library-view").is_visible()
     assert not page.locator("#project-view").is_visible()
