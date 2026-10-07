@@ -130,8 +130,8 @@ def aplicar(textos_json, origem, destino) -> dict:
     if faltam:
         raise ValueError(f"textos sem tradução: {', '.join(faltam)}")
     origem, destino = Path(origem).resolve(), Path(destino).resolve()
-    if destino == origem or destino.is_relative_to(origem):
-        raise ValueError("destino não pode ser a origem nem ficar dentro dela")
+    if destino.is_relative_to(origem) or origem.is_relative_to(destino):
+        raise ValueError("destino não pode ser a origem, ficar dentro dela nem contê-la")
     if destino.is_dir():
         shutil.rmtree(destino)
     if origem.is_dir():

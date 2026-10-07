@@ -110,7 +110,7 @@ def test_aplicar_destino_perigoso(tmp_path):
     saida = tmp_path / "textos.json"
     localiza.extrair([src / "goat.tsx"], saida)
     _traduz(saida, {})
-    for destino in (src, src / "sub"):
+    for destino in (src, src / "sub", tmp_path):
         with pytest.raises(ValueError, match="destino"):
             localiza.aplicar(saida, src, destino)
     assert (src / "goat.tsx").read_text(encoding="utf-8") == TSX
