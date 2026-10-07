@@ -4,12 +4,18 @@ Entrada: `target = {origem, marca, nome, briefing}`. Projeto: `edit/shorts/<slug
 Referência é inspiração de **mecanismo** (ritmo, estrutura, gancho), nunca cópia
 de texto, visual ou música. `conceitos.md` registra URL e autor.
 
+0. Criar `edit/shorts/<slug-do-nome>/ui/` e `ui/state.json` com `{"formato": "padrao-ads", "ref": {"conceitos": 0}}`
+   (merge se existir) — `budget.py autorizar` exige o dir; a UI só lista projetos com `ui/`.
 1. `python ui/referencia.py baixar "<origem>" bruto/ref` → `bruto/ref/<slug>.mp4` + `.json`.
    Exit 2 com "baixe à mão" (URL com login, ex.: Instagram) → pedir pela fila (`waiting_reply`) que o
    usuário coloque o arquivo em `bruto/ref/` e passe o nome.
-2. Transcrição (paga): `python ui/budget.py autorizar edit/shorts/<proj> elevenlabs_scribe <minutos>`
+2. Transcrição (paga): minutos = `ffprobe -v error -show_entries format=duration -of csv=p=0 bruto/ref/<slug>.mp4`
+   ÷ 60, arredondado pra cima (`dur` é null pra arquivo local) →
+   `python ui/budget.py autorizar edit/shorts/<proj> elevenlabs_scribe <minutos>`
    → `python video-use/helpers/transcribe.py bruto/ref/<slug>.mp4 --edit-dir edit/shorts/<proj>`
    → `python ui/budget.py registrar ...`.
+   Se o orçamento for negado ou o áudio for só música (transcribe aborta), rodar o passo 3 sem
+   `--transcript` (`fala: null`) e registrar isso no `conceitos.md`.
 3. `python ui/referencia.py analisar bruto/ref/<slug>.mp4 edit/shorts/<proj> --transcript edit/shorts/<proj>/transcripts/<slug>.json`.
 4. Ler `ref/sheet.png` (texto na tela, enquadramento, cor), `ref/analise.json`, o briefing e
    `edit/shorts/<marca>/PAUTA.md` → `conceitos.md` no formato do spec (tabela A/B/C: ideia ·
