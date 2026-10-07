@@ -658,3 +658,22 @@ body[data-tab="aprovacao"] #tab-aprovacao { display: flex; flex-direction: colum
 .conf-alta { color: var(--ok); }
 .conf-media { color: var(--accent); }
 .conf-baixa { color: var(--fail); }
+
+/* ---- linha do tempo ---- */
+body[data-tab="linha"] #tab-linha { display: flex; flex-direction: column; }
+#tab-linha { padding: 0; }
+.linha-topo { padding: 10px 14px; border-bottom: 1px solid var(--border); display: grid; gap: 8px; flex-shrink: 0; }
+.linha-ctl { display: flex; gap: 8px; align-items: center; }
+#linha-scrub { flex: 1; accent-color: var(--accent); }
+#linha-custo { color: var(--accent); min-width: 150px; text-align: right; }
+.linha-mini { display: flex; gap: 3px; }
+.linha-mini .step.atual { outline: 1px solid var(--accent); }
+.linha-filtros { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.linha-lista { list-style: none; margin: 0; padding: 6px 14px 20px; overflow: auto; flex: 1 1 0; min-height: 0; }
+.linha-item { display: grid; grid-template-columns: 52px 18px 1fr; gap: 6px; padding: 4px 6px; border-radius: 5px; cursor: pointer; }
+.linha-item:hover { background: var(--panel); }
+.linha-item.cur { background: rgba(240, 178, 74, .12); outline: 1px solid rgba(240, 178, 74, .4); }
+.linha-ico { text-align: center; color: var(--text-dim); }
+.lt-decisao .linha-ico { color: var(--accent); }
+.lt-pergunta .linha-ico, .lt-resposta .linha-ico { color: var(--ok); }
+.linha-vazio { padding: 30px 14px; }

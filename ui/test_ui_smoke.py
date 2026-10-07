@@ -451,3 +451,68 @@ def test_board_decisao_expandida_sobrevive_reload(page, ui_url, fake_root):
     (proj / "ui" / "state.json").write_text(json.dumps({"formato": "teste", "x": 2}), encoding="utf-8")   # SSE
     page.wait_for_timeout(2000)
     assert page.locator("#card-cortes .dec-mot").is_visible()
+
+
+def _linha_fixture(fake_root):
+    proj = fake_root / "edit-fake"
+    _decisao_raw(proj, "2026-10-07T10:06:00+00:00", "corte", "tirar gaguejo", etapa="cortes")
+    (proj / "ui" / "costs.jsonl").write_text(json.dumps(
+        {"ts": "2026-10-07T10:07:00+00:00", "provedor": "elevenlabs_scribe", "usd": 0.5, "creditos": 0}) + "\n",
+        encoding="utf-8")
+    with (proj / "ui" / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:08:00+00:00", "tipo": "resposta", "qid": 1, "texto": "ok"}) + "\n")
+    return proj
+
+
+def _scrub(page, v):
+    page.eval_on_selector("#linha-scrub",
+                          f"el => {{ el.value = {v}; el.dispatchEvent(new Event('input', {{bubbles: true}})); }}")
+
+
+def test_linha_replay(page, ui_url, fake_root):
+    _linha_fixture(fake_root)     # eventos: transcricao fim 10:00, cortes inicio 10:05, decisão 10:06, custo 10:07, resposta 10:08
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    assert page.locator(".linha-item").count() == 5
+    _scrub(page, 0)
+    assert "st-pendente" in page.locator("#linha-mini .step").nth(1).get_attribute("class")
+    assert page.locator("#linha-custo").inner_text() == "acumulado US$ 0.00"
+    _scrub(page, 4)
+    assert "st-andamento" in page.locator("#linha-mini .step").nth(1).get_attribute("class")
+    assert page.locator("#linha-custo").inner_text() == "acumulado US$ 0.50"
+    assert "cur" in page.locator(".linha-item[data-k='4']").get_attribute("class")
+    page.click(".linha-item[data-k='2']")
+    assert page.locator("#linha-scrub").input_value() == "2"
+    _scrub(page, 0)
+    page.click("#linha-play")
+    page.wait_for_function("document.querySelector('#linha-scrub').value === '4'", timeout=6000)
+    page.wait_for_function("document.querySelector('#linha-play').textContent === '▶'", timeout=3000)   # parou no fim
+
+
+def test_linha_filtros(page, ui_url, fake_root):
+    _linha_fixture(fake_root)
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    for t in ("etapa", "pergunta", "resposta", "custo"):
+        page.click(f".linha-filtros [data-tipo={t}]")
+    page.wait_for_function("document.querySelectorAll('.linha-item').length === 1")
+    assert "tirar gaguejo" in page.locator(".linha-item").inner_text()
+    assert page.locator(".linha-filtros [data-assunto=corte]").is_visible()
+
+
+def test_linha_filtro_vazio(page, ui_url, fake_root):
+    _linha_fixture(fake_root)
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    for t in ("etapa", "decisao", "pergunta", "resposta", "custo"):
+        page.click(f".linha-filtros [data-tipo={t}]")
+    page.wait_for_function("document.querySelectorAll('.linha-item').length === 0")
+    assert page.locator("#linha-scrub").is_disabled()
+    page.click("#linha-play")       # sem eventos visíveis: não quebra
+    assert page.locator("#linha-play").inner_text() == "▶"
+
+
+def test_linha_sem_historico(page, ui_url):
+    page.goto(ui_url + "/#/p/edit-raw/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-vazio")
+    assert "sem histórico" in page.locator("#tab-linha").inner_text()

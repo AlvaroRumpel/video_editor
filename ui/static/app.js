@@ -17,7 +17,7 @@ const putJSON = (path, params, body) =>
 const escapeHtml = s => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const TABS = ['board', 'edicao', 'aprovacao', 'docs', 'custos'];
+const TABS = ['board', 'edicao', 'aprovacao', 'docs', 'custos', 'linha'];
 const FOLHAS = ['broll', 'clips', 'conceitos', 'overlays'];   // campo `folha` do pedido waiting_reply
 const STATUS_LABEL = { pendente: 'pendente', andamento: 'em andamento', fim: 'ok',
   espera: 'esperando você', pulada: 'pulada', falha: 'falha' };
@@ -664,6 +664,7 @@ function renderAll() {
   if (tab === 'board') renderBoard();
   if (tab === 'custos') renderCustosTab();
   if (tab === 'aprovacao') renderFolha();
+  if (tab === 'linha') renderLinha(true);
   if (tab === 'docs' && S.docsPid !== S.pid) { S.docsPid = S.pid; renderDocsTab(); }
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
@@ -688,6 +689,7 @@ function renderTab(tab, prev) {
   renderTabs();
   if (tab === 'board') renderBoard();
   else if (tab === 'custos') renderCustosTab();
+  else if (tab === 'linha') renderLinha(true);
   else if (tab === 'docs') { S.docsPid = S.pid; renderDocsTab(); }
   else if (tab === 'aprovacao') { if (pedidoFolha()) renderFolha(); else goTab('board'); }
   else if (tab === 'edicao' && prev !== 'edicao')
