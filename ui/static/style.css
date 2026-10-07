@@ -556,3 +556,31 @@ body[data-tab="edicao"] #tab-edicao { display: grid; grid-template-columns: 1fr 
 .lib-dots i.st-pulada { background: #2a2a30; opacity: .4; }
 .lib-atual { font-size: 12px; }
 .lib-vazio { padding: 40px; }
+
+/* ---- stepper + board ---- */
+.step { flex: 1 1 0; min-width: 70px; padding: 5px 6px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--panel-2); color: var(--text-dim); border: 1px solid transparent; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.step.st-fim { background: #16261c; color: var(--ok); }
+.step.st-andamento { background: #2c2210; color: var(--accent); box-shadow: 0 0 0 1px rgba(240, 178, 74, .35), 0 0 12px rgba(240, 178, 74, .18); }
+.step.st-espera { background: transparent; color: var(--accent); border-color: var(--accent); }
+.step.st-falha { background: #2a1414; color: var(--fail); }
+.step.st-pulada { text-decoration: line-through; opacity: .5; }
+.step-tag { font-size: 11px; color: var(--text-dim); padding: 0 8px; }
+
+.board-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: grid; gap: 6px; }
+.board-card.st-andamento { border-color: rgba(240, 178, 74, .45); }
+.board-card.st-espera { border-color: var(--accent); }
+.board-card.st-falha { border-color: rgba(224, 82, 82, .5); }
+.board-card.st-pendente, .board-card.st-pulada { opacity: .6; }
+.bc-head { display: flex; gap: 8px; align-items: baseline; }
+.bc-head .spacer { flex: 1; }
+.bc-rot { font-weight: 600; }
+.bc-status { font-size: 11px; color: var(--text-dim); }
+.board-card.st-fim .bc-status { color: var(--ok); }
+.board-card.st-andamento .bc-status, .board-card.st-espera .bc-status { color: var(--accent); }
+.board-card.st-falha .bc-status { color: var(--fail); }
+.bc-nota { color: var(--text-dim); }
+.board-pergunta { display: grid; gap: 6px; background: rgba(240, 178, 74, .06); border-radius: 6px; padding: 8px; }
+.board-pergunta textarea { resize: vertical; padding: 6px; }
+.board-pergunta button { justify-self: start; }
+.board-vazio { padding: 30px 0; }

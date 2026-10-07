@@ -138,3 +138,59 @@ def test_biblioteca_poll_preserva_rascunho_de_resposta(page, ui_url, fake_root):
     page.wait_for_timeout(500)
     assert page.input_value(".queue-reply-input") == "rascunho"
     assert page.evaluate("document.activeElement.classList.contains('queue-reply-input')")
+
+
+def test_stepper_e_board(page, ui_url):
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#stepper .step")
+    steps = page.locator("#stepper .step")
+    assert steps.count() == 3
+    assert "st-fim" in steps.nth(0).get_attribute("class")
+    assert "st-andamento" in steps.nth(1).get_attribute("class")
+    assert page.locator("#card-cortes").is_visible()
+    page.click("#tabs a[data-tab=custos]")
+    page.wait_for_function("document.body.dataset.tab === 'custos'")
+    steps.nth(2).click()
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    assert page.locator("#card-render").is_visible()
+
+
+def test_board_espera_mostra_pedido(page, ui_url, fake_root):
+    ui = fake_root / "edit-fake" / "ui"
+    with (ui / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:06:00+00:00", "tipo": "etapa", "etapa": "cortes", "status": "espera"}) + "\n")
+    (ui / "queue.json").write_text(json.dumps([
+        {"id": 7, "status": "waiting_reply", "type": "instrucao", "text": "x", "resultado": "aprova os cortes?"}]), encoding="utf-8")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes .board-pergunta")
+    assert "aprova os cortes?" in page.locator("#card-cortes").inner_text()
+    page.fill("#card-cortes .board-reply-input", "ok")
+    page.click("#card-cortes .board-reply-send")
+    page.wait_for_function("!document.querySelector('#card-cortes .board-reply-input')")
+    q = json.loads((ui / "queue.json").read_text(encoding="utf-8"))
+    assert q[0]["reply"] == "ok" and q[0]["status"] == "pending"
+
+
+def test_board_reply_sobrevive_reload(page, ui_url, fake_root):
+    ui = fake_root / "edit-fake" / "ui"
+    with (ui / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:06:00+00:00", "tipo": "etapa", "etapa": "cortes", "status": "espera"}) + "\n")
+    (ui / "queue.json").write_text(json.dumps([
+        {"id": 7, "status": "waiting_reply", "type": "instrucao", "text": "x", "resultado": "?"}]), encoding="utf-8")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes .board-reply-input")
+    page.fill("#card-cortes .board-reply-input", "digitando")
+    (ui / "state.json").write_text(json.dumps({"formato": "teste", "x": 1}), encoding="utf-8")   # dispara SSE
+    page.wait_for_timeout(2500)
+    assert page.locator("#card-cortes .board-reply-input").input_value() == "digitando"
+
+
+def test_board_info_no_card_da_etapa(page, ui_url, fake_root):
+    (fake_root / "Formatos" / "teste.md").write_text(
+        "---\netapas: transcricao, audio, cortes\n---\n", encoding="utf-8")
+    (fake_root / "edit-fake" / "ui" / "state.json").write_text(json.dumps(
+        {"formato": "teste", "audio": {"denoise": "forte"}, "clips": {"aprovados": [1, 2]}}), encoding="utf-8")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-audio")
+    assert "denoise forte" in page.locator("#card-audio").inner_text()
+    assert "2 aprovados" in page.locator("#card-outros").inner_text()   # sem etapa candidatos
