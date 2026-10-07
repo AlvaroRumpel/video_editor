@@ -259,3 +259,121 @@ def test_receitas_reais_tem_mapa_de_etapas():
     for formato in ESPERADO:
         txt = (pipeline.ROOT / "Formatos" / f"{formato}.md").read_text(encoding="utf-8")
         assert "> Etapas" in txt, formato
+
+
+UTC = timezone.utc
+
+
+def _linha_raw(proj, obj):
+    with (proj / "ui" / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write((obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)) + "\n")
+
+
+def test_registrar_decisao_valida(root):
+    proj = _proj(root)
+    d = eventos.registrar_decisao(proj, "trilha", "Phoenix2026", etapa="cortes", alternativas=["A", "B"],
+                                  motivo="calma", custo_usd=0.4, confianca="alta", root=root)
+    assert d["tipo"] == "decisao" and d["assunto"] == "trilha" and d["escolha"] == "Phoenix2026"
+    assert d["alternativas"] == ["A", "B"] and d["motivo"] == "calma" and d["etapa"] == "cortes"
+    assert d["custo_usd"] == 0.4 and d["confianca"] == "alta"
+    assert datetime.fromisoformat(d["ts"]).tzinfo is not None
+    gravada = json.loads((proj / "ui" / "eventos.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert gravada == d
+
+
+def test_registrar_decisao_minima(root):
+    d = eventos.registrar_decisao(_proj(root), "outro", "  x  ", root=root)
+    assert d["escolha"] == "x" and d["alternativas"] == [] and d["motivo"] == ""
+    assert "etapa" not in d and "custo_usd" not in d and "confianca" not in d
+
+
+@pytest.mark.parametrize("kw", [
+    {"assunto": "nada"}, {"escolha": "   "}, {"etapa": "inventada"}, {"confianca": "talvez"},
+    {"custo_usd": float("nan")}, {"custo_usd": -1}, {"custo_usd": True}, {"custo_usd": "x"},
+])
+def test_registrar_decisao_invalida(root, kw):
+    args = {"assunto": "trilha", "escolha": "x", **kw}
+    assunto, escolha = args.pop("assunto"), args.pop("escolha")
+    with pytest.raises(ValueError):
+        eventos.registrar_decisao(_proj(root), assunto, escolha, root=root, **args)
+    assert not (_proj(root) / "ui" / "eventos.jsonl").exists()
+
+
+def test_registrar_decisao_etapa_em_formato_sem_etapas(root):
+    proj = _proj(root)
+    (proj / "ui" / "state.json").write_text(json.dumps({"formato": "padrao-youtube"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="etapa"):
+        eventos.registrar_decisao(proj, "corte", "x", etapa="cortes", root=root)
+    eventos.registrar_decisao(proj, "corte", "x", root=root)   # sem etapa: ok
+
+
+def test_registrar_decisao_projeto_inexistente(root):
+    with pytest.raises(ValueError, match="projeto"):
+        eventos.registrar_decisao(root / "nao-tem", "trilha", "x", root=root)
+
+
+def test_registrar_resposta(root):
+    proj = _proj(root)
+    r = eventos.registrar_resposta(proj, 7, "ok b01:2")
+    assert r["tipo"] == "resposta" and r["qid"] == 7 and r["texto"] == "ok b01:2"
+    assert eventos.ler(proj, "resposta") == [r]
+    with pytest.raises(ValueError):
+        eventos.registrar_resposta(root / "nao-tem", 1, "x")
+
+
+def test_ler_todos_os_tipos(root):
+    proj = _proj(root)
+    _ev(proj, "cortes", "inicio", T(0))
+    _linha_raw(proj, {"ts": T(1), "tipo": "decisao", "assunto": "xyz", "escolha": "e1",
+                      "alternativas": "não-lista", "custo_usd": -1, "confianca": "talvez", "motivo": 3})
+    _linha_raw(proj, {"ts": T(2), "tipo": "decisao", "assunto": "trilha"})              # sem escolha
+    _linha_raw(proj, {"ts": T(3), "tipo": "resposta", "texto": "x"})                    # sem qid
+    _linha_raw(proj, {"ts": T(4), "tipo": "outra", "x": 1})
+    _linha_raw(proj, "{quebrado")
+    _linha_raw(proj, {"ts": T(5), "tipo": "resposta", "qid": 9, "texto": None})
+    todos = eventos.ler(proj, None)
+    assert [e["tipo"] for e in todos] == ["etapa", "decisao", "resposta"]
+    d = todos[1]
+    assert d["assunto"] == "outro" and d["alternativas"] == [] and d["motivo"] == ""
+    assert "custo_usd" not in d and "confianca" not in d
+    assert todos[2]["texto"] == ""
+    assert [e["tipo"] for e in eventos.ler(proj)] == ["etapa"]          # default continua só etapa
+
+
+def test_quadro_ate(root):
+    proj = _proj(root)
+    _ev(proj, "transcricao", "inicio", T(0))
+    _ev(proj, "transcricao", "fim", T(5))
+    _ev(proj, "cortes", "inicio", T(10))
+    _custo(proj, T(3), 0.2)
+    _custo(proj, T(12), 0.3)
+    q = eventos.quadro(proj, root=root, ate=datetime(2026, 10, 7, 10, 6, tzinfo=UTC))
+    st = {e["id"]: e for e in q["etapas"]}
+    assert st["transcricao"]["status"] == "fim" and st["transcricao"]["custo_usd"] == 0.2
+    assert st["cortes"]["status"] == "pendente" and q["atual"] is None
+    q2 = eventos.quadro(proj, root=root, ate=datetime(2026, 10, 7, 10, 13, tzinfo=UTC))
+    c = {e["id"]: e for e in q2["etapas"]}["cortes"]
+    assert c["status"] == "andamento" and c["custo_usd"] == 0.3          # agora = ate
+    assert eventos.quadro(proj, root=root, ate=datetime(2026, 10, 7, 9, 0, tzinfo=UTC))["sem_historico"] is True
+
+
+def test_quadro_decisoes_por_etapa(root):
+    proj = _proj(root)
+    _ev(proj, "velha", "fim", T(0))                                        # fora da receita
+    _linha_raw(proj, {"ts": T(1), "tipo": "decisao", "assunto": "corte", "escolha": "c1", "etapa": "cortes"})
+    _linha_raw(proj, {"ts": T(2), "tipo": "decisao", "assunto": "outro", "escolha": "solta"})
+    _linha_raw(proj, {"ts": T(3), "tipo": "decisao", "assunto": "grade", "escolha": "g", "etapa": "legado"})
+    _linha_raw(proj, {"ts": T(4), "tipo": "decisao", "assunto": "outro", "escolha": "v", "etapa": "velha"})
+    _linha_raw(proj, {"ts": T(5), "tipo": "decisao", "assunto": "corte", "escolha": "c2", "etapa": "cortes"})
+    q = eventos.quadro(proj, root=root)
+    cortes = {e["id"]: e for e in q["etapas"]}["cortes"]
+    assert [d["escolha"] for d in cortes["decisoes"]] == ["c1", "c2"]
+    assert {e["id"]: e for e in q["etapas"]}["render"]["decisoes"] == []
+    assert [d["escolha"] for d in q["fora_da_receita"][0]["decisoes"]] == ["v"]
+    assert [d["escolha"] for d in q["decisoes_soltas"]] == ["solta", "g"]
+
+
+def test_quadro_so_decisoes_tem_historico(root):
+    proj = _proj(root)
+    _linha_raw(proj, {"ts": T(1), "tipo": "decisao", "assunto": "corte", "escolha": "c1"})
+    assert eventos.quadro(proj, root=root)["sem_historico"] is False
