@@ -677,3 +677,18 @@ body[data-tab="linha"] #tab-linha { display: flex; flex-direction: column; }
 .lt-decisao .linha-ico { color: var(--accent); }
 .lt-pergunta .linha-ico, .lt-resposta .linha-ico { color: var(--ok); }
 .linha-vazio, .linha-msg { padding: 30px 14px; }
+
+/* ---- página decisões ---- */
+body[data-route="decisoes"] .only-project,
+body[data-route="decisoes"] .only-library { display: none !important; }
+body:not([data-route="decisoes"]) .only-decisoes { display: none !important; }
+#decisoes-view { overflow: auto; display: flex; flex-direction: column; min-height: 0; padding: 0 16px 24px; }
+#dec-filtros { display: flex; gap: 10px; align-items: center; padding: 12px 0 6px; flex-wrap: wrap; }
+#dec-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+#dec-busca { width: 260px; padding: 5px 10px; border-radius: 99px; }
+.dec-freq { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 0 10px; }
+.dec-tab { border-collapse: collapse; width: 100%; font-size: 12px; }
+.dec-tab th, .dec-tab td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.dec-tab th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.dec-tab a { color: var(--accent); text-decoration: none; }
+.dec-vazio { padding: 30px 0; }

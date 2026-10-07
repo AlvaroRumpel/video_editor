@@ -14,6 +14,9 @@
   <span class="only-library brand">video_editor</span>
   <button class="only-library" id="btn-new" title="Criar projeto novo">+ Novo vídeo</button>
   <button class="only-library" id="btn-formats" title="Ver e editar as receitas de formato">Formatos</button>
+  <button class="only-library" id="btn-decisoes" title="Decisões do Claude em todos os projetos">Decisões</button>
+  <a class="only-decisoes back" id="decisoes-voltar" href="#/" title="Voltar à biblioteca">←</a>
+  <span class="only-decisoes proj-name">Decisões</span>
   <a class="only-project back" id="btn-back" href="#/" title="Voltar à biblioteca">←</a>
   <span class="only-project proj-name" id="proj-name"></span>
   <select class="only-project" id="format-select" title="Formato/receita que o Claude segue neste projeto"></select>
@@ -45,6 +48,11 @@
       <input type="search" id="lib-busca" placeholder="buscar projeto...">
     </div>
     <div id="lib-grid"></div>
+  </section>
+  <section id="decisoes-view" class="only-decisoes">
+    <div id="dec-filtros"><div id="dec-chips"></div><input type="search" id="dec-busca" placeholder="buscar escolha, motivo, projeto..."></div>
+    <div id="dec-freq"></div>
+    <div id="dec-tabela"></div>
   </section>
   <section id="project-view" class="only-project">
     <div id="stepper"></div>
@@ -79,5 +87,6 @@
 <script src="board.js"></script>
 <script src="folha.js"></script>
 <script src="linha.js"></script>
+<script src="decisoes.js"></script>
 </body>
 </html>

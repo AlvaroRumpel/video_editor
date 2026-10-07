@@ -24,6 +24,7 @@ const STATUS_LABEL = { pendente: 'pendente', andamento: 'em andamento', fim: 'ok
 const hashFor = (pid, tab) => `#/p/${encodeURIComponent(pid)}/${tab}`;
 
 function parseHash() {
+  if (location.hash === '#/decisoes') return { route: 'decisoes' };
   const m = location.hash.match(/^#\/p\/([^/]+)(?:\/([a-z]+))?$/);
   if (!m) return { route: 'library' };
   return { route: 'project', pid: decodeURIComponent(m[1]), tab: TABS.includes(m[2]) ? m[2] : null };
@@ -37,19 +38,31 @@ function goTab(tab) {
   if (location.hash === h) route(); else location.hash = h;
 }
 
+function saiDoProjeto() {
+  if (S.es) { S.es.close(); S.es = null; }
+  S.pid = null; S.proj = null; S.quadro = null; S.selected = null;
+  el('instr-context').textContent = 'instrução geral';
+  const v = el('player');
+  v.pause(); if (v.getAttribute('src')) v.removeAttribute('src');
+  el('render-progress').hidden = true;   // progresso é por projeto
+}
+
 async function route() {
   const r = parseHash();
   const body = document.body;
   if (r.route === 'library') {
     body.dataset.route = 'library';
-    if (S.es) { S.es.close(); S.es = null; }
-    S.pid = null; S.proj = null; S.quadro = null; S.selected = null;
-    el('instr-context').textContent = 'instrução geral';
-    const v = el('player');
-    v.pause(); if (v.getAttribute('src')) v.removeAttribute('src');
-    el('render-progress').hidden = true;   // progresso é por projeto
+    saiDoProjeto();
     renderBudget();
     startLibrary();
+    return;
+  }
+  if (r.route === 'decisoes') {
+    body.dataset.route = 'decisoes';
+    saiDoProjeto();
+    stopLibrary();
+    renderBudget();
+    renderDecisoesPage();
     return;
   }
   stopLibrary();

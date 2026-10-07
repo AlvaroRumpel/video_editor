@@ -559,3 +559,33 @@ def test_linha_troca_de_projeto_com_falha(page, ui_url, fake_root):
     assert page.locator(".linha-item").count() == 0
     page.evaluate("location.hash = '#/p/edit-fake/linha'")     # volta: não fica preso no placeholder
     page.wait_for_function("document.querySelectorAll('.linha-item').length === 5")
+
+
+def test_pagina_decisoes(page, ui_url, fake_root):
+    fake, raw = fake_root / "edit-fake", fake_root / "edit-raw"
+    _decisao_raw(fake, "2026-10-07T10:01:00+00:00", "trilha", "Phoenix2026", motivo="calma", confianca="alta")
+    _decisao_raw(fake, "2026-10-07T10:02:00+00:00", "corte", "tirar gaguejo")
+    _decisao_raw(raw, "2026-10-07T10:03:00+00:00", "trilha", "Phoenix2026")
+    _decisao_raw(raw, "2026-10-07T10:04:00+00:00", "trilha", "Incredulity", custo_usd=0.1)
+    page.goto(ui_url + "/#/", wait_until="domcontentloaded")
+    page.click("#btn-decisoes")
+    page.wait_for_function("document.body.dataset.route === 'decisoes'")
+    page.wait_for_selector(".dec-tab tbody tr")
+    assert page.locator(".dec-tab tbody tr").count() == 4
+    assert not page.locator("#library-view").is_visible()
+    page.click("#dec-chips [data-assunto=trilha]")
+    page.wait_for_function("document.querySelectorAll('.dec-tab tbody tr').length === 3")
+    assert "Phoenix2026 ×2" in page.locator("#dec-freq").inner_text()
+    page.fill("#dec-busca", "incred")
+    page.wait_for_function("document.querySelectorAll('.dec-tab tbody tr').length === 1")
+    page.click(".dec-tab tbody tr a")
+    page.wait_for_function("location.hash === '#/p/edit-raw/linha'")
+    page.wait_for_function("document.body.dataset.route === 'project'")
+
+
+def test_pagina_decisoes_vazia(page, ui_url):
+    page.goto(ui_url + "/#/decisoes", wait_until="domcontentloaded")
+    page.wait_for_selector(".dec-vazio")
+    assert "nenhuma decisão registrada" in page.locator("#decisoes-view").inner_text()
+    page.click("#decisoes-voltar")
+    page.wait_for_function("document.body.dataset.route === 'library'")
