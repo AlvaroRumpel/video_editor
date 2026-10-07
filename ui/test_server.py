@@ -561,3 +561,71 @@ def test_file_midia_range(client, fake_root):
                                   "overlays/../broll/sheet.png", "broll/cand/sub/a.mp4"])
 def test_file_midia_traversal(client, nome):
     assert client.get("/api/file", params={"id": "edit-fake", "name": nome}).status_code == 400
+
+
+def _receita_teste(root):
+    (root / "Formatos" / "teste.md").write_text("---\netapas: transcricao=transcrição, cortes\n---\n", encoding="utf-8")
+    ui = root / "edit-fake" / "ui"
+    ui.mkdir(parents=True, exist_ok=True)
+    (ui / "state.json").write_text(json.dumps({"formato": "teste"}), encoding="utf-8")
+    return root / "edit-fake"
+
+
+def test_linha_route(client, fake_root):
+    proj = _receita_teste(fake_root)
+    eventos.registrar(proj, "cortes", "inicio", root=fake_root)
+    eventos.registrar_decisao(proj, "corte", "c1", etapa="cortes", root=fake_root)
+    d = client.get("/api/linha", params={"id": "edit-fake"}).json()
+    assert [e["tipo"] for e in d["eventos"]] == ["etapa", "decisao"] and len(d["quadros"]) == 2
+    assert client.get("/api/linha", params={"id": "../x"}).status_code == 400
+
+
+def test_decisoes_route(client, fake_root):
+    proj = _receita_teste(fake_root)
+    eventos.registrar_decisao(proj, "trilha", "Phoenix2026", root=fake_root)
+    r = client.get("/api/decisoes")
+    assert r.status_code == 200 and r.json()["decisoes"][0]["escolha"] == "Phoenix2026"
+    r = client.get("/api/decisoes", params={"assunto": "trilha"})
+    assert r.json()["frequentes"] == [{"escolha": "Phoenix2026", "n": 1}]
+    assert client.get("/api/decisoes", params={"assunto": ""}).status_code == 200
+    assert client.get("/api/decisoes", params={"assunto": "nada"}).status_code == 400
+
+
+def test_quadro_route_traz_decisoes(client, fake_root):
+    proj = _receita_teste(fake_root)
+    eventos.registrar_decisao(proj, "corte", "c1", etapa="cortes", root=fake_root)
+    eventos.registrar_decisao(proj, "outro", "solta", root=fake_root)
+    q = client.get("/api/quadro", params={"id": "edit-fake"}).json()
+    assert [d["escolha"] for d in q["etapas"][1]["decisoes"]] == ["c1"]
+    assert [d["escolha"] for d in q["decisoes_soltas"]] == ["solta"]
+
+
+def _fila(path, qid=5):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([{"id": qid, "status": "waiting_reply", "text": "x"}]), encoding="utf-8")
+
+
+def test_reply_grava_resposta(client, fake_root):
+    _fila(fake_root / "edit-fake" / "ui" / "queue.json")
+    r = client.post("/api/reply", params={"id": "edit-fake"}, json={"qid": 5, "text": "ok b01:2"})
+    assert r.status_code == 200
+    resp = eventos.ler(fake_root / "edit-fake", "resposta")
+    assert [(e["qid"], e["texto"]) for e in resp] == [(5, "ok b01:2")]
+
+
+def test_reply_global_nao_grava_resposta(client, fake_root):
+    _fila(fake_root / ".ui-runtime" / "queue.json")
+    assert client.post("/api/reply", params={"id": "_global"}, json={"qid": 5, "text": "ok"}).status_code == 200
+    assert not (fake_root / ".ui-runtime" / "eventos.jsonl").exists()
+    assert eventos.ler(fake_root / "edit-fake", "resposta") == []
+
+
+def test_reply_log_falhando_nao_quebra(client, fake_root, monkeypatch):
+    _fila(fake_root / "edit-fake" / "ui" / "queue.json")
+
+    def quebra(*a, **k):
+        raise OSError("disco cheio")
+
+    monkeypatch.setattr(eventos, "registrar_resposta", quebra)
+    r = client.post("/api/reply", params={"id": "edit-fake"}, json={"qid": 5, "text": "ok"})
+    assert r.status_code == 200 and r.json()["status"] == "pending"

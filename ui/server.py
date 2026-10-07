@@ -187,6 +187,11 @@ def reply(request: Request, id: str, body: dict):
             e["status"] = "pending"
             e.pop("folha", None)   # qualquer resposta consome a folha; o Claude regrava se perguntar de novo
             pipeline.atomic_write_json(qpath, queue)
+            if id != "_global":   # resposta entra na linha do tempo do projeto; log nunca derruba o reply
+                try:
+                    eventos.registrar_resposta(qpath.parent.parent, e["id"], e["reply"])
+                except Exception:  # noqa: BLE001
+                    pass
             return e
     raise HTTPException(404, "pedido não encontrado")
 
@@ -278,6 +283,19 @@ def global_queue(request: Request):
 @app.get("/api/quadro")
 def quadro_route(request: Request, id: str):
     return eventos.quadro(_proj(request, id), root=_root(request))
+
+
+@app.get("/api/linha")
+def linha_route(request: Request, id: str):
+    return eventos.linha(_proj(request, id), root=_root(request))
+
+
+@app.get("/api/decisoes")
+def decisoes_route(request: Request, assunto: str | None = None):
+    assunto = assunto or None
+    if assunto is not None and assunto not in eventos.ASSUNTOS:
+        raise HTTPException(400, "assunto inválido")
+    return eventos.decisoes(_root(request), assunto=assunto)
 
 
 @app.get("/api/folha")
