@@ -266,6 +266,7 @@ def test_new_project_roteiro_e_pauta(client, fake_root):
 
 def test_queue_aceita_roteiro_pauta(client):
     assert "roteiro" in server.QUEUE_TYPES and "pauta" in server.QUEUE_TYPES
+    assert "referencia" in server.HIDDEN_FORMATS
 
 
 def test_events_inclui_docs(client, fake_root):

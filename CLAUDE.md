@@ -40,6 +40,8 @@ em vez de sobrescrever o objeto inteiro.
      `novo-projeto` com o mesmo nome reaproveita `edit/<slug>/` (mantém
      pesquisa.md/roteiro.md).
    - `pauta` — `target` = `{marca, mes}`; fila global; seguir `Formatos/pauta.md`.
+   - `referencia` — `target` = `{origem, marca, nome, briefing}`; fila global;
+     seguir `Formatos/referencia.md` (baixar → analisar → conceitos A/B/C + animatic → escolha).
 4. Pedido grande/ambíguo → `status: "waiting_reply"` + pergunta em
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
    TODA pergunta ao usuário passa por aqui — nunca só no chat: o usuário
@@ -89,6 +91,8 @@ sem orçamento. Fluxo: `padrao-youtube-longo.md` §5.1.
 Shorts: `Formatos/padrao-youtube-shorts.md` (Clip Factory, `ui/clips.py`). Publora
 só como **draft** (`create_post` + upload + `complete_media`); nunca agendar sem
 pedido explícito — Starter limita 3 agendados / 7 dias.
+
+Vídeo de referência (Reel/Short) = inspiração de mecanismo, nunca cópia; URL e autor ficam em conceitos.md. Download só via ui/referencia.py (yt-dlp ou arquivo em bruto/ref/).
 
 ## Regras
 

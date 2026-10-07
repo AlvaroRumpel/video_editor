@@ -137,7 +137,7 @@ def brutos_ref(request: Request):
     return sorted(p.name for p in d.glob("*.mp4")) if d.is_dir() else []
 
 
-HIDDEN_FORMATS = {"thumbnail", "pauta"}  # receitas internas, fora do dropdown
+HIDDEN_FORMATS = {"thumbnail", "pauta", "referencia"}  # receitas internas, fora do dropdown
 QUEUE_TYPES = {"instrucao", "render", "borda", "veto", "roteiro", "pauta", "referencia"}
 DOC_NAME = re.compile(r"^[\w\-. ]+\.md$")
 FILE_NAME = re.compile(r"^(broll|ref)/[\w\-]+\.png$|^animatic-[A-Z]\.png$")
