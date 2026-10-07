@@ -74,12 +74,25 @@ Registrar no log do projeto (a UI acende a trilha ao vivo):
 
 - Começou etapa: `python ui/eventos.py etapa <proj> <id> inicio`.
 - Concluiu: `python ui/eventos.py etapa <proj> <id> fim --nota "<resumo curto>"`.
-- Abriu `waiting_reply` dentro dela: `... <id> espera`.
+- Abriu `waiting_reply` dentro dela: `... <id> espera --nota "<pergunta curta>"` (a nota é a pergunta na linha do tempo).
 - Retomou depois da resposta: `... <id> inicio` de novo.
 - Etapa opcional que não vai rodar: `... <id> pulada`. Erro: `... <id> falha --nota "<motivo>"`.
 - exit 1 (etapa/status inválido, formato sem etapas) → conferir o front-matter
   da receita e o `formato` do `state.json`; nunca inventar id.
 - Custo por etapa sai sozinho do `costs.jsonl` (intervalo início→fim).
+
+## Decisões (linha do tempo da UI)
+
+Registrar só escolhas entre alternativas reais que mudam resultado ou custo
+(provedor, trilha, candidato de b-roll, x do clipe, grade, conceito, corte
+polêmico). Escolha óbvia sem alternativa não entra. Teto ~30 por projeto.
+
+`python ui/eventos.py decisao <proj> <assunto> "<escolha>" --etapa <id> --alt "<alternativa>" ... --motivo "<por quê>" [--custo <usd estimado>] [--confianca alta|media|baixa]`
+
+`assunto` ∈ provedor, trilha, sfx, broll, corte, grade, zoom, overlay,
+legenda, conceito, clipe, thumbnail, render, outro (fora da lista → `outro`
+e explicar no motivo). `--etapa` precisa estar na receita (ou omitir).
+Respostas do usuário entram sozinhas no log (o servidor grava no `/api/reply`).
 
 ## Orçamento (ações pagas)
 

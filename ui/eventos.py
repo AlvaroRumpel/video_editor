@@ -8,6 +8,7 @@ O log é só acréscimo; o quadro (status por etapa, atual, custo) é derivado."
 import json
 import re
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -267,6 +268,54 @@ def quadro(proj: Path, root=None, agora=None, ate=None) -> dict:
             "fora_da_receita": fora, "atual": atual, "decisoes_soltas": soltas}
 
 
+def linha(proj: Path, root=None) -> dict:
+    """Tudo do projeto em ordem (log + custos), cada item com custo acumulado e
+    o estado das etapas naquele instante (para o replay)."""
+    root = root or pipeline.ROOT
+    itens = [dict(e) for e in ler(proj, None)]
+    for l in budget._linhas(proj / "ui" / "costs.jsonl"):
+        t, u = _dt(l.get("ts")), budget._fin(l.get("usd", 0))
+        if t is None or u is None:
+            continue
+        itens.append({"ts": l["ts"], "tipo": "custo", "provedor": str(l.get("provedor") or ""),
+                      "usd": u, "nota": str(l.get("nota") or "")})
+    itens.sort(key=lambda e: _dt(e["ts"]))   # estável: log (anexado antes) vem antes do custo no empate
+    acum, quadros = 0.0, []
+    for e in itens:
+        if e["tipo"] == "custo":
+            acum += e["usd"]
+        e["custo_acum"] = round(acum, 4)
+        # ponytail: um quadro por evento relê o log (O(n²)); trocar por varredura incremental se o log passar de milhares de linhas
+        q = quadro(proj, root=root, ate=_dt(e["ts"]))
+        quadros.append({"etapas": [{"id": x["id"], "rotulo": x["rotulo"], "status": x["status"]} for x in q["etapas"]],
+                        "atual": q["atual"]})
+    return {"eventos": itens, "quadros": quadros}
+
+
+def decisoes(root=None, assunto=None) -> dict:
+    root = root or pipeline.ROOT
+    if assunto is not None and assunto not in ASSUNTOS:
+        raise ValueError(f"assunto inválido: {assunto}")
+    out = []
+    for p in pipeline.find_projects(root):
+        try:
+            proj = pipeline.project_dir(root, p["id"])
+            for d in ler(proj, "decisao"):
+                if assunto and d["assunto"] != assunto:
+                    continue
+                out.append({"projeto": p["id"], "nome": p["name"], "ts": d["ts"], "etapa": d.get("etapa"),
+                            "assunto": d["assunto"], "escolha": d["escolha"], "alternativas": d["alternativas"],
+                            "motivo": d["motivo"], "custo_usd": d.get("custo_usd"), "confianca": d.get("confianca")})
+        except Exception:  # noqa: BLE001 — projeto ilegível não derruba a página
+            continue
+    out.sort(key=lambda d: _dt(d["ts"]), reverse=True)
+    freq = []
+    if assunto:
+        cont = Counter(d["escolha"] for d in out)
+        freq = [{"escolha": k, "n": n} for k, n in sorted(cont.items(), key=lambda kv: (-kv[1], kv[0]))]
+    return {"decisoes": out, "frequentes": freq}
+
+
 if __name__ == "__main__":
     import argparse
     if hasattr(sys.stdout, "reconfigure"):
@@ -279,11 +328,27 @@ if __name__ == "__main__":
     p.add_argument("--nota")
     p = sub.add_parser("quadro")
     p.add_argument("proj")
+    p = sub.add_parser("decisao")
+    p.add_argument("proj"); p.add_argument("assunto"); p.add_argument("escolha")
+    p.add_argument("--etapa"); p.add_argument("--alt", action="append", default=[])
+    p.add_argument("--motivo", default=""); p.add_argument("--custo", type=float)
+    p.add_argument("--confianca")
+    p = sub.add_parser("linha")
+    p.add_argument("proj")
+    p = sub.add_parser("decisoes")
+    p.add_argument("--assunto")
     ns = ap.parse_args()
     root = Path(ns.root)
     try:
         if ns.cmd == "etapa":
             out = registrar(Path(ns.proj), ns.etapa, ns.status, nota=ns.nota, root=root)
+        elif ns.cmd == "decisao":
+            out = registrar_decisao(Path(ns.proj), ns.assunto, ns.escolha, etapa=ns.etapa, alternativas=ns.alt,
+                                    motivo=ns.motivo, custo_usd=ns.custo, confianca=ns.confianca, root=root)
+        elif ns.cmd == "linha":
+            out = linha(Path(ns.proj), root=root)
+        elif ns.cmd == "decisoes":
+            out = decisoes(root, assunto=ns.assunto)
         else:
             out = quadro(Path(ns.proj), root=root)
     except ValueError as e:

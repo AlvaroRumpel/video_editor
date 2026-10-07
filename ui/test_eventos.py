@@ -377,3 +377,87 @@ def test_quadro_so_decisoes_tem_historico(root):
     proj = _proj(root)
     _linha_raw(proj, {"ts": T(1), "tipo": "decisao", "assunto": "corte", "escolha": "c1"})
     assert eventos.quadro(proj, root=root)["sem_historico"] is False
+
+
+def test_linha_ordem_custos_e_quadros(root):
+    proj = _proj(root)
+    _ev(proj, "transcricao", "fim", T(0))
+    _ev(proj, "cortes", "inicio", T(5))
+    _linha_raw(proj, {"ts": T(6), "tipo": "decisao", "assunto": "corte", "escolha": "c1", "etapa": "cortes"})
+    _linha_raw(proj, {"ts": T(8), "tipo": "resposta", "qid": 3, "texto": "ok"})
+    _custo(proj, T(5), 0.5)          # empate com o inicio de cortes: vem depois dele
+    _custo(proj, T(7), 0.25)
+    d = eventos.linha(proj, root=root)
+    evs = d["eventos"]
+    assert [e["tipo"] for e in evs] == ["etapa", "etapa", "custo", "decisao", "custo", "resposta"]
+    assert [e["custo_acum"] for e in evs] == [0.0, 0.0, 0.5, 0.5, 0.75, 0.75]
+    assert evs[2] == {"ts": T(5), "tipo": "custo", "provedor": "x", "usd": 0.5, "nota": "", "custo_acum": 0.5}
+    assert len(d["quadros"]) == len(evs)
+    q0 = {e["id"]: e["status"] for e in d["quadros"][0]["etapas"]}
+    assert q0["transcricao"] == "fim" and q0["cortes"] == "pendente"
+    assert d["quadros"][1]["atual"] == "cortes"
+    assert d["quadros"][0]["etapas"][1] == {"id": "transcricao", "rotulo": "transcrição", "status": "fim"}
+
+
+def test_linha_vazia(root):
+    assert eventos.linha(_proj(root), root=root) == {"eventos": [], "quadros": []}
+
+
+def _dec(proj, ts, assunto, escolha, **kw):
+    (proj / "ui").mkdir(parents=True, exist_ok=True)
+    _linha_raw(proj, {"ts": ts, "tipo": "decisao", "assunto": assunto, "escolha": escolha, **kw})
+
+
+def test_decisoes_entre_projetos(root):
+    fake, raw = root / "edit-fake", root / "edit-raw"
+    _dec(fake, T(1), "trilha", "Phoenix2026", alternativas=["Incredulity"], motivo="calma", confianca="alta")
+    _dec(fake, T(2), "corte", "tirar gaguejo")
+    _dec(raw, T(3), "trilha", "Phoenix2026")
+    _dec(raw, T(4), "trilha", "Incredulity", custo_usd=0.1)
+    d = eventos.decisoes(root)
+    assert [x["escolha"] for x in d["decisoes"]] == ["Incredulity", "Phoenix2026", "tirar gaguejo", "Phoenix2026"]
+    assert d["frequentes"] == []
+    primeiro = d["decisoes"][-1]
+    assert primeiro == {"projeto": "edit-fake", "nome": "edit-fake", "ts": T(1), "etapa": None, "assunto": "trilha",
+                        "escolha": "Phoenix2026", "alternativas": ["Incredulity"], "motivo": "calma",
+                        "custo_usd": None, "confianca": "alta"}
+    t = eventos.decisoes(root, assunto="trilha")
+    assert len(t["decisoes"]) == 3
+    assert t["frequentes"] == [{"escolha": "Phoenix2026", "n": 2}, {"escolha": "Incredulity", "n": 1}]
+    with pytest.raises(ValueError):
+        eventos.decisoes(root, assunto="nada")
+
+
+def test_decisoes_projeto_ilegivel_pulado(root, monkeypatch):
+    _dec(root / "edit-raw", T(3), "trilha", "Phoenix2026")
+    real = eventos.ler
+
+    def quebra(proj, tipo="etapa"):
+        if proj.name == "edit-fake":
+            raise RuntimeError("boom")
+        return real(proj, tipo)
+
+    monkeypatch.setattr(eventos, "ler", quebra)
+    assert [x["projeto"] for x in eventos.decisoes(root)["decisoes"]] == ["edit-raw"]
+
+
+def test_cli_decisao_linha_decisoes(root):
+    proj = str(_proj(root))
+    r = _cli(root, "decisao", proj, "trilha", "Phoenix2026", "--etapa", "cortes", "--alt", "A", "--alt", "B",
+             "--motivo", "calma", "--custo", "0.4", "--confianca", "media")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["alternativas"] == ["A", "B"] and d["custo_usd"] == 0.4 and d["confianca"] == "media"
+    assert _cli(root, "decisao", proj, "nada", "x").returncode == 1
+    r = _cli(root, "linha", proj)
+    assert r.returncode == 0 and json.loads(r.stdout)["eventos"][0]["tipo"] == "decisao"
+    r = _cli(root, "decisoes", "--assunto", "trilha")
+    assert r.returncode == 0 and json.loads(r.stdout)["frequentes"] == [{"escolha": "Phoenix2026", "n": 1}]
+
+
+def test_protocolo_decisoes_documentado():
+    txt = (pipeline.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "## Decisões" in txt and "python ui/eventos.py decisao" in txt
+    assert 'espera --nota "<pergunta curta>"' in txt
+    for a in eventos.ASSUNTOS:
+        assert a in txt
