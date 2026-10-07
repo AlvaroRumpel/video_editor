@@ -89,3 +89,52 @@ def test_hash_vazio_vai_para_biblioteca(page, ui_url):
     page.wait_for_function("document.body.dataset.route === 'library'")
     assert page.locator("#library-view").is_visible()
     assert not page.locator("#project-view").is_visible()
+
+
+def test_biblioteca_card_abre_projeto(page, ui_url):
+    page.goto(ui_url + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector(".lib-card")
+    assert page.locator(".lib-card").count() == 2
+    card = page.locator(".lib-card", has_text="edit-fake")
+    assert card.locator(".lib-dots i").count() == 3
+    assert "cortes" in card.locator(".lib-atual").inner_text()
+    card.click()
+    page.wait_for_function("location.hash.startsWith('#/p/edit-fake/')")
+    page.wait_for_function("document.body.dataset.route === 'project'")
+    page.click("#btn-back")
+    page.wait_for_function("document.body.dataset.route === 'library'")
+
+
+def test_biblioteca_filtros(page, ui_url):
+    page.goto(ui_url + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector(".lib-card")
+    page.fill("#lib-busca", "raw")
+    page.wait_for_function("document.querySelectorAll('.lib-card').length === 1")
+    page.fill("#lib-busca", "")
+    page.click(".lib-chip[data-formato=teste]")
+    page.wait_for_function("document.querySelectorAll('.lib-card').length === 1")
+    assert "edit-fake" in page.locator(".lib-card").inner_text()
+
+
+def test_biblioteca_projeto_aninhado(page, ui_url, fake_root):
+    aninhado = fake_root / "edit" / "shorts" / "marca" / "proj-x" / "ui"
+    aninhado.mkdir(parents=True)
+    page.goto(ui_url + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector(".lib-card >> text=marca/proj-x")
+    page.click(".lib-card >> text=marca/proj-x")
+    page.wait_for_function("document.body.dataset.route === 'project'")
+    assert "edit%2Fshorts%2Fmarca%2Fproj-x" in page.evaluate("location.hash")
+    page.wait_for_function("document.getElementById('proj-name').textContent === 'marca/proj-x'")
+
+
+def test_biblioteca_poll_preserva_rascunho_de_resposta(page, ui_url, fake_root):
+    (fake_root / "edit-fake" / "ui" / "queue.json").write_text(json.dumps([
+        {"id": 1, "type": "instrucao", "text": "x", "status": "waiting_reply", "resultado": "pergunta?"}]),
+        encoding="utf-8")
+    page.goto(ui_url + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector(".queue-reply-input")
+    page.fill(".queue-reply-input", "rascunho")
+    page.evaluate("loadLibrary()")   # o mesmo que o poll de 5s faz
+    page.wait_for_timeout(500)
+    assert page.input_value(".queue-reply-input") == "rascunho"
+    assert page.evaluate("document.activeElement.classList.contains('queue-reply-input')")

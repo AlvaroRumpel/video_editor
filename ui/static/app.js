@@ -705,6 +705,12 @@ function renderQueue() {
     : (S.lib.items || []).flatMap(p => (p.fila || []).map(e => ({ ...e, _scope: p.id, _nome: p.name })));
   const globalEntries = (S.globalQueue || []).map(e => ({ ...e, _scope: 'global' }));
   const merged = projEntries.concat(globalEntries).sort((a, b) => b.id - a.id);
+  // rascunhos de resposta sobrevivem ao redesenho (poll da biblioteca, SSE)
+  const rkey = t => t.dataset.scope + ':' + t.dataset.qid;
+  const drafts = {};
+  el('queue-panel').querySelectorAll('.queue-reply-input').forEach(t => { if (t.value) drafts[rkey(t)] = t.value; });
+  const ae = document.activeElement;
+  const focused = ae && ae.classList.contains('queue-reply-input') ? rkey(ae) : null;
   el('queue-panel').innerHTML = merged.length ? merged.map(e => {
     const icon = STATUS_ICON[e.status] || '';
     const prefix = e._scope === 'global' ? '[novo] ' : e._nome ? `[${escapeHtml(e._nome)}] ` : '';
@@ -720,6 +726,10 @@ function renderQueue() {
       ${sub}${replySent}${reply}
     </div>`;
   }).join('') : '<div class="queue-empty">fila vazia</div>';
+  el('queue-panel').querySelectorAll('.queue-reply-input').forEach(t => {
+    if (drafts[rkey(t)]) t.value = drafts[rkey(t)];
+    if (rkey(t) === focused) t.focus();
+  });
 }
 
 function sendReply(qid, text, scope) {
