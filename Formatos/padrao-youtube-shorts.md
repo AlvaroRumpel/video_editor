@@ -3,7 +3,7 @@ etapas: transcricao=transcrição, candidatos, aprovacao=aprovação, render, dr
 ---
 # Formato: Padrão YouTube — Shorts (vertical 9:16)
 
-> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera --nota "<pergunta curta>"|pulada|falha [--nota]`):
 > transcricao = Método 1 · candidatos = Método 2–4 · aprovacao = Método 5 (`espera` no waiting_reply) ·
 > render = Método 6 · draft = Método 7–8.
 > Rodando dentro de projeto longo: logar só a etapa `shorts` no projeto longo — `inicio` no começo,

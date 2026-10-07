@@ -18,7 +18,6 @@ import pipeline  # noqa: E402
 
 STATUS = {"inicio", "fim", "espera", "pulada", "falha"}
 TERMINAIS = {"fim", "falha", "pulada"}   # fecham o ciclo da etapa
-TIPOS_EVENTO = ("etapa", "decisao", "resposta")
 ASSUNTOS = ("provedor", "trilha", "sfx", "broll", "corte", "grade", "zoom", "overlay",
             "legenda", "conceito", "clipe", "thumbnail", "render", "outro")
 CONFIANCAS = ("alta", "media", "baixa")
@@ -108,6 +107,8 @@ def registrar_decisao(proj: Path, assunto: str, escolha: str, etapa=None, altern
     escolha = str(escolha or "").strip()
     if not escolha:
         raise ValueError("escolha vazia")
+    if isinstance(alternativas, str):   # "a,b" viraria ["a", ",", "b"]
+        raise ValueError("alternativas deve ser lista, não texto")
     if etapa:
         formato = formato_de(proj)
         ids = [e["id"] for e in etapas_de(formato, root)]
@@ -150,7 +151,7 @@ def _valido(e):
             e.pop("nota", None)
         return e
     if t == "decisao":
-        if not isinstance(e.get("assunto"), str) or not isinstance(e.get("escolha"), str) or not e["escolha"]:
+        if not isinstance(e.get("assunto"), str) or not isinstance(e.get("escolha"), str) or not e["escolha"].strip():
             return None
         if e["assunto"] not in ASSUNTOS:
             e["assunto"] = "outro"
@@ -232,13 +233,20 @@ def _resumo(item: dict, evs: list[dict], custos: list[tuple], agora: datetime) -
             "nota": nota, "custo_usd": custo}
 
 
+def _utc(d):
+    return d if d is None or d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
 def quadro(proj: Path, root=None, agora=None, ate=None) -> dict:
     root = root or pipeline.ROOT
-    agora = agora or ate or datetime.now(timezone.utc)
+    ate, agora = _utc(ate), _utc(agora)   # naive = UTC (como _dt)
     formato = formato_de(proj)
-    receita = etapas_de(formato, root)
-    todos = ler(proj, None)
-    custos = _custos(proj)
+    return _quadro_de(formato, etapas_de(formato, root), ler(proj, None), _custos(proj),
+                      agora or ate or datetime.now(timezone.utc), ate)
+
+
+def _quadro_de(formato, receita, todos, custos, agora, ate=None) -> dict:
+    """Quadro a partir de listas já lidas (quadro() lê do disco; linha() reaproveita)."""
     if ate is not None:
         todos = [e for e in todos if _dt(e["ts"]) <= ate]
         custos = [(t, u) for t, u in custos if t <= ate]
@@ -272,11 +280,16 @@ def linha(proj: Path, root=None) -> dict:
     """Tudo do projeto em ordem (log + custos), cada item com custo acumulado e
     o estado das etapas naquele instante (para o replay)."""
     root = root or pipeline.ROOT
-    itens = [dict(e) for e in ler(proj, None)]
+    formato = formato_de(proj)
+    receita = etapas_de(formato, root)
+    todos = ler(proj, None)   # log, custos, formato e receita lidos uma vez só
+    itens = [dict(e) for e in todos]
+    custos = []
     for l in budget._linhas(proj / "ui" / "costs.jsonl"):
         t, u = _dt(l.get("ts")), budget._fin(l.get("usd", 0))
         if t is None or u is None:
             continue
+        custos.append((t, u))
         itens.append({"ts": l["ts"], "tipo": "custo", "provedor": str(l.get("provedor") or ""),
                       "usd": u, "nota": str(l.get("nota") or "")})
     itens.sort(key=lambda e: _dt(e["ts"]))   # estável: log (anexado antes) vem antes do custo no empate
@@ -285,8 +298,9 @@ def linha(proj: Path, root=None) -> dict:
         if e["tipo"] == "custo":
             acum += e["usd"]
         e["custo_acum"] = round(acum, 4)
-        # ponytail: um quadro por evento relê o log (O(n²)); trocar por varredura incremental se o log passar de milhares de linhas
-        q = quadro(proj, root=root, ate=_dt(e["ts"]))
+        # ponytail: cada quadro refiltra as listas em memória (O(n²)); ok para milhares de eventos, varredura incremental se passar disso
+        ate = _dt(e["ts"])
+        q = _quadro_de(formato, receita, todos, custos, ate, ate)
         quadros.append({"etapas": [{"id": x["id"], "rotulo": x["rotulo"], "status": x["status"]} for x in q["etapas"]],
                         "atual": q["atual"]})
     return {"eventos": itens, "quadros": quadros}

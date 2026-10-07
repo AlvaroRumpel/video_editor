@@ -3,7 +3,7 @@ etapas: referencia?=referência, pesquisa, roteiro, producao=produção, audio=�
 ---
 # Padrão Ads (identidade aprovada 2026-08-31; origem: Reels Anotus)
 
-> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera --nota "<pergunta curta>"|pulada|falha [--nota]`):
 > referencia = fluxo `Formatos/referencia.md` (pular quando não veio de referência) ·
 > pesquisa = "Pesquisa e roteiro" 1–5 · roteiro = "Pesquisa e roteiro" 6–7 ·
 > producao = "Técnica de produção" (motion, footage, encode) · audio = SFX + trilha ·

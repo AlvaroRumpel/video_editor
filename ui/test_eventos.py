@@ -290,6 +290,7 @@ def test_registrar_decisao_minima(root):
 @pytest.mark.parametrize("kw", [
     {"assunto": "nada"}, {"escolha": "   "}, {"etapa": "inventada"}, {"confianca": "talvez"},
     {"custo_usd": float("nan")}, {"custo_usd": -1}, {"custo_usd": True}, {"custo_usd": "x"},
+    {"alternativas": "a,b"},
 ])
 def test_registrar_decisao_invalida(root, kw):
     args = {"assunto": "trilha", "escolha": "x", **kw}
@@ -357,6 +358,21 @@ def test_quadro_ate(root):
     assert eventos.quadro(proj, root=root, ate=datetime(2026, 10, 7, 9, 0, tzinfo=UTC))["sem_historico"] is True
 
 
+def test_quadro_ate_naive_vale_utc(root):
+    proj = _proj(root)
+    _ev(proj, "cortes", "inicio", T(0))
+    q = eventos.quadro(proj, root=root, ate=datetime(2026, 10, 7, 10, 1))
+    assert {e["id"]: e["status"] for e in q["etapas"]}["cortes"] == "andamento"
+    assert eventos.quadro(proj, root=root, ate=datetime(2026, 10, 7, 9, 0))["sem_historico"] is True
+
+
+def test_ler_rejeita_escolha_so_espaco(root):
+    proj = _proj(root)
+    _linha_raw(proj, {"ts": T(1), "tipo": "decisao", "assunto": "corte", "escolha": "   "})
+    _linha_raw(proj, {"ts": T(2), "tipo": "decisao", "assunto": "corte", "escolha": "c1"})
+    assert [d["escolha"] for d in eventos.ler(proj, "decisao")] == ["c1"]
+
+
 def test_quadro_decisoes_por_etapa(root):
     proj = _proj(root)
     _ev(proj, "velha", "fim", T(0))                                        # fora da receita
@@ -397,6 +413,26 @@ def test_linha_ordem_custos_e_quadros(root):
     assert q0["transcricao"] == "fim" and q0["cortes"] == "pendente"
     assert d["quadros"][1]["atual"] == "cortes"
     assert d["quadros"][0]["etapas"][1] == {"id": "transcricao", "rotulo": "transcrição", "status": "fim"}
+
+
+def test_linha_300_eventos_rapida(root):
+    import time
+    proj = _proj(root)
+    base = datetime(2026, 10, 7, tzinfo=UTC)
+    ids = ["transcricao", "cortes", "render"]
+    for i in range(300):
+        ts = (base + timedelta(seconds=i)).isoformat()
+        if i % 3 == 2:
+            _custo(proj, ts, 0.01)
+        else:
+            _ev(proj, ids[i % 3], "inicio" if i % 2 else "fim", ts)
+    t0 = time.perf_counter()
+    d = eventos.linha(proj, root=root)
+    assert time.perf_counter() - t0 < 1.0
+    assert len(d["eventos"]) == len(d["quadros"]) == 300
+    ultimo = eventos.quadro(proj, root=root, ate=base + timedelta(seconds=299))
+    assert d["quadros"][-1]["atual"] == ultimo["atual"]
+    assert [e["status"] for e in d["quadros"][-1]["etapas"]] == [e["status"] for e in ultimo["etapas"]]
 
 
 def test_linha_vazia(root):

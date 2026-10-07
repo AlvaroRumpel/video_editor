@@ -26,7 +26,7 @@ function visiveis() {
   });
 }
 
-async function renderLinha(forcar) {
+async function renderLinha(forcar, redesenhar = false) {
   const pid = S.pid;
   if (linhaDados.pid !== pid) {   // outro projeto: nunca mostrar a linha do anterior, nem enquanto carrega
     pausaLinha();
@@ -45,8 +45,11 @@ async function renderLinha(forcar) {
   }
   if (req !== linhaReq || S.pid !== pid) return;   // resposta atrasada ou projeto trocado
   const eventos = d.eventos || [];
-  // log é só-acréscimo: mesmo tamanho = nada mudou; não redesenha (preserva arraste do scrub e scroll)
-  if (linhaDados.pid === pid && eventos.length === linhaDados.eventos.length) return;
+  // log é só-acréscimo: mesmo tamanho = nada mudou; não redesenha (preserva arraste do scrub e scroll).
+  // redesenhar (state.json mudou): receita/rótulos dos quadros podem ter mudado mesmo sem evento novo —
+  // compara os quadros (progresso de render também mexe no state e não deve piscar a aba)
+  if (linhaDados.pid === pid && eventos.length === linhaDados.eventos.length
+      && (!redesenhar || JSON.stringify(d.quadros || []) === JSON.stringify(linhaDados.quadros))) return;
   linhaDados = { pid, eventos, quadros: d.quadros || [] };
   desenhaLinha();
 }

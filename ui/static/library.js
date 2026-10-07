@@ -25,6 +25,9 @@ async function loadLibrary() {
     const rota = document.body.dataset.route;
     if (rota !== 'library' && rota !== 'decisoes') return;   // decisões também mostra a Fila
     S.lib.items = items; S.globalQueue = gq; S.activity = act;
+    const online = items.some(p => p.claude_online);   // aqui (não em renderLibrary): vale também em #/decisoes
+    el('claude-status').className = online ? 'online' : 'offline';
+    el('claude-status').textContent = online ? 'Claude escutando' : 'Claude offline';
     if (rota === 'library') renderLibrary();
     renderQueue();
   } catch (e) {
@@ -55,9 +58,6 @@ function libCard(p) {
 
 function renderLibrary() {
   const L = S.lib;
-  const online = L.items.some(p => p.claude_online);
-  el('claude-status').className = online ? 'online' : 'offline';
-  el('claude-status').textContent = online ? 'Claude escutando' : 'Claude offline';
   const formatos = [...new Set(L.items.map(p => p.formato).filter(Boolean))].sort();
   const busca = L.busca.toLowerCase();
   const vis = L.items.filter(p => (!L.formato || p.formato === L.formato)

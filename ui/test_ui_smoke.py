@@ -561,6 +561,25 @@ def test_linha_troca_de_projeto_com_falha(page, ui_url, fake_root):
     page.wait_for_function("document.querySelectorAll('.linha-item').length === 5")
 
 
+def test_linha_atualiza_por_sse(page, ui_url, fake_root):
+    proj = _linha_fixture(fake_root)
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    assert page.locator(".linha-item").count() == 5
+    with (proj / "ui" / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-07T10:09:00+00:00", "tipo": "etapa", "etapa": "cortes", "status": "fim"}) + "\n")
+    page.wait_for_function("document.querySelectorAll('.linha-item').length === 6", timeout=6000)
+    (fake_root / "Formatos" / "teste2.md").write_text(RECEITA.replace("transcrição", "TRANSCR"), encoding="utf-8")
+    (proj / "ui" / "state.json").write_text(json.dumps({"formato": "teste2"}), encoding="utf-8")   # mesmo nº de eventos
+    page.wait_for_function("document.querySelector('#linha-mini').innerText.includes('TRANSCR')", timeout=6000)
+
+
+def test_pagina_decisoes_claude_online(page, ui_url, fake_root):
+    (fake_root / "edit-fake" / "ui" / "heartbeat").touch()
+    page.goto(ui_url + "/#/decisoes", wait_until="domcontentloaded")
+    page.wait_for_function("document.querySelector('#claude-status').textContent === 'Claude escutando'")
+
+
 def test_pagina_decisoes(page, ui_url, fake_root):
     fake, raw = fake_root / "edit-fake", fake_root / "edit-raw"
     _decisao_raw(fake, "2026-10-07T10:01:00+00:00", "trilha", "Phoenix2026", motivo="calma", confianca="alta")

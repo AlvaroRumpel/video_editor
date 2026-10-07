@@ -92,7 +92,7 @@ polêmico). Escolha óbvia sem alternativa não entra. Teto ~30 por projeto.
 `assunto` ∈ provedor, trilha, sfx, broll, corte, grade, zoom, overlay,
 legenda, conceito, clipe, thumbnail, render, outro (fora da lista → `outro`
 e explicar no motivo). `--etapa` precisa estar na receita (ou omitir).
-Respostas do usuário entram sozinhas no log (o servidor grava no `/api/reply`).
+Respostas do usuário entram sozinhas no log (só da fila do projeto; a fila global não entra — o servidor grava no `/api/reply`).
 
 ## Orçamento (ações pagas)
 

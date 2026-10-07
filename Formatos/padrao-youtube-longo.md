@@ -3,7 +3,7 @@ etapas: roteiro?=roteiro, transcricao=transcrição, cortes, fatos, visual, audi
 ---
 # Formato: Padrão YouTube — vídeo longo (horizontal)
 
-> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera --nota "<pergunta curta>"|pulada|falha [--nota]`):
 > roteiro = §0.0 (pular se não houve pedido `roteiro`) · transcricao = §0.1 + `transcribe.py` do §1 ·
 > cortes = §2 (+ `plan_cuts.py`/`verify_text.py` do §1) · fatos = §1.1 · visual = §3, §4, §5, §5.1, §5.2 ·
 > audio = §0.3 + §8.1 · legenda = §7 · render = `rezoom.py` → `recomposite.py` do §1 + §6/§6.1 + §8 ·

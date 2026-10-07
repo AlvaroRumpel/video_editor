@@ -3,7 +3,7 @@ etapas: pesquisa, pauta, aprovacao=aprovação
 ---
 # Pauta mensal com dados (interno; pedido `pauta`)
 
-> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera --nota "<pergunta curta>"|pulada|falha [--nota]`):
 > pesquisa = passos 1–2 · pauta = passo 3 · aprovacao = passos 4–5.
 
 Entrada: `target = {marca, mes}`. Projeto de trabalho:

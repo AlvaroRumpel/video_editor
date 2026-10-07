@@ -160,6 +160,8 @@ function connectSSE(pid) {
         .filter(k => snap.mtimes[k] !== last.mtimes[k]);
       if (changed.length) await loadProject(pid);   // recarrega tudo (simples)
       if (changed.includes('docs') && document.body.dataset.tab === 'docs') renderDocsTab();
+      if (document.body.dataset.tab === 'linha' && ['eventos', 'costs', 'state'].some(k => changed.includes(k)))
+        renderLinha(true, changed.includes('state'));   // state: receita/rótulos podem ter mudado
     }
     last = snap;
   };
@@ -677,7 +679,7 @@ function renderAll() {
   if (tab === 'board') renderBoard();
   if (tab === 'custos') renderCustosTab();
   if (tab === 'aprovacao') renderFolha();
-  if (tab === 'linha') renderLinha(true);
+  if (tab === 'linha' && linhaDados.pid !== S.pid) renderLinha(true);   // 1º load do projeto; mudanças vêm pelo SSE
   if (tab === 'docs' && S.docsPid !== S.pid) { S.docsPid = S.pid; renderDocsTab(); }
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }

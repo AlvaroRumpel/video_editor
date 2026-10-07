@@ -120,8 +120,10 @@ para o card "outros". Texto sempre via `escapeHtml`.
 
 ### Aba "Linha do tempo" (`linha.js`, aba `linha` depois de Custos)
 
-- Busca `/api/linha` ao abrir a aba e quando o SSE recarrega o projeto com a
-  aba visível.
+- Busca `/api/linha` ao abrir a aba (e no 1º load do projeto) e quando o SSE
+  vê mudança em `eventos`, `costs` ou `state` com a aba visível. Mesmo nº de
+  eventos não redesenha, exceto mudança de `state` que altere os quadros
+  (receita/rótulos).
 - Lista cronológica: hora (mono), ícone por tipo (etapa ▸, decisão ◆,
   pergunta ❓ = etapa/espera com nota, resposta ↩, custo $), texto curto.
 - Filtros (chips, combináveis): tipo (`etapa`, `decisao`, `pergunta`,

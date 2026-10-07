@@ -3,7 +3,7 @@ etapas: frame, recorte, composicao=composição, variacoes=variações
 ---
 # Formato: Thumbnail YouTube
 
-> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera --nota "<pergunta curta>"|pulada|falha [--nota]`):
 > frame = "Escolha do frame" · recorte = "Recorte (rembg)" · composicao = "Composição" · variacoes = "Variações" + "Entrega".
 > Rodando dentro de projeto longo: logar só a etapa `thumbnail` no projeto longo — `inicio` no começo,
 > `espera` nas aprovações, `inicio` ao retomar, `fim` no fim, com `--nota` por subpasso; as etapas
