@@ -1,10 +1,14 @@
 import json
 import os
+import subprocess
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 import eventos
 import server
+import server as server_mod
 from test_pipeline import fake_root  # fixture reexport
 
 
@@ -423,3 +427,68 @@ def test_events_vigia_eventos(client, fake_root):
     r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
     snap = json.loads(r.text.split("data: ", 1)[1])
     assert snap["mtimes"]["eventos"] is not None
+
+
+def _fake_run_ok(calls):
+    def run(args, **kw):
+        calls.append(args[0])
+        if args[0] == "ffprobe":
+            return subprocess.CompletedProcess(args, 0, stdout="10.0\n", stderr="")
+        Path(args[-1]).write_bytes(b"\xff\xd8JPEGFAKE")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+    return run
+
+
+def _fake_run_falha(args, **kw):
+    raise FileNotFoundError("ffmpeg")
+
+
+def test_capa_thumbnail_primeiro(client, fake_root, monkeypatch):
+    calls = []
+    monkeypatch.setattr(server_mod, "_run", _fake_run_ok(calls))
+    (fake_root / "edit-fake" / "thumbnail-b.png").write_bytes(b"\x89PNGb")
+    (fake_root / "edit-fake" / "thumbnail-a.png").write_bytes(b"\x89PNGa")
+    r = client.get("/api/capa", params={"id": "edit-fake"})
+    assert r.status_code == 200 and r.content == b"\x89PNGa" and calls == []
+
+
+def test_capa_frame_do_video_com_cache(client, fake_root, monkeypatch):
+    calls = []
+    monkeypatch.setattr(server_mod, "_run", _fake_run_ok(calls))
+    r = client.get("/api/capa", params={"id": "edit-fake"})   # fixture tem preview.mp4
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert (fake_root / "edit-fake" / "ui" / "capa.jpg").exists()
+    assert calls == ["ffprobe", "ffmpeg"]
+    client.get("/api/capa", params={"id": "edit-fake"})      # cache válido: não roda de novo
+    assert calls == ["ffprobe", "ffmpeg"]
+
+
+def test_capa_refaz_se_video_mais_novo(client, fake_root, monkeypatch):
+    calls = []
+    monkeypatch.setattr(server_mod, "_run", _fake_run_ok(calls))
+    proj = fake_root / "edit-fake"
+    (proj / "ui").mkdir(exist_ok=True)
+    (proj / "ui" / "capa.jpg").write_bytes(b"velha")
+    os.utime(proj / "ui" / "capa.jpg", (1_000_000, 1_000_000))
+    r = client.get("/api/capa", params={"id": "edit-fake"})
+    assert r.content == b"\xff\xd8JPEGFAKE" and calls == ["ffprobe", "ffmpeg"]
+
+
+def test_capa_ffmpeg_falha_cai_no_animatic(client, fake_root, monkeypatch):
+    monkeypatch.setattr(server_mod, "_run", _fake_run_falha)
+    (fake_root / "edit-fake" / "animatic-A.png").write_bytes(b"\x89PNGanim")
+    r = client.get("/api/capa", params={"id": "edit-fake"})
+    assert r.status_code == 200 and r.content == b"\x89PNGanim"
+
+
+def test_capa_sheet_de_ref(client, fake_root, monkeypatch):
+    monkeypatch.setattr(server_mod, "_run", _fake_run_falha)
+    (fake_root / "edit-raw" / "ref").mkdir()
+    (fake_root / "edit-raw" / "ref" / "sheet.png").write_bytes(b"\x89PNGsheet")
+    assert client.get("/api/capa", params={"id": "edit-raw"}).content == b"\x89PNGsheet"
+
+
+def test_capa_sem_fonte_404(client, monkeypatch):
+    monkeypatch.setattr(server_mod, "_run", _fake_run_falha)
+    assert client.get("/api/capa", params={"id": "edit-raw"}).status_code == 404
+    assert client.get("/api/capa", params={"id": "../x"}).status_code == 400

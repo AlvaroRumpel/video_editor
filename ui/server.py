@@ -1,7 +1,9 @@
 """Servidor da UI do video_editor. Roda: python ui/server.py"""
 from pathlib import Path
 import math
+import os
 import re
+import subprocess
 import time
 import asyncio
 import json as _json
@@ -321,6 +323,53 @@ def library(request: Request):
     for i in out:
         del i["_ts"]
     return out
+
+
+_run = subprocess.run   # injetável nos testes
+
+
+def _frame(video: Path, dst: Path) -> None:
+    """Frame a 10% da duração → dst (jpg, 640 de largura). Escreve atômico."""
+    out = _run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "csv=p=0", str(video)],
+               capture_output=True, text=True, check=True, timeout=30)
+    dur = float(out.stdout.strip())
+    tmp = dst.with_name("capa.tmp.jpg")
+    _run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{dur * 0.1:.2f}", "-i", str(video),
+          "-frames:v", "1", "-vf", "scale=640:-2", str(tmp)],
+         capture_output=True, check=True, timeout=30)
+    os.replace(tmp, dst)
+
+
+@app.get("/api/capa")
+def capa(request: Request, id: str):
+    proj = _proj(request, id)
+    base = proj.resolve()
+
+    def ok(p: Path) -> bool:
+        return p.is_file() and p.resolve().is_relative_to(base)
+
+    thumbs = [p for p in sorted(proj.glob("thumbnail*.png")) if ok(p)]
+    if thumbs:
+        return FileResponse(thumbs[0], media_type="image/png")
+    cache = proj / "ui" / "capa.jpg"
+    for nome in ("final.mp4", "preview.mp4"):
+        video = proj / nome
+        if not ok(video):
+            continue
+        if ok(cache) and cache.stat().st_mtime >= video.stat().st_mtime:
+            return FileResponse(cache, media_type="image/jpeg")
+        try:
+            cache.parent.mkdir(exist_ok=True)
+            _frame(video, cache)
+            return FileResponse(cache, media_type="image/jpeg")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue   # ffmpeg ausente/falhou: próxima fonte
+    for rel in ("animatic-A.png", "ref/sheet.png"):
+        p = proj / rel
+        if ok(p):
+            return FileResponse(p, media_type="image/png")
+    raise HTTPException(404, "sem capa")
 
 
 BUDGET_NUM = ("teto_mensal_usd", "teto_projeto_usd", "aprovar_acima_usd")
