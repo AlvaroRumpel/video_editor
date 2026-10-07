@@ -1,12 +1,18 @@
 """Dublagem: frases na timeline do export, tradução (preenchida pelo Claude)
 validada contra glossário e tempo, TTS ElevenLabs por frase (cache + orçamento),
 encaixe no tempo, remix e exports por idioma. Artefato: <proj>/dub/<lang>/dublagem.json."""
+import hashlib
 import json
 import re
+import shutil
+import subprocess
 import sys
+import wave
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import audio  # noqa: E402
+import budget  # noqa: E402
 import clips  # noqa: E402
 import pipeline  # noqa: E402
 
@@ -18,6 +24,10 @@ MAX_FATOR = 1.25
 MAX_FRASE_S = 12.0
 PAUSA = 0.35
 CAMPOS_TTS = ("trad", "audio", "hash", "dur", "fator", "estado")
+TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
+MODELO_TTS = "eleven_multilingual_v2"
+SR = 48000
+EXIT_ORCAMENTO = {"ok": 0, "precisa_aprovacao": 2, "bloqueado": 3}
 
 
 def _dir(proj, lang) -> Path:
@@ -207,6 +217,157 @@ def edl(proj, lang) -> dict:
     return {"trocados": trocados, "mantidos": mantidos}
 
 
+def _hash(voice_id: str, trad: str) -> str:
+    return hashlib.sha1(f"{voice_id}\n{trad}".encode("utf-8")).hexdigest()
+
+
+def tts(proj, lang, root=None, aprovacao=None, _fetch=None) -> dict:
+    """Gera mp3 das frases traduzidas que mudaram (texto ou voz). Autoriza antes; registra o gerado."""
+    root = Path(root or pipeline.ROOT)
+    proj = Path(proj)
+    d = _ler(proj, lang)
+    v = voz(proj, root)
+    pend = [f for f in d["frases"] if (f.get("trad") or "").strip() and (
+        f.get("hash") != _hash(v["voice_id"], f["trad"].strip())
+        or not f.get("audio") or not (proj / f["audio"]).is_file())]
+    if not pend:
+        return {"status": "ok", "geradas": [], "caracteres": 0}
+    chars = sum(len(f["trad"].strip()) for f in pend)
+    a = budget.autorizar(root, proj, "elevenlabs_tts", chars, aprovacao=aprovacao)
+    if a["status"] != "ok":
+        return {**a, "caracteres": chars, "pendentes": len(pend)}
+    key = budget._chave_elevenlabs()
+    if not key:
+        raise RuntimeError("ELEVENLABS_API_KEY ausente")
+    fetch = _fetch or audio._fetch_elevenlabs
+    url = TTS_URL.format(voice_id=v["voice_id"])
+    dd = _dir(proj, lang)
+    geradas, usados, erro = [], 0, None
+    try:
+        for f in pend:
+            trad = f["trad"].strip()
+            try:
+                dados = fetch(key, url, {"text": trad, "model_id": MODELO_TTS})
+            except RuntimeError as e:
+                erro = str(e)
+                break
+            (dd / f"{f['id']}.mp3").write_bytes(dados)
+            f.update(audio=f"dub/{lang}/{f['id']}.mp3", hash=_hash(v["voice_id"], trad),
+                     dur=None, fator=None, estado="gerada")
+            geradas.append(f["id"])
+            usados += len(trad)
+    finally:
+        d["voz"] = v
+        _gravar(proj, lang, d)
+        if usados:   # créditos já consumidos: registrar mesmo se o lote parou
+            budget.registrar(proj, "elevenlabs_tts", usados, aprovacao=aprovacao,
+                             nota=f"dublagem {lang}: {len(geradas)} frases", root=root)
+    if erro:
+        raise RuntimeError(f"TTS parou após {len(geradas)} frases: {erro}")
+    return {"status": "ok", "geradas": geradas, "caracteres": usados}
+
+
+def _dur(path: Path, run) -> float:
+    r = run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, check=True, timeout=60)
+    return float(r.stdout.strip())
+
+
+def encaixar(proj, lang, dur_total: float, _run=None) -> dict:
+    """Mede cada frase, acelera até MAX_FATOR, posiciona em t_in num voz.wav (48 kHz mono) do tamanho do export."""
+    run = _run or subprocess.run
+    proj = Path(proj)
+    d = _ler(proj, lang)
+    dd = _dir(proj, lang)
+    tmp = dd / "_encaixe"
+    tmp.mkdir(parents=True, exist_ok=True)
+    buf = bytearray(int(dur_total * SR) * 2)
+    res = {"encaixadas": [], "aceleradas": [], "estouradas": []}
+    try:
+        for f in d["frases"]:
+            src = proj / f["audio"] if f.get("audio") else None
+            if not src or not src.is_file():
+                continue
+            slot = float(f["t_out"]) - float(f["t_in"])
+            dur = _dur(src, run)
+            fator = dur / slot if slot > 0 else float("inf")
+            f["dur"], f["fator"] = round(dur, 3), round(fator, 3)
+            if fator > MAX_FATOR:
+                f["estado"] = "estoura"
+                res["estouradas"].append(f["id"])
+                continue
+            wav = tmp / f"{f['id']}.wav"
+            af = ["-af", f"atempo={fator:.4f}"] if fator > 1 else []
+            run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), *af,
+                 "-ar", str(SR), "-ac", "1", "-c:a", "pcm_s16le", str(wav)],
+                capture_output=True, check=True, timeout=120)
+            with wave.open(str(wav), "rb") as w:
+                pcm = w.readframes(w.getnframes())
+            ini = int(float(f["t_in"]) * SR) * 2
+            if ini < len(buf):
+                fim = min(ini + len(pcm), len(buf))
+                buf[ini:fim] = pcm[:fim - ini]
+            f["estado"] = "encaixada"
+            (res["aceleradas"] if fator > 1 else res["encaixadas"]).append(f["id"])
+        with wave.open(str(dd / "voz.wav"), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(SR)
+            w.writeframes(bytes(buf))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        _gravar(proj, lang, d)
+    return res
+
+
+def _trilha(proj: Path, root: Path, trilha=None):
+    """Trilha explícita, ou state.json.audio.trilha (caminho, ou nome em assets/music/)."""
+    if trilha:
+        return Path(trilha)
+    st = pipeline.read_json(proj / "ui" / "state.json", {})
+    nome = ((st.get("audio") or {}).get("trilha") if isinstance(st, dict) else None) or ""
+    if not nome:
+        return None
+    for cand in (Path(nome), root / nome, proj / nome):
+        if cand.is_file():
+            return cand
+    achados = sorted((root / "assets" / "music").glob(f"{Path(nome).stem}.*"))
+    return achados[0] if achados else None
+
+
+def mixar(proj, lang, export, nome, root=None, video=None, saida=None, trilha=None) -> dict:
+    """voz.wav (+ trilha com ducking) sobre a imagem de `video` (ou do export) → mp4, m4a e srt em Export/."""
+    root = Path(root or pipeline.ROOT)
+    proj = Path(proj)
+    dd = _dir(proj, lang)
+    voz_wav = dd / "voz.wav"
+    if not voz_wav.is_file():
+        raise ValueError("voz.wav ausente — rode `encaixar` antes")
+    saida = Path(saida or root / "Export")
+    video = Path(video or export)
+    st = pipeline.read_json(proj / "ui" / "state.json", {})
+    a = (st.get("audio") or {}) if isinstance(st, dict) else {}
+    tp = _trilha(proj, root, trilha)
+    base = dd / "_base.mp4"
+    mp4 = saida / f"{nome} - {lang}.mp4"
+    try:
+        audio._atomico(base, ["-i", str(video), "-i", str(voz_wav), "-map", "0:v", "-map", "1:a",
+                              "-c:v", "copy", *audio.AAC, "-shortest"])
+        if tp:
+            audio.mix_trilha(base, tp, mp4, nivel_db=float(a.get("nivel_db", -18.0)),
+                             duck_db=float(a.get("duck_db", -8.0)))
+        else:
+            audio._atomico(mp4, ["-i", str(base), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+                                 "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart"])
+    finally:
+        base.unlink(missing_ok=True)
+    m4a = saida / f"{nome} - {lang}.m4a"
+    audio._atomico(m4a, ["-i", str(mp4), "-vn", "-c:a", "copy"])
+    srt_path = saida / f"{nome} - {lang}.srt"
+    srt_path.write_text(srt(proj, lang), encoding="utf-8")
+    return {"mp4": str(mp4), "m4a": str(m4a), "srt": str(srt_path), "trilha": str(tp) if tp else None}
+
+
 def _cli(ns, root: Path):
     proj = Path(ns.proj)
     if ns.cmd == "frases":
@@ -223,6 +384,14 @@ def _cli(ns, root: Path):
         return {"palavras": len(words(proj, ns.lang))}, 0
     if ns.cmd == "edl":
         return edl(proj, ns.lang), 0
+    if ns.cmd == "tts":
+        r = tts(proj, ns.lang, root=root, aprovacao=ns.aprovacao)
+        return r, EXIT_ORCAMENTO.get(r["status"], 2)
+    if ns.cmd == "encaixar":
+        return encaixar(proj, ns.lang, audio.duracao(Path(ns.export))), 0
+    if ns.cmd == "mixar":
+        return mixar(proj, ns.lang, Path(ns.export), ns.nome, root=root, video=ns.video,
+                     saida=ns.saida, trilha=ns.trilha), 0
     raise ValueError(f"comando desconhecido: {ns.cmd}")
 
 
@@ -235,6 +404,10 @@ def _parser():
     for c in ("validar", "words", "edl"):
         p = sub.add_parser(c); p.add_argument("proj"); p.add_argument("lang")
     p = sub.add_parser("srt"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--saida", required=True)
+    p = sub.add_parser("tts"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--aprovacao", type=int)
+    p = sub.add_parser("encaixar"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--export", required=True)
+    p = sub.add_parser("mixar"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--export", required=True)
+    p.add_argument("--nome", required=True); p.add_argument("--video"); p.add_argument("--saida"); p.add_argument("--trilha")
     return ap, sub
 
 

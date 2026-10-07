@@ -182,3 +182,160 @@ def test_cli_frases_validar(root, tmp_path):
     r = _cli(root, "validar", str(proj), "es")
     assert r.returncode == 1 and json.loads(r.stdout)["ok"] is False
     assert _cli(root, "frases", str(proj), "XX", "--words", str(wp)).returncode == 1
+
+
+import budget
+
+
+def _ff(*args):
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args], check=True)
+
+
+@pytest.fixture
+def tts_root(root, monkeypatch):
+    (root / "ui" / "precos.json").write_text(json.dumps({
+        "elevenlabs_tts": {"unidade": "caractere", "usd": 0.0001, "creditos": 0}}), encoding="utf-8")
+    monkeypatch.setattr(budget, "_chave_elevenlabs", lambda: "k")
+    return root
+
+
+def _fetch_ok(calls):
+    def f(key, url, body):
+        calls.append((url, body["text"]))
+        return b"ID3fake-mp3-" + body["text"].encode("utf-8")
+    return f
+
+
+def _custos(proj):
+    p = proj / "ui" / "costs.jsonl"
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()] if p.exists() else []
+
+
+def test_tts_gera_e_registra(tts_root):
+    proj = _proj(tts_root)
+    dublagem.frases(proj, "es", _words("oi gente", "tudo bem"))
+    _set_trad(proj, {"f001": "hola gente", "f002": "todo bien"})
+    calls = []
+    r = dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok(calls))
+    assert r["status"] == "ok" and r["geradas"] == ["f001", "f002"] and r["caracteres"] == 19
+    assert calls[0][0] == "https://api.elevenlabs.io/v1/text-to-speech/VPAD?output_format=mp3_44100_128"
+    d = _dub(proj)
+    assert d["voz"]["voice_id"] == "VPAD"
+    f = d["frases"][0]
+    assert f["audio"] == "dub/es/f001.mp3" and f["estado"] == "gerada" and len(f["hash"]) == 40
+    assert (proj / "dub" / "es" / "f001.mp3").read_bytes().startswith(b"ID3")
+    c = _custos(proj)
+    assert len(c) == 1 and c[0]["provedor"] == "elevenlabs_tts" and c[0]["unidades"] == 19
+
+
+def test_tts_cache_e_troca_de_voz(tts_root):
+    proj = _proj(tts_root)
+    dublagem.frases(proj, "es", _words("oi gente", "tudo bem"))
+    _set_trad(proj, {"f001": "hola gente", "f002": "todo bien"})
+    dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok([]))
+    calls = []
+    assert dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok(calls))["geradas"] == []
+    _set_trad(proj, {"f002": "todo muy bien"})
+    assert dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok(calls))["geradas"] == ["f002"]
+    (proj / "ui" / "state.json").write_text(json.dumps({"dub": {"voz": {"voice_id": "OUTRA", "nome": "o"}}}),
+                                            encoding="utf-8")
+    assert dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok(calls))["geradas"] == ["f001", "f002"]
+    assert calls[-1][0].startswith("https://api.elevenlabs.io/v1/text-to-speech/OUTRA")
+
+
+def test_tts_orcamento_negado(tts_root):
+    proj = _proj(tts_root)
+    dublagem.frases(proj, "es", _words("oi gente"))
+    _set_trad(proj, {"f001": "x" * 6000})                        # 6000 × 0.0001 = 0.60 > aprovar_acima 0.5
+    calls = []
+    r = dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok(calls))
+    assert r["status"] == "precisa_aprovacao" and r["caracteres"] == 6000 and calls == []
+    assert _custos(proj) == [] and _dub(proj)["frases"][0]["audio"] is None
+
+
+def test_tts_erro_no_meio(tts_root):
+    proj = _proj(tts_root)
+    dublagem.frases(proj, "es", _words("um", "dois", "tres"))
+    _set_trad(proj, {"f001": "uno", "f002": "dos", "f003": "tres"})
+
+    def falha_na_segunda(key, url, body):
+        if body["text"] == "dos":
+            raise RuntimeError("ElevenLabs HTTP 500")
+        return b"ID3" + body["text"].encode()
+
+    with pytest.raises(RuntimeError, match="1 frases"):
+        dublagem.tts(proj, "es", root=tts_root, _fetch=falha_na_segunda)
+    fs = _dub(proj)["frases"]
+    assert fs[0]["estado"] == "gerada" and fs[1]["audio"] is None
+    assert [c["unidades"] for c in _custos(proj)] == [3]
+
+
+def test_tts_sem_voz(tts_root):
+    proj = _proj(tts_root)
+    (tts_root / "ui" / "vozes.json").write_text("{}", encoding="utf-8")
+    dublagem.frases(proj, "es", _words("oi"))
+    _set_trad(proj, {"f001": "hola"})
+    with pytest.raises(ValueError, match="vozes.json"):
+        dublagem.tts(proj, "es", root=tts_root, _fetch=_fetch_ok([]))
+
+
+def _tom(path, dur):
+    _ff("-f", "lavfi", "-i", f"sine=f=440:r=48000:d={dur}", "-ac", "1", str(path))
+
+
+def test_encaixar_real(root):
+    proj = _proj(root)
+    dublagem.frases(proj, "es", _words("a b c d", "e f g h", "i j k l", gap=1.0))   # slots de 1.15 s
+    d = _dub(proj)
+    durs = {"f001": 0.8, "f002": 1.3, "f003": 2.0}                                # ≤1 · ~1.13× · ~1.74×
+    for f in d["frases"]:
+        _tom(proj / "dub" / "es" / f"{f['id']}.wav", durs[f["id"]])
+        f["audio"] = f"dub/es/{f['id']}.wav"
+        f["trad"] = "x"
+    (proj / "dub" / "es" / "dublagem.json").write_text(json.dumps(d), encoding="utf-8")
+    r = dublagem.encaixar(proj, "es", dur_total=6.0)
+    assert r == {"encaixadas": ["f001"], "aceleradas": ["f002"], "estouradas": ["f003"]}
+    import wave
+    with wave.open(str(proj / "dub" / "es" / "voz.wav"), "rb") as w:
+        assert w.getframerate() == 48000 and w.getnchannels() == 1
+        assert abs(w.getnframes() / 48000 - 6.0) < 0.01
+    fs = {f["id"]: f for f in _dub(proj)["frases"]}
+    assert fs["f003"]["estado"] == "estoura" and fs["f002"]["estado"] == "encaixada"
+    assert 1.0 < fs["f002"]["fator"] <= dublagem.MAX_FATOR
+    assert not (proj / "dub" / "es" / "_encaixe").exists()
+
+
+def test_mixar_real(root, tmp_path):
+    proj = _proj(root)
+    export = tmp_path / "final.mp4"
+    _ff("-f", "lavfi", "-i", "testsrc=s=320x180:r=30:d=3", "-f", "lavfi", "-i", "sine=f=300:r=48000:d=3",
+        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(export))
+    dublagem.frases(proj, "es", _words("oi gente"))
+    _set_trad(proj, {"f001": "hola gente"})
+    _tom(proj / "dub" / "es" / "voz.wav", 3)
+    saida = tmp_path / "Export"
+    r = dublagem.mixar(proj, "es", export, "Meu video", root=root, saida=saida)
+    assert r["trilha"] is None
+    for ext in ("mp4", "m4a", "srt"):
+        assert (saida / f"Meu video - es.{ext}").exists()
+    trilha = tmp_path / "t.wav"
+    _tom(trilha, 5)
+    r = dublagem.mixar(proj, "es", export, "Meu video", root=root, saida=saida, trilha=trilha)
+    assert r["trilha"] == str(trilha)
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+                            str(saida / "Meu video - es.mp4")], capture_output=True, text=True).stdout.split()
+    assert probe.count("video") == 1 and probe.count("audio") == 1
+
+
+def test_mixar_sem_voz(root, tmp_path):
+    dublagem.frases(_proj(root), "es", _words("oi"))
+    with pytest.raises(ValueError, match="voz.wav"):
+        dublagem.mixar(_proj(root), "es", tmp_path / "x.mp4", "n", root=root, saida=tmp_path)
+
+
+def test_cli_tts_exit_codes(tts_root, monkeypatch):
+    proj = _proj(tts_root)
+    dublagem.frases(proj, "es", _words("oi"))
+    _set_trad(proj, {"f001": "x" * 6000})
+    r = _cli(tts_root, "tts", str(proj), "es")
+    assert r.returncode == 2 and json.loads(r.stdout)["status"] == "precisa_aprovacao"
