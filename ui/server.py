@@ -285,10 +285,23 @@ def _fila_ativa(proj: Path) -> list:
     return [e for e in q if isinstance(e, dict) and e.get("status") in FILA_ATIVA]
 
 
-def _atividade(proj: Path) -> float:
-    cands = [*(proj / "ui").glob("*"), proj / "edl.json", proj / "preview.mp4", proj / "final.mp4"]
+_NAO_ATIVIDADE = {"heartbeat", "capa.jpg", "capa.tmp.jpg"}   # escuta/cache de capa não são atividade
+CAPA_FONTES = ("final.mp4", "preview.mp4", "animatic-A.png", "ref/sheet.png")
+
+
+def _max_mtime(cands) -> float:
     ms = [m for m in map(_mtime, cands) if m is not None]
     return max(ms) if ms else 0.0
+
+
+def _atividade(proj: Path) -> float:
+    ui = [p for p in (proj / "ui").glob("*") if p.name not in _NAO_ATIVIDADE]
+    return _max_mtime([*ui, proj / "edl.json", proj / "preview.mp4", proj / "final.mp4"])
+
+
+def _capa_v(proj: Path) -> float:
+    """Versão da capa: só muda quando uma fonte da capa muda."""
+    return _max_mtime([*proj.glob("thumbnail*.png"), *(proj / r for r in CAPA_FONTES)])
 
 
 def _curta(e):
@@ -302,7 +315,7 @@ def library(request: Request):
     for p in pipeline.find_projects(root):
         item = {**p, "formato": None, "etapas": [], "atual": None, "sem_historico": True,
                 "pendencias": 0, "fila": [], "custo_usd": 0.0, "claude_online": False,
-                "atividade": None, "_ts": 0.0}
+                "atividade": None, "capa_v": 0, "_ts": 0.0}
         try:
             proj = pipeline.project_dir(root, p["id"])
             q = eventos.quadro(proj, root=root)
@@ -314,7 +327,7 @@ def library(request: Request):
                 atual=_curta(atual) if atual else None, sem_historico=q["sem_historico"],
                 pendencias=sum(e["status"] == "waiting_reply" for e in fila), fila=fila,
                 custo_usd=budget.gasto_projeto(proj)["usd"],
-                claude_online=pipeline.claude_online(proj), _ts=ts,
+                claude_online=pipeline.claude_online(proj), _ts=ts, capa_v=_capa_v(proj),
                 atividade=datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts else None)
         except Exception:  # noqa: BLE001 — projeto ilegível não derruba a biblioteca
             pass

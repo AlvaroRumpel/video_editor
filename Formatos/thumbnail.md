@@ -5,6 +5,9 @@ etapas: frame, recorte, composicao=composição, variacoes=variações
 
 > Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
 > frame = "Escolha do frame" · recorte = "Recorte (rembg)" · composicao = "Composição" · variacoes = "Variações" + "Entrega".
+> Rodando dentro de projeto longo: logar só a etapa `thumbnail` no projeto longo — `inicio` no começo,
+> `espera` nas aprovações, `inicio` ao retomar, `fim` no fim, com `--nota` por subpasso; as etapas
+> acima valem só para projeto com formato próprio.
 
 Recorte do apresentador sobre fundo chapado + tipografia pesada. 1280×720 PNG.
 Sem geração de imagem por IA — a matéria-prima é sempre frame do próprio vídeo.

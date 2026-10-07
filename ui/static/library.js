@@ -33,14 +33,13 @@ async function loadLibrary() {
 
 function libCard(p) {
   const href = '#/p/' + encodeURIComponent(p.id);
-  const v = encodeURIComponent(p.atividade || '');
-  const capa = `/api/capa?id=${encodeURIComponent(p.id)}&v=${v}`;
+  const capa = `/api/capa?id=${encodeURIComponent(p.id)}&v=${p.capa_v || 0}`;
   const dots = p.etapas.map(e =>
     `<i class="st-${e.status}" title="${escapeHtml(e.rotulo)} · ${STATUS_LABEL[e.status] || e.status}"></i>`).join('');
   const atual = p.atual ? `${escapeHtml(p.atual.rotulo)} · ${STATUS_LABEL[p.atual.status] || p.atual.status}`
     : !p.etapas.length ? 'sem etapas' : p.sem_historico ? 'sem histórico' : 'parado';
   return `<a class="lib-card" href="${href}">
-      <div class="lib-capa"><span class="lib-sigla">${sigla(p.formato)}</span>
+      <div class="lib-capa"><span class="lib-sigla">${escapeHtml(sigla(p.formato))}</span>
         <img src="${capa}" alt="" loading="lazy" onerror="this.remove()"></div>
       <div class="lib-info">
         <div class="lib-nome">${escapeHtml(p.name)}</div>

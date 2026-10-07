@@ -165,6 +165,19 @@ def test_quadro_reinicio_apos_fim(root):
     assert e["nota"] is None   # nota do ciclo anterior não vaza
 
 
+def test_quadro_retoma_apos_espera(root):
+    proj = _proj(root)
+    _ev(proj, "cortes", "inicio", T(0))
+    _ev(proj, "cortes", "espera", T(2), nota="aprova?")
+    _ev(proj, "cortes", "inicio", T(4))
+    _ev(proj, "cortes", "fim", T(6), nota="ok")
+    _custo(proj, T(1), 1.0)
+    _custo(proj, T(5), 0.25)
+    e = eventos.quadro(proj, root=root)["etapas"][2]
+    assert e["status"] == "fim" and e["inicio"] == T(0) and e["fim"] == T(6)
+    assert e["custo_usd"] == 1.25 and e["nota"] == "ok"
+
+
 def test_quadro_custo_por_intervalo(root):
     proj = _proj(root)
     _ev(proj, "transcricao", "inicio", T(0))
@@ -226,7 +239,8 @@ def test_cli_validacao_exit_1(root):
 
 
 ESPERADO = {
-    "padrao-youtube-longo": ["roteiro", "transcricao", "cortes", "fatos", "visual", "audio", "legenda", "render", "entrega"],
+    "padrao-youtube-longo": ["roteiro", "transcricao", "cortes", "fatos", "visual", "audio", "legenda", "render", "entrega",
+                             "shorts", "thumbnail"],
     "padrao-youtube-shorts": ["transcricao", "candidatos", "aprovacao", "render", "draft"],
     "padrao-ads": ["referencia", "pesquisa", "roteiro", "producao", "audio", "render", "qc"],
     "pauta": ["pesquisa", "pauta", "aprovacao"],

@@ -120,9 +120,16 @@ function renderBoard() {
 function boardReply(input) {
   const text = input.value.trim();
   if (!text) return;
-  delete boardDrafts[draftKey(input)];
+  const k = draftKey(input);
+  delete boardDrafts[k];
   input.value = '';
-  sendReply(+input.dataset.qid, text, 'proj');
+  sendReply(+input.dataset.qid, text, 'proj').catch(e => {   // falhou: texto volta ao rascunho
+    console.warn(e);
+    if (!boardDrafts[k]) boardDrafts[k] = text;
+    el('tab-board').querySelectorAll('.board-reply-input').forEach(t => {
+      if (draftKey(t) === k && !t.value) t.value = text;
+    });
+  });
 }
 
 el('tab-board').addEventListener('click', e => {

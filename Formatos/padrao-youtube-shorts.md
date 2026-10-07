@@ -6,6 +6,9 @@ etapas: transcricao=transcrição, candidatos, aprovacao=aprovação, render, dr
 > Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
 > transcricao = Método 1 · candidatos = Método 2–4 · aprovacao = Método 5 (`espera` no waiting_reply) ·
 > render = Método 6 · draft = Método 7–8.
+> Rodando dentro de projeto longo: logar só a etapa `shorts` no projeto longo — `inicio` no começo,
+> `espera` nas aprovações, `inicio` ao retomar, `fim` no fim, com `--nota` por subpasso; as etapas
+> acima valem só para projeto com formato próprio.
 
 Shorts são cortes derivados do **export horizontal pronto** — nunca do bruto.
 O horizontal já está cortado, gradeado e com punch-ins, então um short custa um

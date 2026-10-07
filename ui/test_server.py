@@ -407,6 +407,21 @@ def test_library_ordena_por_atividade(client, fake_root):
     assert ids.index("edit-raw") < ids.index("edit-fake")
 
 
+def test_library_heartbeat_e_capa_nao_mudam_atividade(client, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "ui").mkdir(exist_ok=True)
+    for p in [proj / "edl.json", proj / "preview.mp4", *proj.glob("ui/*")]:
+        os.utime(p, (1_000_000, 1_000_000))
+    antes = {p["id"]: p for p in client.get("/api/library").json()}["edit-fake"]
+    (proj / "ui" / "heartbeat").touch()
+    (proj / "ui" / "capa.jpg").write_bytes(b"jpg")
+    depois = {p["id"]: p for p in client.get("/api/library").json()}["edit-fake"]
+    assert depois["atividade"] == antes["atividade"]
+    assert depois["capa_v"] == antes["capa_v"] == 1_000_000   # preview.mp4
+    (proj / "thumbnail.png").write_bytes(b"png")
+    assert {p["id"]: p for p in client.get("/api/library").json()}["edit-fake"]["capa_v"] > 1_000_000
+
+
 def test_library_projeto_ilegivel_nao_quebra(client, monkeypatch):
     real = eventos.quadro
 

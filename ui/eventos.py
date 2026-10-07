@@ -16,6 +16,7 @@ import budget  # noqa: E402
 import pipeline  # noqa: E402
 
 STATUS = {"inicio", "fim", "espera", "pulada", "falha"}
+TERMINAIS = {"fim", "falha", "pulada"}   # fecham o ciclo da etapa
 ID_RE = re.compile(r"[a-z0-9-]+")
 FORMATO_RE = re.compile(r"[\w\-]+")
 FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---", re.S)
@@ -125,11 +126,15 @@ def _resumo(item: dict, evs: list[dict], custos: list[tuple], agora: datetime) -
     ult = evs[-1]["status"]
     status = "andamento" if ult == "inicio" else ult
     idx = max((i for i, e in enumerate(evs) if e["status"] == "inicio"), default=None)
-    inicio = evs[idx]["ts"] if idx is not None else None
+    ciclo = None   # 1º inicio do ciclo atual: retomar após `espera` não zera início/custo
+    if idx is not None:
+        term = max((i for i, e in enumerate(evs[:idx]) if e["status"] in TERMINAIS), default=-1)
+        ciclo = next(i for i in range(term + 1, idx + 1) if evs[i]["status"] == "inicio")
+    inicio = evs[ciclo]["ts"] if ciclo is not None else None
     depois = evs[idx + 1:] if idx is not None else evs
     fims = [e["ts"] for e in depois if e["status"] == "fim"]
     fim = fims[-1] if fims else None
-    nota = next((e["nota"] for e in reversed(evs[idx or 0:]) if e.get("nota")), None)
+    nota = next((e["nota"] for e in reversed(evs[ciclo or 0:]) if e.get("nota")), None)
     custo = 0.0
     if inicio:
         if fim:

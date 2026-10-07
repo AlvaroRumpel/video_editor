@@ -69,21 +69,27 @@ Listas iniciais:
 
 | formato | etapas |
 |---|---|
-| padrao-youtube-longo | `roteiro?, transcricao=transcrição, cortes, fatos, visual, audio=áudio, legenda, render, entrega` |
+| padrao-youtube-longo | `roteiro?, transcricao=transcrição, cortes, fatos, visual, audio=áudio, legenda, render, entrega, shorts?, thumbnail?` |
 | padrao-youtube-shorts | `transcricao=transcrição, candidatos, aprovacao=aprovação, render, draft=draft Publora` |
 | padrao-ads | `referencia?=referência, pesquisa, roteiro, producao=produção, audio=áudio, render, qc=QC` |
 | pauta | `pesquisa, pauta, aprovacao=aprovação` |
 | thumbnail | `frame, recorte, composicao=composição, variacoes=variações` |
 
 `visual` (longo) agrupa grade, punch-in, motion e b-roll; `audio` agrupa
-limpeza e trilha.
+limpeza e trilha. Shorts (Clip Factory) e thumbnail rodam dentro do projeto
+longo: lá viram as etapas opcionais `shorts`/`thumbnail` (`inicio` no começo,
+`espera` nas aprovações, `inicio` ao retomar, `fim` no fim, `--nota` por
+subpasso); as listas próprias de shorts/thumbnail valem só para projeto com
+esse formato.
 
 Projetos de referência têm `formato: padrao-ads` desde o passo 0 de
 `referencia.md`, então o fluxo referência é a etapa opcional `referencia` do
 ads (`inicio` no passo 0, notas por subpasso, `fim` na escolha) — sem lista
 própria. `pauta.md` e `padrao-youtube-longo.md` §0.0 passam a criar
 `ui/state.json` com `formato` (`pauta` / `padrao-youtube-longo`) junto com
-`ui/`, para o log validar.
+`ui/`, para o log validar. `novo-projeto` (CLAUDE.md) cria/mescla
+`ui/state.json` com `{"formato": target.formato}` antes da primeira etapa,
+preservando chaves existentes.
 
 ### Log de eventos
 
@@ -125,12 +131,17 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
   ```
   - `status` da etapa = status do último evento dela; sem evento =
     `"pendente"`; último evento `inicio` → `"andamento"`.
-  - `inicio` = ts do último `inicio`; `fim` = ts do `fim` posterior a esse
-    `inicio` (ou null). `nota` = última nota não vazia da etapa.
+  - Ciclo atual = eventos a partir do 1º `inicio` depois do último
+    `fim|falha|pulada` que precede o último `inicio` (retomar após `espera`
+    com novo `inicio` continua o mesmo ciclo; `inicio` após `fim` abre outro).
+  - `inicio` = ts do 1º `inicio` do ciclo atual; `fim` = ts do último `fim`
+    posterior ao último `inicio` (ou null). `nota` = última nota não vazia do
+    ciclo atual.
   - `atual` = etapa com `inicio` sem `fim` posterior de ts mais recente;
     se nenhuma, a última com `espera`; senão null.
   - `custo_usd` = soma de `usd` das linhas de `costs.jsonl` com `ts` dentro de
-    `[inicio, fim]` (ou `[inicio, agora]` se em andamento). Gasto fora de
+    `[inicio, fim]` (ou `[inicio, agora]` se em andamento; `espera`/`falha`/`pulada`
+    fecham no último evento). Gasto fora de
     qualquer intervalo não entra em etapa (continua no total do projeto).
   - Etapas no log que não existem na receita → `fora_da_receita`.
   - `sem_historico` = nenhum evento válido.
@@ -143,11 +154,15 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
   `{id, name, formato, started, has_preview, has_final, etapas: [{id, rotulo, status}],
   atual: {id, rotulo, status}|null, sem_historico: bool, pendencias: int,
   fila: [pedidos pending|executing|waiting_reply], custo_usd: float,
-  claude_online: bool, atividade: ISO|null}`.
+  claude_online: bool, atividade: ISO|null, capa_v: float}`.
   - `pendencias` = pedidos `waiting_reply` em `<proj>/ui/queue.json`.
   - `custo_usd` = `budget.gasto_projeto(proj)` total.
-  - `atividade` = maior mtime entre `ui/*`, `edl.json`, `preview.mp4`,
-    `final.mp4`. Lista ordenada por `atividade` desc.
+  - `atividade` = maior mtime entre `ui/*` (exceto `heartbeat`, `capa.jpg`,
+    `capa.tmp.jpg`), `edl.json`, `preview.mp4`, `final.mp4`. Lista ordenada
+    por `atividade` desc.
+  - `capa_v` = maior mtime das fontes da capa (`thumbnail*.png`, `final.mp4`,
+    `preview.mp4`, `animatic-A.png`, `ref/sheet.png`; 0 se nenhuma) — versão
+    da URL da capa no card, muda só quando a capa pode mudar.
   - Erro ao ler um projeto não derruba a lista: o projeto entra com campos
     mínimos (`id`, `name`) e `etapas: []`.
 - `GET /api/quadro?id=` — `eventos.quadro(proj)`.
@@ -223,6 +238,7 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
 - Ao começar etapa da receita: `python ui/eventos.py etapa <proj> <id> inicio`.
 - Ao concluir: `... fim --nota "<resumo curto>"`.
 - Ao abrir `waiting_reply` dentro de uma etapa: `... espera`.
+- Retomou depois da resposta: `... inicio` de novo.
 - Etapa opcional que não vai rodar: `... pulada`. Erro: `... falha --nota "<motivo>"`.
 - exit 1 do CLI (etapa inválida) → conferir front-matter da receita; nunca
   inventar id.

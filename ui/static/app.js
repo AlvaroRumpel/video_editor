@@ -43,6 +43,7 @@ async function route() {
     body.dataset.route = 'library';
     if (S.es) { S.es.close(); S.es = null; }
     S.pid = null; S.proj = null; S.quadro = null; S.selected = null;
+    el('instr-context').textContent = 'instrução geral';
     const v = el('player');
     v.pause(); if (v.getAttribute('src')) v.removeAttribute('src');
     el('render-progress').hidden = true;   // progresso é por projeto
@@ -121,7 +122,7 @@ async function loadProjectInner(pid) {
   const novo = S.pid !== pid;
   S.pid = pid; S.proj = proj; S.wave = wave; S.quadro = quadro;
   S.globalQueue = gq; S.activity = act; S.budget = bud;
-  if (novo) { S.selected = null; S.docsPid = null; }
+  if (novo) { S.selected = null; S.docsPid = null; el('instr-context').textContent = 'instrução geral'; }
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
   if (S.proj.has_preview)
@@ -658,7 +659,8 @@ function renderAll() {
 }
 
 function renderHeader() {
-  el('proj-name').textContent = S.pid.split('/').slice(-2).join('/');
+  const parts = S.pid.split('/');   // mesma regra de pipeline.find_projects (nome do card)
+  el('proj-name').textContent = parts.length >= 3 ? parts.slice(-2).join('/') : parts.at(-1);
   el('proj-cost').textContent = fmtUSD((S.proj.custos || {}).usd);
 }
 
@@ -735,7 +737,10 @@ function renderQueue() {
 function sendReply(qid, text, scope) {
   const pid = scope === 'global' ? '_global' : scope === 'proj' ? S.pid : scope;
   return postJSON('/api/reply', { id: pid }, { qid, text })
-    .then(() => (S.pid ? loadProject(S.pid) : loadLibrary()));
+    .then(r => {
+      if (!r.ok) throw new Error('resposta: HTTP ' + r.status);
+      return S.pid ? loadProject(S.pid) : loadLibrary();
+    });
 }
 
 el('queue-panel').addEventListener('click', e => {
@@ -743,7 +748,7 @@ el('queue-panel').addEventListener('click', e => {
   if (!btn) return;
   const input = btn.closest('.queue-reply').querySelector('.queue-reply-input');
   const text = input.value.trim();
-  if (text) sendReply(+btn.dataset.qid, text, btn.dataset.scope);
+  if (text) sendReply(+btn.dataset.qid, text, btn.dataset.scope).catch(e => console.warn(e));
 });
 el('queue-panel').addEventListener('keydown', e => {
   if (e.key !== 'Enter' || !e.target.classList.contains('queue-reply-input')) return;
@@ -756,7 +761,7 @@ el('queue-panel').addEventListener('keydown', e => {
   }
   e.preventDefault();   // Enter puro = envia
   const text = e.target.value.trim();
-  if (text) sendReply(+e.target.dataset.qid, text, e.target.dataset.scope);
+  if (text) sendReply(+e.target.dataset.qid, text, e.target.dataset.scope).catch(err => console.warn(err));
 });
 
 function fmtMSS(sec) {
@@ -846,6 +851,7 @@ async function loadFormats() {
 }
 
 function renderFormatSelect() {
+  if (!S.proj) return;   // promise tardia depois de voltar à biblioteca
   const sel = el('format-select');
   sel.innerHTML = (S.formats || []).map(f =>
     `<option value="${f.name}">${f.name}</option>`).join('');
