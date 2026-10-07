@@ -11,7 +11,6 @@ import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).parent))
 import pipeline  # noqa: E402
@@ -74,7 +73,11 @@ def baixar(origem: str, dst_dir: Path, _run=None) -> dict:
         src = Path(origem)
         if not src.is_file():
             raise ValueError(f"arquivo não existe: {src}")
-        shutil.copyfile(src, dst_dir / f"{slug}.mp4")
+        alvo = dst_dir / f"{slug}.mp4"
+        if src.resolve().parent != dst_dir.resolve():
+            shutil.copyfile(src, alvo)
+        elif src.name != alvo.name:                  # já em bruto/ref/ (baixado à mão) → só renomeia
+            os.replace(src, alvo)
         meta = {"origem": "arquivo", "url": "", "plataforma": "arquivo", "autor": "", "titulo": src.stem,
                 "dur": None, "publicado": "", "baixado_em": agora, "slug": slug, "arquivo": f"{slug}.mp4"}
     (dst_dir / f"{slug}.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -119,6 +122,12 @@ def cortes(video: Path, limiar: float = 10) -> list[float]:
     return out
 
 
+def _lista_concat(pngs: list[Path], lista: Path) -> None:
+    """concat demuxer resolve relativo ao dir da lista → caminho absoluto, aspas escapadas."""
+    lista.write_text("".join("file '" + p.resolve().as_posix().replace("'", "'\\''") + "'\n" for p in pngs),
+                     encoding="utf-8")
+
+
 def _rotulo(s: str) -> str:
     return s.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
@@ -134,17 +143,18 @@ def keyframes(video: Path, tempos: list[float], dst_png: Path, max_n: int = 24) 
     tmp = Path(dst_png).with_suffix(".tiles"); tmp.mkdir(parents=True, exist_ok=True)
     ff = f",drawtext=fontfile='{_rotulo(FONTE.as_posix())}':" if FONTE.exists() else ",drawtext="
     pngs = []
-    for i, t in enumerate(tempos):
-        png = tmp / f"k_{i:03d}.png"
-        vf = (f"scale=320:568:force_original_aspect_ratio=decrease,pad=320:568:(ow-iw)/2:(oh-ih)/2"
-              f"{ff}text='{_rotulo(f't={t:.1f}s')}':x=6:y=h-24:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.6")
-        _ff(["-ss", f"{min(t + 0.1, max(dur - 0.05, 0)):.3f}", "-i", str(video), "-frames:v", "1", "-vf", vf, str(png)])
-        pngs.append(png)
-    cols = min(6, len(pngs)); rows = -(-len(pngs) // cols)
-    lista = tmp / "lista.txt"
-    lista.write_text("".join(f"file '{p.as_posix()}'\n" for p in pngs), encoding="utf-8")
-    _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", f"tile={cols}x{rows}:color=black", "-frames:v", "1", str(dst_png)])
-    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        for i, t in enumerate(tempos):
+            png = tmp / f"k_{i:03d}.png"
+            vf = (f"scale=320:568:force_original_aspect_ratio=decrease,pad=320:568:(ow-iw)/2:(oh-ih)/2"
+                  f"{ff}text='{_rotulo(f't={t:.1f}s')}':x=6:y=h-24:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.6")
+            _ff(["-ss", f"{min(t + 0.1, max(dur - 0.05, 0)):.3f}", "-i", str(video), "-frames:v", "1", "-vf", vf, str(png)])
+            pngs.append(png)
+        cols = min(6, len(pngs)); rows = -(-len(pngs) // cols)
+        lista = tmp / "lista.txt"; _lista_concat(pngs, lista)
+        _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", f"tile={cols}x{rows}:color=black", "-frames:v", "1", str(dst_png)])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return {"png": str(dst_png), "n": len(pngs), "colunas": cols, "linhas": rows}
 
 
@@ -193,7 +203,7 @@ def analisar(video: Path, proj: Path, transcript_json: Path | None = None) -> di
         rel = str(video)
     a = {"video": rel, "dur": round(dur, 2), "largura": w, "altura": h,
          "fala": fala(tr) if tr else None, "cortes": cs,
-         "plano_medio_s": round(dur / max(len(cs), 1), 2), "cortes_por_min": round(len(cs) * 60 / dur, 1) if dur else 0,
+         "plano_medio_s": round(dur / max(len(cs), 1), 2), "cortes_por_min": round((len(cs) - 1) * 60 / dur, 1) if dur else 0,
          "audio": audio(video), "sheet": "ref/sheet.png",
          "transcript": str(transcript_json) if transcript_json else None}
     pipeline.atomic_write_json(ref / "analise.json", a)
@@ -226,7 +236,8 @@ def cenas_de(roteiro_md: Path) -> list[dict]:
 def _html_cena(c: dict, total: int, pal: dict) -> str:
     import html
     marca = f"<div class='wm'>{html.escape(pal['marca'])}<span class='dot'></span></div>" if pal["marca"] else ""
-    return f"""<!doctype html><html><head><meta charset='utf-8'><style>
+    return f"""<!doctype html><html><head><meta charset='utf-8'>
+<link rel="preconnect" href="https://fonts.gstatic.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;1,700&family=Inter:wght@500;700;900&display=swap" rel="stylesheet"><style>
 html,body{{margin:0;width:540px;height:960px;background:{pal['fundo']};font-family:{pal['sans']};}}
 .pill{{position:absolute;top:26px;left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:999px;background:#fff;border:1px solid #B9B3E6;color:{pal['pill']};font-weight:700;font-size:14px}}
 .pill::before{{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:{pal['acento']};margin-right:8px}}
@@ -253,20 +264,23 @@ def animatic(roteiro_md: Path, dst_png: Path, marca: str = "anotus") -> dict:
         from playwright.sync_api import sync_playwright
     except Exception as e:
         raise RuntimeError(f"playwright não instalado ({type(e).__name__}): pip install playwright && playwright install chromium")
+    marca = (marca or "anotus").strip().lower()
     pal = PALETAS.get(marca, PALETAS["neutra"])
     tmp = Path(dst_png).with_suffix(".cenas"); tmp.mkdir(parents=True, exist_ok=True)
     pngs = []
-    with sync_playwright() as pw:
-        b = pw.chromium.launch()
-        pg = b.new_context(viewport={"width": 540, "height": 960}, device_scale_factor=2).new_page()
-        for i, c in enumerate(cenas):
-            pg.set_content(_html_cena(c, len(cenas), pal)); pg.wait_for_timeout(100)
-            png = tmp / f"c_{i:02d}.png"; pg.screenshot(path=str(png)); pngs.append(png)
-        b.close()
-    lista = tmp / "lista.txt"
-    lista.write_text("".join(f"file '{p.as_posix()}'\n" for p in pngs), encoding="utf-8")
-    _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", "scale=270:480,tile=4x2:color=black", "-frames:v", "1", str(dst_png)])
-    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_context(viewport={"width": 540, "height": 960}, device_scale_factor=2).new_page()
+            for i, c in enumerate(cenas):
+                pg.set_content(_html_cena(c, len(cenas), pal))
+                pg.evaluate("document.fonts.ready"); pg.wait_for_timeout(50)
+                png = tmp / f"c_{i:02d}.png"; pg.screenshot(path=str(png)); pngs.append(png)
+            b.close()
+        lista = tmp / "lista.txt"; _lista_concat(pngs, lista)
+        _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", "scale=270:480,tile=4x2:color=black", "-frames:v", "1", str(dst_png)])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return {"png": str(dst_png), "cenas": len(cenas), "avisos": avisos}
 
 

@@ -269,6 +269,14 @@ def test_sheet_grade(tmp_path, mp4, jpg):
     assert (w, h) == (960, 540)
 
 
+def test_sheet_caminhos_relativos(tmp_path, mp4, jpg, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _broll(tmp_path / "proj", mp4, jpg)
+    stock.sheet(Path("proj/broll.json"), Path("proj/broll/sheet.png"), Path("proj"))
+    assert (tmp_path / "proj" / "broll" / "sheet.png").is_file()
+    assert not (tmp_path / "proj" / "broll" / "sheet.tiles").exists()
+
+
 def _edl(proj: Path, overlays=None):
     e = {"version": 1, "sources": {"MAIN": "x.mkv"}, "ranges": [], "grade": "", "total_duration_s": 100.0,
          "overlays": overlays or [{"file": "animations/remotion/out/Opening.mov", "start_in_output": 0.0, "duration": 5.5}]}

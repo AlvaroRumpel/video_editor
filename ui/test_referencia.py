@@ -1,4 +1,5 @@
 # ui/test_referencia.py
+import functools
 import json
 import shutil
 import subprocess
@@ -31,6 +32,20 @@ def test_baixar_arquivo_local(tmp_path):
     meta = json.loads((dst / "reel-teste.json").read_text(encoding="utf-8"))
     assert meta["origem"] == "arquivo" and meta["plataforma"] == "arquivo" and r["slug"] == "reel-teste"
     assert "baixado_em" in meta
+
+
+def test_baixar_arquivo_ja_no_destino(tmp_path):
+    dst = tmp_path / "ref"; dst.mkdir()
+    src = dst / "reel.mp4"; src.write_bytes(b"abc")
+    r = referencia.baixar(str(src), dst)
+    assert src.read_bytes() == b"abc" and r["arquivo"] == "reel.mp4" and (dst / "reel.json").is_file()
+
+
+def test_baixar_arquivo_no_destino_com_outro_nome(tmp_path):
+    dst = tmp_path / "ref"; dst.mkdir()
+    src = dst / "Reel Insta.mp4"; src.write_bytes(b"abc")
+    r = referencia.baixar(str(src), dst)
+    assert (dst / "reel-insta.mp4").read_bytes() == b"abc" and not src.exists() and r["slug"] == "reel-insta"
 
 
 def test_baixar_url_monta_comando_e_le_info(tmp_path, monkeypatch):
@@ -166,6 +181,15 @@ def test_analisar(video3cortes, tmp_path):
                                      "cortes_por_min", "audio", "sheet", "transcript"}
     assert (a["largura"], a["altura"]) == (540, 960) and (proj / "ref" / "sheet.png").exists()
     assert referencia.analisar(video3cortes, proj)["fala"] is None
+    assert a["cortes_por_min"] == round((len(a["cortes"]) - 1) * 60 / a["dur"], 1)
+
+
+@pytest_ffmpeg
+def test_analisar_caminhos_relativos(video3cortes, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    referencia.analisar(Path("ref.mp4"), Path("proj"))
+    assert (tmp_path / "proj" / "ref" / "sheet.png").is_file()
+    assert not (tmp_path / "proj" / "ref" / "sheet.tiles").exists()
 
 
 ROTEIRO = """# Roteiro — teste
@@ -195,6 +219,7 @@ def test_cenas_de(tmp_path):
     assert referencia.cenas_de(p2) == []
 
 
+@functools.lru_cache(maxsize=None)
 def _tem_chromium():
     try:
         from playwright.sync_api import sync_playwright
@@ -221,6 +246,20 @@ def test_animatic_mais_de_8_cenas(tmp_path):
     p = tmp_path / "r.md"; p.write_text(md, encoding="utf-8")
     r = referencia.animatic(p, tmp_path / "a.png")
     assert r["cenas"] == 8 and any("8" in a for a in r["avisos"])
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or not _tem_chromium(), reason="sem ffmpeg/chromium")
+def test_animatic_caminhos_relativos(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("proj").mkdir(); Path("proj/r.md").write_text(ROTEIRO, encoding="utf-8")
+    r = referencia.animatic(Path("proj/r.md"), Path("proj/a.png"), marca=" Anotus ")
+    assert (tmp_path / "proj" / "a.png").is_file() and not (tmp_path / "proj" / "a.cenas").exists()
+    assert r["cenas"] == 3
+
+
+def test_html_cena_fontes():
+    h = referencia._html_cena({"n": 1, "texto": "x"}, 1, referencia.PALETAS["anotus"])
+    assert "fonts.googleapis.com/css2?family=Fraunces" in h and "Inter" in h
 
 
 def test_animatic_sem_cenas(tmp_path):

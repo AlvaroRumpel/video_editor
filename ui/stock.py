@@ -5,6 +5,7 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -324,22 +325,24 @@ def sheet(broll_json: Path, dst_png: Path, proj: Path) -> dict:
         raise ValueError("broll.json sem momentos/candidatos")
     tmp = Path(dst_png).with_suffix(".tiles"); tmp.mkdir(parents=True, exist_ok=True)
     tiles = []
-    for m in moms:
-        cands = m.get("candidatos", [])
-        for k in range(cols):
-            png = tmp / f"{m['id']}-{k}.png"
-            if k < len(cands):
-                c = cands[k]
-                rot = f"{m['id']}-{k + 1} · {c['fonte']} · {c['dur']:.0f}s" if c["tipo"] == "video" else f"{m['id']}-{k + 1} · {c['fonte']} · foto"
-                _frame(proj / c["arq"], png, rot)
-            else:
-                _ff(["-f", "lavfi", "-i", "color=c=black:s=480x270", "-frames:v", "1", str(png)])
-            tiles.append(png)
-    lista = tmp / "lista.txt"
-    lista.write_text("".join(f"file '{p.as_posix()}'\n" for p in tiles), encoding="utf-8")
-    _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", f"tile={cols}x{len(moms)}", "-frames:v", "1", str(dst_png)])
-    for p in tiles: p.unlink(missing_ok=True)
-    lista.unlink(missing_ok=True); tmp.rmdir()
+    try:
+        for m in moms:
+            cands = m.get("candidatos", [])
+            for k in range(cols):
+                png = tmp / f"{m['id']}-{k}.png"
+                if k < len(cands):
+                    c = cands[k]
+                    rot = f"{m['id']}-{k + 1} · {c['fonte']} · {c['dur']:.0f}s" if c["tipo"] == "video" else f"{m['id']}-{k + 1} · {c['fonte']} · foto"
+                    _frame(proj / c["arq"], png, rot)
+                else:
+                    _ff(["-f", "lavfi", "-i", "color=c=black:s=480x270", "-frames:v", "1", str(png)])
+                tiles.append(png)
+        lista = tmp / "lista.txt"  # concat resolve relativo ao dir da lista → absoluto, aspas escapadas
+        lista.write_text("".join("file '" + p.resolve().as_posix().replace("'", "'\\''") + "'\n" for p in tiles),
+                         encoding="utf-8")
+        _ff(["-f", "concat", "-safe", "0", "-i", str(lista), "-vf", f"tile={cols}x{len(moms)}", "-frames:v", "1", str(dst_png)])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return {"png": str(dst_png), "linhas": len(moms), "colunas": cols}
 
 
