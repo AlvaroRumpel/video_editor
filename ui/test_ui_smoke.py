@@ -516,3 +516,46 @@ def test_linha_sem_historico(page, ui_url):
     page.goto(ui_url + "/#/p/edit-raw/linha", wait_until="domcontentloaded")
     page.wait_for_selector(".linha-vazio")
     assert "sem histórico" in page.locator("#tab-linha").inner_text()
+
+
+def _play_e_sai(page, sair):
+    _scrub(page, 0)
+    page.click("#linha-play")
+    sair()
+    page.wait_for_timeout(1500)      # > 2 ticks: se o timer vazasse, o scrub avançaria
+    page.goto(page.url.split("#")[0] + "#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    v = page.locator("#linha-scrub").input_value()
+    assert page.locator("#linha-play").inner_text() == "▶"
+    page.wait_for_timeout(1300)
+    assert page.locator("#linha-scrub").input_value() == v and int(v) < 4
+
+
+def test_linha_play_para_ao_sair(page, ui_url, fake_root):
+    _linha_fixture(fake_root)
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    _play_e_sai(page, lambda: page.click("#tabs a[data-tab=board]"))
+    _play_e_sai(page, lambda: page.evaluate("location.hash = '#/'"))
+
+
+def test_linha_troca_de_projeto(page, ui_url, fake_root):
+    _linha_fixture(fake_root)
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    page.evaluate("location.hash = '#/p/edit-raw/linha'")
+    page.wait_for_selector(".linha-vazio")
+    assert "sem histórico" in page.locator("#tab-linha").inner_text()
+    assert page.locator(".linha-item").count() == 0
+
+
+def test_linha_troca_de_projeto_com_falha(page, ui_url, fake_root):
+    _linha_fixture(fake_root)
+    page.goto(ui_url + "/#/p/edit-fake/linha", wait_until="domcontentloaded")
+    page.wait_for_selector(".linha-item")
+    page.route("**/api/linha?id=edit-raw*", lambda r: r.abort())
+    page.evaluate("location.hash = '#/p/edit-raw/linha'")
+    page.wait_for_function("document.querySelector('#tab-linha').innerText.includes('linha indisponível')")
+    assert page.locator(".linha-item").count() == 0
+    page.evaluate("location.hash = '#/p/edit-fake/linha'")     # volta: não fica preso no placeholder
+    page.wait_for_function("document.querySelectorAll('.linha-item').length === 5")

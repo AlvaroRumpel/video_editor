@@ -6,7 +6,7 @@ const LINHA_ICO = { etapa: '▸', decisao: '◆', pergunta: '❓', resposta: '�
 const LINHA_STATUS = { inicio: 'início', fim: 'fim', espera: 'espera', pulada: 'pulada', falha: 'falha' };
 let linhaDados = { pid: null, eventos: [], quadros: [] };
 const linhaFiltro = { tipos: new Set(LINHA_TIPOS), assunto: null };
-let linhaPos = 0, linhaTimer = null, linhaVel = 1;
+let linhaPos = 0, linhaTimer = null, linhaVel = 1, linhaReq = 0;
 
 const tipoLinha = e => (e.tipo === 'etapa' && e.status === 'espera' && e.nota ? 'pergunta' : e.tipo);
 
@@ -28,13 +28,26 @@ function visiveis() {
 
 async function renderLinha(forcar) {
   const pid = S.pid;
-  if (forcar || linhaDados.pid !== pid) {
-    let d;
-    try { d = await getJSON('/api/linha', { id: pid }); } catch (e) { console.warn('linha falhou', e); return; }
-    if (S.pid !== pid) return;
-    if (linhaDados.pid !== pid) { pausaLinha(); linhaPos = 0; }
-    linhaDados = { pid, eventos: d.eventos || [], quadros: d.quadros || [] };
+  if (linhaDados.pid !== pid) {   // outro projeto: nunca mostrar a linha do anterior, nem enquanto carrega
+    pausaLinha();
+    linhaPos = 0;
+    linhaFiltro.assunto = null;
+    linhaDados = { pid: null, eventos: [], quadros: [] };   // pid fica null até o fetch dar certo
+    el('tab-linha').innerHTML = '<div class="dim linha-msg">carregando…</div>';
+  } else if (!forcar) { desenhaLinha(); return; }
+  const req = ++linhaReq;
+  let d;
+  try { d = await getJSON('/api/linha', { id: pid }); } catch (e) {
+    console.warn('linha falhou', e);
+    if (req === linhaReq && S.pid === pid && linhaDados.pid !== pid)
+      el('tab-linha').innerHTML = '<div class="dim linha-msg">linha indisponível</div>';
+    return;
   }
+  if (req !== linhaReq || S.pid !== pid) return;   // resposta atrasada ou projeto trocado
+  const eventos = d.eventos || [];
+  // log é só-acréscimo: mesmo tamanho = nada mudou; não redesenha (preserva arraste do scrub e scroll)
+  if (linhaDados.pid === pid && eventos.length === linhaDados.eventos.length) return;
+  linhaDados = { pid, eventos, quadros: d.quadros || [] };
   desenhaLinha();
 }
 
@@ -89,7 +102,8 @@ function tocaLinha() {
   if (!visiveis().length) return;
   if (linhaPos >= visiveis().length - 1) linhaPos = 0;
   linhaTimer = setInterval(() => {
-    if (linhaPos >= visiveis().length - 1 || document.body.dataset.tab !== 'linha') { pausaLinha(); return; }
+    if (linhaPos >= visiveis().length - 1 || document.body.dataset.tab !== 'linha'
+        || document.body.dataset.route !== 'project') { pausaLinha(); return; }
     linhaPos += 1;
     marcaLinha();
   }, 600 / linhaVel);

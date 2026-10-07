@@ -676,4 +676,4 @@ body[data-tab="linha"] #tab-linha { display: flex; flex-direction: column; }
 .linha-ico { text-align: center; color: var(--text-dim); }
 .lt-decisao .linha-ico { color: var(--accent); }
 .lt-pergunta .linha-ico, .lt-resposta .linha-ico { color: var(--ok); }
-.linha-vazio { padding: 30px 14px; }
+.linha-vazio, .linha-msg { padding: 30px 14px; }
