@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +67,21 @@ def test_ler_clips(proj):
     assert c1["dur"] == 15.5 and c1["x"] == 700 and c1["legenda"] is True
     assert c1["plataformas"] == ["shorts", "reels"] and c1["nota"] == 4
     assert c2["x"] == 640 and c2["legenda"] is False and c2["nota"] is None and c2["plataformas"] == []
+
+
+def test_ler_clips_x_nulo_e_invalido(proj):
+    _w(proj / "clips" / "clips.json", {"x_padrao": None, "clipes": [
+        {"id": "c01", "status": "proposto", "x": None, "ranges": [{"t_in": 0, "t_out": 1}]}]})
+    d = folha.ler(proj, "clips")
+    assert d["x_padrao"] == 636 and d["clipes"][0]["x"] == 636
+    _w(proj / "clips" / "clips.json", {"x_padrao": 600, "clipes": [
+        {"id": "c01", "status": "proposto", "x": None, "ranges": [{"t_in": 0, "t_out": 1}]}]})
+    assert folha.ler(proj, "clips")["clipes"][0]["x"] == 600
+    for doc in ({"x_padrao": "abc", "clipes": []},
+                {"clipes": [{"id": "c01", "status": "proposto", "x": [1], "ranges": [{"t_in": 0, "t_out": 1}]}]}):
+        _w(proj / "clips" / "clips.json", doc)
+        with pytest.raises(ValueError, match="x"):
+            folha.ler(proj, "clips")
 
 
 def test_ler_clips_x_padrao_default(proj):
@@ -153,18 +169,36 @@ def _edl_com_overlays(proj, overlays):
     (proj / "edl.json").write_text(json.dumps(edl), encoding="utf-8")
 
 
+def _mtime(path: Path, delta: float):
+    st = (path.parent / "edl.json").stat().st_mtime + delta
+    os.utime(path, (st, st))
+
+
 def test_overlays_sobre_preview(proj):
     (proj / "anim").mkdir()
     (proj / "anim" / "A.mov").write_bytes(b"mov")
     _edl_com_overlays(proj, [{"file": "anim/A.mov", "start_in_output": 4.0, "duration": 2.0}])
+    _mtime(proj / "preview.mp4", +10)                                    # render mais novo que o edl
     calls = []
     d = folha.overlays(proj, _run=_fake_run(calls))
     assert d["overlays"] == [{"id": "o01", "arquivo": "anim/A.mov", "t": 4.0, "dur": 2.0, "png": "overlays/o01.png", "erro": None}]
     args = calls[0]
-    assert args[0] == "ffmpeg" and str(proj / "preview.mp4") in args     # fixture tem preview.mp4
-    assert args[args.index(str(proj / "preview.mp4")) - 1] == "-i"
+    assert args[0] == "ffmpeg" and args.count("-i") == 1                 # só o base: overlay já queimado
+    assert args[args.index("-i") + 1] == str(proj / "preview.mp4")
     assert "5.000" in args                                                # base em t + dur/2
+    assert not any("A.mov" in a for a in args)
     assert json.loads((proj / "overlays" / "folha.json").read_text(encoding="utf-8")) == d
+
+
+def test_overlays_preview_desatualizado_usa_preto(proj):
+    (proj / "A.mov").write_bytes(b"mov")
+    _edl_com_overlays(proj, [{"file": "A.mov", "start_in_output": 4.0, "duration": 2.0}])
+    _mtime(proj / "preview.mp4", -10)                                    # render mais velho que o edl
+    calls = []
+    folha.overlays(proj, _run=_fake_run(calls))
+    args = calls[0]
+    assert "lavfi" in args and str(proj / "preview.mp4") not in args
+    assert str(proj / "A.mov") in args and "1.000" in args
 
 
 def test_overlays_sem_video_base_usa_preto(proj):

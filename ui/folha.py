@@ -66,6 +66,15 @@ def _broll(proj: Path) -> dict:
     return {"momentos": out}
 
 
+def _x(v, default: int, nome: str) -> int:
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"clips.json: {nome} inválido: {v!r}")
+
+
 def _ranges(c: dict) -> list:
     rs = c.get("ranges")
     if not isinstance(rs, list) or not rs:
@@ -78,14 +87,14 @@ def _ranges(c: dict) -> list:
 
 def _clips(proj: Path) -> dict:
     d = _json(proj / "clips" / "clips.json")
-    xp = int(d.get("x_padrao", X_PADRAO))
+    xp = _x(d.get("x_padrao"), X_PADRAO, "x_padrao")
     out = []
     for c in _itens(d, "clipes", "clips.json"):
         if c.get("status") != "proposto":
             continue
         rs = _ranges(c)
         out.append({"id": c["id"], "slug": c.get("slug", ""), "nota": c.get("nota"), "gancho": c.get("gancho", ""),
-                    "ranges": rs, "x": int(c.get("x", xp)), "legenda": bool(c.get("legenda")),
+                    "ranges": rs, "x": _x(c.get("x"), xp, f"{c['id']}.x"), "legenda": bool(c.get("legenda")),
                     "plataformas": list(c.get("plataformas") or []),
                     "dur": round(sum(r["t_out"] - r["t_in"] for r in rs), 3)})
     return {"x_padrao": xp, "clipes": out}
@@ -124,12 +133,16 @@ def ler(proj: Path, tipo: str) -> dict:
 
 
 def overlays(proj: Path, _run=None) -> dict:
-    """Frame no meio de cada overlay do edl.json, composto sobre o vídeo base
-    (final.mp4, senão preview.mp4, senão fundo preto) no mesmo tempo de saída."""
+    """Frame no meio de cada overlay do edl.json. Render (final.mp4, senão
+    preview.mp4) não mais velho que o edl.json já tem o overlay queimado com o
+    modo certo → frame dele no tempo de saída. Sem render atual → overlay sozinho
+    sobre fundo preto."""
     run = _run or subprocess.run
     proj = Path(proj)
     edl = _json(proj / "edl.json")
     base = next((proj / n for n in ("final.mp4", "preview.mp4") if (proj / n).is_file()), None)
+    if base and base.stat().st_mtime < (proj / "edl.json").stat().st_mtime:
+        base = None
     dst = proj / "overlays"
     dst.mkdir(exist_ok=True)
     itens = []
@@ -145,14 +158,15 @@ def overlays(proj: Path, _run=None) -> dict:
             itens.append(item)
             continue
         meio = dur / 2
-        entrada = (["-ss", f"{t0 + meio:.3f}", "-i", str(base)] if base
-                   else ["-f", "lavfi", "-i", "color=c=black:s=1920x1080"])
         png = dst / f"{oid}.png"
-        args = ["ffmpeg", "-y", "-loglevel", "error", *entrada, "-ss", f"{meio:.3f}", "-i", str(src),
-                # setpts zera os dois relógios: sem isso o fundo lavfi sai sem o overlay
-                "-filter_complex", "[0:v]scale=1920:1080,setpts=PTS-STARTPTS[b];[1:v]setpts=PTS-STARTPTS[o];"
-                                   "[b][o]overlay=(W-w)/2:(H-h)/2,scale=640:-2",
-                "-frames:v", "1", str(png)]
+        if base:
+            entrada = ["-ss", f"{t0 + meio:.3f}", "-i", str(base), "-vf", "scale=640:-2"]
+        else:
+            entrada = ["-f", "lavfi", "-i", "color=c=black:s=1920x1080", "-ss", f"{meio:.3f}", "-i", str(src),
+                         # setpts zera os dois relógios: sem isso o fundo lavfi sai sem o overlay
+                         "-filter_complex", "[0:v]setpts=PTS-STARTPTS[b];[1:v]setpts=PTS-STARTPTS[o];"
+                                            "[b][o]overlay=(W-w)/2:(H-h)/2,scale=640:-2"]
+        args = ["ffmpeg", "-y", "-loglevel", "error", *entrada, "-frames:v", "1", str(png)]
         try:
             run(args, capture_output=True, check=True, timeout=60)
             item["png"] = f"overlays/{oid}.png"
