@@ -54,6 +54,19 @@ el('stepper').addEventListener('click', e => {
 const fmtHora = ts => ts ? new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
 const fmtDur = (a, b) => fmtMSS(((b ? new Date(b) : new Date()) - new Date(a)) / 1000);
 
+// decisão do Claude: resumo na linha, motivo/custo ao expandir (<details> nativo)
+function decisaoHtml(d) {
+  const alt = d.alternativas && d.alternativas.length
+    ? ` <span class="dim">(vs ${escapeHtml(d.alternativas.join(', '))})</span>` : '';
+  const conf = d.confianca
+    ? ` <span class="conf conf-${escapeHtml(d.confianca)}" title="confiança ${escapeHtml(d.confianca)}">●</span>` : '';
+  const custo = d.custo_usd != null ? ` <span class="mono">${fmtUSD(d.custo_usd)}</span>` : '';
+  return `<details class="dec" data-k="${escapeHtml(d.ts + '|' + d.assunto)}">
+      <summary><span class="tag">${escapeHtml(d.assunto)}</span> ${escapeHtml(d.escolha)}${alt}${conf}</summary>
+      <div class="dec-mot">${escapeHtml(d.motivo || 'sem motivo registrado')}${custo}</div>
+    </details>`;
+}
+
 function boardCard(e, infos, pedido, fora) {
   // duração só com fim (inicio→fim) ou em andamento (inicio→agora); falha/pulada/espera = só a hora de início
   const tempo = e.inicio && e.fim ? `${fmtHora(e.inicio)}–${fmtHora(e.fim)} · ${fmtDur(e.inicio, e.fim)}`
@@ -79,7 +92,7 @@ function boardCard(e, infos, pedido, fora) {
         <span class="spacer"></span><span class="mono dim">${tempo}</span>
         <span class="mono">${e.custo_usd > 0 ? fmtUSD(e.custo_usd) : ''}</span></div>
       ${e.nota ? `<div class="bc-nota">${escapeHtml(e.nota)}</div>` : ''}
-      ${linhas}${perg}
+      ${linhas}${(e.decisoes || []).map(decisaoHtml).join('')}${perg}
     </div>`;
 }
 
@@ -93,6 +106,7 @@ function renderBoard() {
   const ae = document.activeElement;
   const foco = ae && ae.classList.contains('board-reply-input')
     ? { k: draftKey(ae), a: ae.selectionStart, b: ae.selectionEnd } : null;
+  const abertos = new Set([...box.querySelectorAll('details.dec[open]')].map(d => d.dataset.k));
   const q = S.quadro || { etapas: [], fora_da_receita: [], atual: null };
   const st = (S.proj && S.proj.state) || {};
   const ids = new Set(q.etapas.map(e => e.id));
@@ -109,9 +123,11 @@ function renderBoard() {
   const alvo = (atualEspera || todas.find(e => e.status === 'espera') || {}).id;
   let html = q.etapas.map(e => boardCard(e, infos, e.id === alvo ? pedido : null, false)).join('');
   html += q.fora_da_receita.map(e => boardCard(e, infos, e.id === alvo ? pedido : null, true)).join('');
-  if (outros.length) html += `<div class="board-card" id="card-outros"><div class="bc-head"><span class="bc-rot">outros</span></div>` +
-    outros.map(t => `<div class="info-line">${escapeHtml(t)}</div>`).join('') + '</div>';
+  const soltas = q.decisoes_soltas || [];
+  if (outros.length || soltas.length) html += `<div class="board-card" id="card-outros"><div class="bc-head"><span class="bc-rot">outros</span></div>` +
+    outros.map(t => `<div class="info-line">${escapeHtml(t)}</div>`).join('') + soltas.map(decisaoHtml).join('') + '</div>';
   box.innerHTML = html || '<div class="board-vazio dim">sem etapas — o formato deste projeto não declara etapas</div>';
+  box.querySelectorAll('details.dec').forEach(d => { if (abertos.has(d.dataset.k)) d.open = true; });
   box.querySelectorAll('.board-reply-input').forEach(t => {
     const k = draftKey(t);
     if (boardDrafts[k]) t.value = boardDrafts[k];

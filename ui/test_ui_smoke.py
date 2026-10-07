@@ -418,3 +418,36 @@ def test_folha_overlays(page, ui_url, fake_root):
     page.click("#fl-enviar")
     page.wait_for_function("document.body.dataset.tab === 'board'")
     assert _queue(proj)[0]["reply"] == "ok o01:não o03: cor âmbar"
+
+
+def _decisao_raw(proj, ts, assunto, escolha, **kw):
+    with (proj / "ui" / "eventos.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": ts, "tipo": "decisao", "assunto": assunto, "escolha": escolha, **kw},
+                           ensure_ascii=False) + "\n")
+
+
+def test_board_decisoes_no_card(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _decisao_raw(proj, "2026-10-07T10:06:00+00:00", "corte", "tirar gaguejo", etapa="cortes",
+                 alternativas=["manter"], motivo="ritmo", confianca="media", custo_usd=0.4)
+    _decisao_raw(proj, "2026-10-07T10:07:00+00:00", "outro", "decisão solta")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes details.dec")
+    dec = page.locator("#card-cortes details.dec")
+    assert "tirar gaguejo" in dec.inner_text() and "manter" in dec.inner_text()
+    assert not page.locator("#card-cortes .dec-mot").is_visible()
+    dec.locator("summary").click()
+    assert page.locator("#card-cortes .dec-mot").is_visible()
+    assert "ritmo" in page.locator("#card-cortes .dec-mot").inner_text()
+    assert "decisão solta" in page.locator("#card-outros").inner_text()
+
+
+def test_board_decisao_expandida_sobrevive_reload(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _decisao_raw(proj, "2026-10-07T10:06:00+00:00", "corte", "c1", etapa="cortes", motivo="m")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-cortes details.dec summary")
+    page.click("#card-cortes details.dec summary")
+    (proj / "ui" / "state.json").write_text(json.dumps({"formato": "teste", "x": 2}), encoding="utf-8")   # SSE
+    page.wait_for_timeout(2000)
+    assert page.locator("#card-cortes .dec-mot").is_visible()
