@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import eventos
+import pipeline
 from test_pipeline import fake_root  # fixture reexport
 
 RECEITA = """---
@@ -222,3 +223,25 @@ def test_cli_etapa_e_quadro(root):
 def test_cli_validacao_exit_1(root):
     r = _cli(root, "etapa", str(_proj(root)), "inventada", "inicio")
     assert r.returncode == 1 and "erro" in json.loads(r.stdout)
+
+
+ESPERADO = {
+    "padrao-youtube-longo": ["roteiro", "transcricao", "cortes", "fatos", "visual", "audio", "legenda", "render", "entrega"],
+    "padrao-youtube-shorts": ["transcricao", "candidatos", "aprovacao", "render", "draft"],
+    "padrao-ads": ["referencia", "pesquisa", "roteiro", "producao", "audio", "render", "qc"],
+    "pauta": ["pesquisa", "pauta", "aprovacao"],
+    "thumbnail": ["frame", "recorte", "composicao", "variacoes"],
+}
+
+
+@pytest.mark.parametrize("formato,ids", ESPERADO.items())
+def test_receitas_reais_declaram_etapas(formato, ids):
+    etapas = eventos.etapas_de(formato, pipeline.ROOT)
+    assert [e["id"] for e in etapas] == ids
+    assert all(e["rotulo"] for e in etapas)
+
+
+def test_receitas_reais_tem_mapa_de_etapas():
+    for formato in ESPERADO:
+        txt = (pipeline.ROOT / "Formatos" / f"{formato}.md").read_text(encoding="utf-8")
+        assert "> Etapas" in txt, formato

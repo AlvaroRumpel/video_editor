@@ -57,6 +57,19 @@ em vez de sobrescrever o objeto inteiro.
 6. Pedidos com `status: "cancelado"` (Ctrl+Z na UI): ignorar, nunca executar.
 7. Fim: `status: "done"` + nota curta em `resultado`, ou `"failed"` + motivo.
 
+## Etapas (board da UI)
+
+Cada receita declara `etapas:` no front-matter e um mapa `> Etapas:` no topo.
+Registrar no log do projeto (a UI acende a trilha ao vivo):
+
+- Começou etapa: `python ui/eventos.py etapa <proj> <id> inicio`.
+- Concluiu: `python ui/eventos.py etapa <proj> <id> fim --nota "<resumo curto>"`.
+- Abriu `waiting_reply` dentro dela: `... <id> espera`.
+- Etapa opcional que não vai rodar: `... <id> pulada`. Erro: `... <id> falha --nota "<motivo>"`.
+- exit 1 (etapa/status inválido, formato sem etapas) → conferir o front-matter
+  da receita e o `formato` do `state.json`; nunca inventar id.
+- Custo por etapa sai sozinho do `costs.jsonl` (intervalo início→fim).
+
 ## Orçamento (ações pagas)
 
 Antes de QUALQUER ação que gaste dinheiro ou cota (ElevenLabs, stock pago,

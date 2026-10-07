@@ -1,4 +1,10 @@
+---
+etapas: frame, recorte, composicao=composição, variacoes=variações
+---
 # Formato: Thumbnail YouTube
+
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> frame = "Escolha do frame" · recorte = "Recorte (rembg)" · composicao = "Composição" · variacoes = "Variações" + "Entrega".
 
 Recorte do apresentador sobre fundo chapado + tipografia pesada. 1280×720 PNG.
 Sem geração de imagem por IA — a matéria-prima é sempre frame do próprio vídeo.

@@ -1,5 +1,9 @@
 # Vídeo de referência → conceitos de ad (interno; pedido `referencia`)
 
+> Etapas: o projeto é `padrao-ads`; todo este fluxo é a etapa `referencia` —
+> `python ui/eventos.py etapa <proj> referencia inicio` logo após o passo 0,
+> `... espera` no passo 6, `... fim --nota "escolhido X"` no passo 7.
+
 Entrada: `target = {origem, marca, nome, briefing}`. Projeto: `edit/shorts/<slug-do-nome>/` com `ui/`.
 Referência é inspiração de **mecanismo** (ritmo, estrutura, gancho), nunca cópia
 de texto, visual ou música. `conceitos.md` registra URL e autor.

@@ -1,4 +1,13 @@
+---
+etapas: roteiro?=roteiro, transcricao=transcrição, cortes, fatos, visual, audio=áudio, legenda, render, entrega
+---
 # Formato: Padrão YouTube — vídeo longo (horizontal)
+
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> roteiro = §0.0 (pular se não houve pedido `roteiro`) · transcricao = §0.1 + `transcribe.py` do §1 ·
+> cortes = §2 (+ `plan_cuts.py`/`verify_text.py` do §1) · fatos = §1.1 · visual = §3, §4, §5, §5.1 ·
+> audio = §0.3 + §8.1 · legenda = §7 · render = `rezoom.py` → `recomposite.py` do §1 + §6/§6.1 + §8 ·
+> entrega = §9 + §0 (export).
 
 Método completo da edição de talking head para YouTube. Derivado do vídeo
 "Eu criei um SaaS" (2026-08-16). Serve como receita reproduzível: seguindo este
@@ -13,7 +22,7 @@ motion graphics, Edge headless para captura de site.
 
 Pedido `roteiro` na fila (`target = {tema, duracao_min, publico, nome}`):
 
-1. Criar `edit/<slug>/ui/` (projeto aparece como "não iniciado").
+1. Criar `edit/<slug>/ui/` e `ui/state.json` = `{"formato": "padrao-youtube-longo"}` (projeto aparece como "não iniciado"); `eventos.py etapa ... roteiro inicio`.
 2. Pesquisa como em `padrao-ads.md` → "Pesquisa e roteiro" (passos 2–5),
    gravando em `edit/<slug>/pesquisa.md`.
 3. `roteiro.md` formato `longo`: estrutura em blocos (abertura, 3–5 blocos,

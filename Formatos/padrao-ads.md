@@ -1,4 +1,13 @@
+---
+etapas: referencia?=referência, pesquisa, roteiro, producao=produção, audio=áudio, render, qc=QC
+---
 # Padrão Ads (identidade aprovada 2026-08-31; origem: Reels Anotus)
+
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> referencia = fluxo `Formatos/referencia.md` (pular quando não veio de referência) ·
+> pesquisa = "Pesquisa e roteiro" 1–5 · roteiro = "Pesquisa e roteiro" 6–7 ·
+> producao = "Técnica de produção" (motion, footage, encode) · audio = SFX + trilha ·
+> render = montagem final · qc = "QC antes de entregar" + "Entrega".
 
 Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue isto.
 

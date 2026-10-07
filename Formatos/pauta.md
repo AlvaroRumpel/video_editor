@@ -1,7 +1,13 @@
+---
+etapas: pesquisa, pauta, aprovacao=aprovação
+---
 # Pauta mensal com dados (interno; pedido `pauta`)
 
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> pesquisa = passos 1–2 · pauta = passo 3 · aprovacao = passos 4–5.
+
 Entrada: `target = {marca, mes}`. Projeto de trabalho:
-`edit/shorts/<marca>/pauta-AAAA-MM/` (criar `ui/` nele para aparecer na UI).
+`edit/shorts/<marca>/pauta-AAAA-MM/` (criar `ui/` e `ui/state.json` = `{"formato": "pauta"}` nele para aparecer na UI e o log de etapas validar).
 Saída: `pesquisa.md` e o rascunho `PAUTA.md` dentro dele; só após `ok` vai
 para `edit/shorts/<marca>/PAUTA.md`.
 

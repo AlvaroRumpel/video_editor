@@ -1,4 +1,11 @@
+---
+etapas: transcricao=transcrição, candidatos, aprovacao=aprovação, render, draft=draft Publora
+---
 # Formato: Padrão YouTube — Shorts (vertical 9:16)
+
+> Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
+> transcricao = Método 1 · candidatos = Método 2–4 · aprovacao = Método 5 (`espera` no waiting_reply) ·
+> render = Método 6 · draft = Método 7–8.
 
 Shorts são cortes derivados do **export horizontal pronto** — nunca do bruto.
 O horizontal já está cortado, gradeado e com punch-ins, então um short custa um
