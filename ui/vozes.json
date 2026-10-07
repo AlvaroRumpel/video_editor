@@ -1,0 +1,5 @@
+{
+  "padrao": {"voice_id": "", "nome": "preencher com uma voz da biblioteca ElevenLabs"},
+  "anotus": {"voice_id": "", "nome": "preencher"},
+  "campeio": {"voice_id": "", "nome": "preencher"}
+}

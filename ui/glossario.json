@@ -1,0 +1,13 @@
+{
+  "Anotus": "manter",
+  "STF": "manter",
+  "STJ": "manter",
+  "OAB": "manter",
+  "vade mecum": "manter",
+  "Campeio": "manter",
+  "súmula": {"es": "súmula", "en": "binding precedent"},
+  "jurisprudência": {"es": "jurisprudencia", "en": "case law"},
+  "lei seca": {"es": "texto de la ley", "en": "statutory text"},
+  "flashcard": {"es": "flashcard", "en": "flashcard"},
+  "concurso": {"es": "oposición", "en": "civil service exam"}
+}
