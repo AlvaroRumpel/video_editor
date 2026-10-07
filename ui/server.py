@@ -79,6 +79,14 @@ def docs(request: Request, id: str):
     out += [{"name": f"broll/{p.name}", "mtime": m}
             for p, m in ((p, _mtime(p)) for p in sorted((proj / "broll").glob("*.png")))
             if m is not None]
+    out += [{"name": f"ref/{p.name}", "mtime": m}
+            for p, m in ((p, _mtime(p)) for p in sorted((proj / "ref").glob("*.png")))
+            if m is not None]
+    # glob é case-insensitive no Windows; a regex garante animatic-[A-Z].png
+    out += [{"name": p.name, "mtime": m}
+            for p, m in ((p, _mtime(p)) for p in sorted(proj.glob("animatic-?.png"))
+                         if FILE_NAME.fullmatch(p.name))
+            if m is not None]
     return out
 
 
@@ -100,8 +108,8 @@ def file_(request: Request, id: str, name: str):
     if not FILE_NAME.fullmatch(name):
         raise HTTPException(400, "nome inválido")
     proj = _proj(request, id)
-    path = proj / "broll" / name.split("/", 1)[1]
-    if path.resolve().parent != (proj / "broll").resolve():
+    path = proj / name
+    if not path.resolve().is_relative_to(proj.resolve()):
         raise HTTPException(400, "nome inválido")
     if not path.is_file():
         raise HTTPException(404, "arquivo não encontrado")
@@ -123,10 +131,16 @@ def brutos(request: Request):
                   if p.suffix.lower() in exts) if bdir.is_dir() else []
 
 
+@app.get("/api/brutos-ref")
+def brutos_ref(request: Request):
+    d = _root(request) / "bruto" / "ref"
+    return sorted(p.name for p in d.glob("*.mp4")) if d.is_dir() else []
+
+
 HIDDEN_FORMATS = {"thumbnail", "pauta"}  # receitas internas, fora do dropdown
-QUEUE_TYPES = {"instrucao", "render", "borda", "veto", "roteiro", "pauta"}
+QUEUE_TYPES = {"instrucao", "render", "borda", "veto", "roteiro", "pauta", "referencia"}
 DOC_NAME = re.compile(r"^[\w\-. ]+\.md$")
-FILE_NAME = re.compile(r"^broll/[\w\-]+\.png$")
+FILE_NAME = re.compile(r"^(broll|ref)/[\w\-]+\.png$|^animatic-[A-Z]\.png$")
 
 
 def _append_queue(qpath, entry):
@@ -217,6 +231,13 @@ def new_project(request: Request, body: dict):
         return _append_queue(qpath, _make_entry("roteiro",
             {"tema": tema, "duracao_min": body.get("duracao_min"), "publico": body.get("publico", ""),
              "nome": body.get("nome", "")}, body.get("nome") or tema[:60]))
+    if formato == "referencia":
+        origem = (body.get("origem") or "").strip(); nome = (body.get("nome") or "").strip()
+        if not origem or not nome:
+            raise HTTPException(400, "referência exige origem (URL ou arquivo) e nome")
+        return _append_queue(qpath, _make_entry("referencia",
+            {"origem": origem, "marca": body.get("marca", ""), "nome": nome,
+             "briefing": (body.get("descricao") or "").strip()}, f"referência: {nome}"))
     if formato == "pauta":
         if not body.get("marca") or not body.get("mes"):
             raise HTTPException(400, "pauta exige marca e mês")

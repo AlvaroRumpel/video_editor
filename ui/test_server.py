@@ -310,3 +310,32 @@ def test_docs_lista_sheet(client, fake_root):
     (fake_root / "edit-fake" / "a.md").write_text("# a", encoding="utf-8")
     nomes = [x["name"] for x in client.get("/api/docs", params={"id": "edit-fake"}).json()]
     assert nomes == ["a.md", "broll/sheet.png"]
+
+
+def test_new_project_referencia(client, fake_root):
+    r = client.post("/api/new-project", json={"formato": "referencia", "origem": "https://www.youtube.com/shorts/x",
+                                              "marca": "anotus", "nome": "Prazos", "descricao": "briefing"})
+    e = r.json()
+    assert e["type"] == "referencia" and e["target"] == {"origem": "https://www.youtube.com/shorts/x", "marca": "anotus",
+                                                           "nome": "Prazos", "briefing": "briefing"}
+    assert client.post("/api/new-project", json={"formato": "referencia", "nome": "x"}).status_code == 400
+    assert client.post("/api/new-project", json={"formato": "referencia", "origem": "a.mp4"}).status_code == 400
+    assert "referencia" in server.QUEUE_TYPES
+
+
+def test_brutos_ref(client, fake_root):
+    d = fake_root / "bruto" / "ref"; d.mkdir(parents=True)
+    (d / "b.mp4").write_bytes(b"0"); (d / "a.mp4").write_bytes(b"0"); (d / "a.json").write_text("{}", encoding="utf-8")
+    assert client.get("/api/brutos-ref").json() == ["a.mp4", "b.mp4"]
+
+
+def test_file_ref_e_animatic(client, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "ref").mkdir(); (proj / "ref" / "sheet.png").write_bytes(b"\x89PNG")
+    (proj / "animatic-A.png").write_bytes(b"\x89PNG")
+    assert client.get("/api/file", params={"id": "edit-fake", "name": "ref/sheet.png"}).status_code == 200
+    assert client.get("/api/file", params={"id": "edit-fake", "name": "animatic-A.png"}).status_code == 200
+    for nome in ("ref/../x.png", "animatic-a.png", "animatic-AB.png", "ref/x.PNG", "conceitos.png"):
+        assert client.get("/api/file", params={"id": "edit-fake", "name": nome}).status_code == 400
+    nomes = [x["name"] for x in client.get("/api/docs", params={"id": "edit-fake"}).json()]
+    assert "ref/sheet.png" in nomes and "animatic-A.png" in nomes

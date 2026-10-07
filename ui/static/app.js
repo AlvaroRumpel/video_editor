@@ -600,6 +600,7 @@ function renderAll() {
   renderAudioInfo();
   renderBrollInfo();
   renderClipsInfo();
+  renderRefInfo();
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
 }
 
@@ -724,6 +725,16 @@ function renderClipsInfo() {
   if (!c) { box.hidden = true; return; }
   const cnt = v => Array.isArray(v) ? v.length : (v ?? 0);
   box.textContent = `clips: ${cnt(c.aprovados)} aprovados · ${cnt(c.renderizados)} renderizados · ${cnt(c.publora_drafts)} drafts`;
+  box.hidden = false;
+}
+
+function renderRefInfo() {
+  const r = S.proj.state && S.proj.state.ref;
+  const box = el('ref-info');
+  if (!r) { box.hidden = true; return; }
+  const n = Array.isArray(r.conceitos) ? r.conceitos.length : (r.conceitos ?? 0);
+  box.textContent = `ref: ${n} conceitos` + (r.escolhido ? ` · escolhido ${r.escolhido}` : '') +
+    (r.produzidos && r.produzidos.length ? ` · produzidos ${r.produzidos.join(', ')}` : '');
   box.hidden = false;
 }
 
@@ -877,7 +888,7 @@ async function openDocsModal() {
 el('btn-docs').addEventListener('click', openDocsModal);
 
 async function openNewProjectModal() {
-  const [brutos, formats] = await Promise.all([getJSON('/api/brutos'), loadFormats()]);
+  const [brutos, formats, brutosRef] = await Promise.all([getJSON('/api/brutos'), loadFormats(), getJSON('/api/brutos-ref')]);
   el('modal').innerHTML = `
     <div class="modal-box">
       <button class="modal-close">×</button>
@@ -885,7 +896,8 @@ async function openNewProjectModal() {
       <label>Formato
         <select id="new-formato">${formats.map(f => `<option value="${f.name}">${f.name}</option>`).join('')}
           <option value="roteiro">roteiro (pesquisa + estrutura antes de gravar)</option>
-          <option value="pauta">pauta (ideias do mês com dados)</option></select>
+          <option value="pauta">pauta (ideias do mês com dados)</option>
+          <option value="referencia">referência (Reel/Short → conceitos de ad)</option></select>
       </label>
       <label>Bruto
         <select id="new-bruto">${brutos.map(b => `<option value="${b}">${b}</option>`).join('')}</select>
@@ -903,24 +915,29 @@ async function openNewProjectModal() {
       <label class="so-roteiro">Público<input type="text" id="new-publico" placeholder="ex.: estudantes de Direito, 1º ano"></label>
       <label class="so-pauta">Marca<input type="text" id="new-marca" placeholder="anotus"></label>
       <label class="so-pauta">Mês<input type="month" id="new-mes"></label>
+      <label class="so-ref">URL da referência<input type="text" id="new-ref-url" placeholder="https://www.instagram.com/reel/..."></label>
+      <label class="so-ref">ou arquivo em bruto/ref<select id="new-ref-arquivo"><option value="">—</option>${brutosRef.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('')}</select></label>
+      <label class="so-ref">Marca<input type="text" id="new-ref-marca" placeholder="anotus"></label>
       <button id="new-send" title="Envia o pedido pra fila do Claude">Enviar</button>
       <div id="new-confirm" hidden>pedido enviado — veja a fila</div>
     </div>`;
   el('modal').hidden = false;
   const ajustaCampos = () => {
     const f = el('new-formato').value;
-    const isAds = f === 'padrao-ads', isRot = f === 'roteiro', isPauta = f === 'pauta';
+    const isAds = f === 'padrao-ads', isRot = f === 'roteiro', isPauta = f === 'pauta', isRef = f === 'referencia';
     const sel = el('new-bruto');
     const has = sel.querySelector('option[value=""]');
     if ((isAds || isRot || isPauta) && !has) sel.insertAdjacentHTML('afterbegin',
       '<option value="" selected>— sem bruto —</option>');
     if (!(isAds || isRot || isPauta) && has) has.remove();
-    sel.closest('label').hidden = isRot || isPauta;
+    sel.closest('label').hidden = isRot || isPauta || isRef;
     el('modal').querySelectorAll('.so-roteiro').forEach(x => x.hidden = !isRot);
     el('modal').querySelectorAll('.so-pauta').forEach(x => x.hidden = !isPauta);
+    el('modal').querySelectorAll('.so-ref').forEach(x => x.hidden = !isRef);
     el('new-nome').closest('label').hidden = isPauta;
-    el('new-fontes').closest('label').hidden = isPauta;
-    el('new-descricao').placeholder = isRot ? 'tema do vídeo' : isPauta ? 'contexto do mês (opcional)' : 'o que você quer no vídeo...';
+    el('new-fontes').closest('label').hidden = isPauta || isRef;
+    el('new-descricao').placeholder = isRot ? 'tema do vídeo' : isPauta ? 'contexto do mês (opcional)'
+      : isRef ? 'briefing: o que o ad precisa dizer' : 'o que você quer no vídeo...';
   };
   el('new-formato').addEventListener('change', ajustaCampos);
   ajustaCampos();
@@ -932,6 +949,10 @@ async function openNewProjectModal() {
       if (!body.descricao || !body.nome) return; }
     else if (formato === 'pauta') { body.marca = el('new-marca').value.trim(); body.mes = el('new-mes').value;
       if (!body.marca || !body.mes) return; }
+    else if (formato === 'referencia') {
+      body.origem = el('new-ref-url').value.trim() || (el('new-ref-arquivo').value ? 'bruto/ref/' + el('new-ref-arquivo').value : '');
+      body.marca = el('new-ref-marca').value.trim();
+      if (!body.origem || !body.nome) return; }
     else if (!body.nome || (!body.bruto && !body.descricao)) return;
     postJSON('/api/new-project', {}, body).then(() => { el('new-confirm').hidden = false; });
   });
