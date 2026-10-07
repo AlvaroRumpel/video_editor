@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import budget
+import eventos
 import md_min
 import pipeline
 import waveform as wf
@@ -267,6 +268,61 @@ def global_queue(request: Request):
                               [])
 
 
+@app.get("/api/quadro")
+def quadro_route(request: Request, id: str):
+    return eventos.quadro(_proj(request, id), root=_root(request))
+
+
+FILA_ATIVA = {"pending", "executing", "waiting_reply"}
+
+
+def _fila_ativa(proj: Path) -> list:
+    q = pipeline.read_json(proj / "ui" / "queue.json", [])
+    if not isinstance(q, list):
+        return []
+    return [e for e in q if isinstance(e, dict) and e.get("status") in FILA_ATIVA]
+
+
+def _atividade(proj: Path) -> float:
+    cands = [*(proj / "ui").glob("*"), proj / "edl.json", proj / "preview.mp4", proj / "final.mp4"]
+    ms = [m for m in map(_mtime, cands) if m is not None]
+    return max(ms) if ms else 0.0
+
+
+def _curta(e):
+    return {k: e[k] for k in ("id", "rotulo", "status")}
+
+
+@app.get("/api/library")
+def library(request: Request):
+    root = _root(request)
+    out = []
+    for p in pipeline.find_projects(root):
+        item = {**p, "formato": None, "etapas": [], "atual": None, "sem_historico": True,
+                "pendencias": 0, "fila": [], "custo_usd": 0.0, "claude_online": False,
+                "atividade": None, "_ts": 0.0}
+        try:
+            proj = pipeline.project_dir(root, p["id"])
+            q = eventos.quadro(proj, root=root)
+            fila = _fila_ativa(proj)
+            atual = next((e for e in q["etapas"] + q["fora_da_receita"] if e["id"] == q["atual"]), None)
+            ts = _atividade(proj)
+            item.update(
+                formato=q["formato"], etapas=[_curta(e) for e in q["etapas"]],
+                atual=_curta(atual) if atual else None, sem_historico=q["sem_historico"],
+                pendencias=sum(e["status"] == "waiting_reply" for e in fila), fila=fila,
+                custo_usd=budget.gasto_projeto(proj)["usd"],
+                claude_online=pipeline.claude_online(proj), _ts=ts,
+                atividade=datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts else None)
+        except Exception:  # noqa: BLE001 — projeto ilegível não derruba a biblioteca
+            pass
+        out.append(item)
+    out.sort(key=lambda i: i["_ts"], reverse=True)
+    for i in out:
+        del i["_ts"]
+    return out
+
+
 BUDGET_NUM = ("teto_mensal_usd", "teto_projeto_usd", "aprovar_acima_usd")
 
 
@@ -309,7 +365,8 @@ def budget_put(request: Request, body: dict):
 
 WATCH = {"edl": "edl.json", "queue": "ui/queue.json",
          "state": "ui/state.json", "preview": "preview.mp4",
-         "final": "final.mp4", "costs": "ui/costs.jsonl"}
+         "final": "final.mp4", "costs": "ui/costs.jsonl",
+         "eventos": "ui/eventos.jsonl"}
 
 
 def _snapshot(proj, root):

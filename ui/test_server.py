@@ -1,7 +1,9 @@
 import json
+import os
 import pytest
 from fastapi.testclient import TestClient
 
+import eventos
 import server
 from test_pipeline import fake_root  # fixture reexport
 
@@ -340,3 +342,84 @@ def test_file_ref_e_animatic(client, fake_root):
         assert client.get("/api/file", params={"id": "edit-fake", "name": nome}).status_code == 400
     nomes = [x["name"] for x in client.get("/api/docs", params={"id": "edit-fake"}).json()]
     assert "ref/sheet.png" in nomes and "animatic-A.png" in nomes
+
+
+def _receita_e_state(root, proj_rel="edit-fake"):
+    (root / "Formatos" / "teste.md").write_text(
+        "---\netapas: transcricao=transcrição, cortes\n---\n# t\n", encoding="utf-8")
+    ui = root / proj_rel / "ui"
+    ui.mkdir(parents=True, exist_ok=True)
+    (ui / "state.json").write_text(json.dumps({"formato": "teste"}), encoding="utf-8")
+    return root / proj_rel
+
+
+def test_quadro_route(client, fake_root):
+    proj = _receita_e_state(fake_root)
+    eventos.registrar(proj, "cortes", "inicio", root=fake_root)
+    q = client.get("/api/quadro", params={"id": "edit-fake"}).json()
+    assert q["atual"] == "cortes" and [e["id"] for e in q["etapas"]] == ["transcricao", "cortes"]
+    assert client.get("/api/quadro", params={"id": "../x"}).status_code == 400
+
+
+def test_project_has_edl(client):
+    assert client.get("/api/project", params={"id": "edit-fake"}).json()["has_edl"] is True
+    assert client.get("/api/project", params={"id": "edit-raw"}).json()["has_edl"] is False
+
+
+def test_library_com_log(client, fake_root):
+    proj = _receita_e_state(fake_root)
+    eventos.registrar(proj, "transcricao", "fim", root=fake_root)
+    eventos.registrar(proj, "cortes", "inicio", root=fake_root)
+    (proj / "ui" / "queue.json").write_text(json.dumps([
+        {"id": 1, "status": "waiting_reply", "text": "aprova?"},
+        {"id": 2, "status": "done", "text": "x"},
+        {"id": 3, "status": "pending", "text": "y"}]), encoding="utf-8")
+    (proj / "ui" / "costs.jsonl").write_text(
+        json.dumps({"ts": "2026-10-07T10:00:00+00:00", "usd": 0.48, "creditos": 0}) + "\n", encoding="utf-8")
+    lib = {p["id"]: p for p in client.get("/api/library").json()}
+    p = lib["edit-fake"]
+    assert p["formato"] == "teste" and p["sem_historico"] is False
+    assert p["etapas"] == [{"id": "transcricao", "rotulo": "transcrição", "status": "fim"},
+                           {"id": "cortes", "rotulo": "cortes", "status": "andamento"}]
+    assert p["atual"] == {"id": "cortes", "rotulo": "cortes", "status": "andamento"}
+    assert p["pendencias"] == 1 and [e["id"] for e in p["fila"]] == [1, 3]
+    assert p["custo_usd"] == 0.48
+    assert p["atividade"] and p["name"] == "edit-fake"
+
+
+def test_library_projeto_sem_formato(client):
+    lib = {p["id"]: p for p in client.get("/api/library").json()}
+    raw = lib["edit-raw"]
+    assert raw["formato"] is None and raw["etapas"] == [] and raw["atual"] is None
+    assert raw["sem_historico"] is True and raw["pendencias"] == 0
+
+
+def test_library_ordena_por_atividade(client, fake_root):
+    velho = fake_root / "edit-fake"
+    for p in [velho / "edl.json", velho / "preview.mp4", *velho.glob("ui/*")]:
+        os.utime(p, (1_000_000, 1_000_000))
+    (fake_root / "edit-raw" / "ui" / "queue.json").write_text("[]", encoding="utf-8")   # mais novo
+    ids = [p["id"] for p in client.get("/api/library").json()]
+    assert ids.index("edit-raw") < ids.index("edit-fake")
+
+
+def test_library_projeto_ilegivel_nao_quebra(client, monkeypatch):
+    real = eventos.quadro
+
+    def quebra(proj, root=None, agora=None):
+        if proj.name == "edit-fake":
+            raise RuntimeError("boom")
+        return real(proj, root=root, agora=agora)
+
+    monkeypatch.setattr(eventos, "quadro", quebra)
+    lib = {p["id"]: p for p in client.get("/api/library").json()}
+    assert lib["edit-fake"]["etapas"] == [] and lib["edit-fake"]["name"] == "edit-fake"
+    assert "edit-raw" in lib
+
+
+def test_events_vigia_eventos(client, fake_root):
+    proj = _receita_e_state(fake_root)
+    eventos.registrar(proj, "cortes", "inicio", root=fake_root)
+    r = client.get("/api/events", params={"id": "edit-fake", "max_events": 1})
+    snap = json.loads(r.text.split("data: ", 1)[1])
+    assert snap["mtimes"]["eventos"] is not None

@@ -146,6 +146,7 @@ def load_project(root: Path, pid: str) -> dict:
         "source_duration": source_duration,
         "has_preview": (proj / "preview.mp4").exists(),
         "has_final": (proj / "final.mp4").exists(),
+        "has_edl": (proj / "edl.json").exists(),
         "custos": budget.gasto_projeto(proj),
         "teto_projeto": float(b["tetos_projeto"].get(pid, b["teto_projeto_usd"])),
     }
