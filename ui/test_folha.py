@@ -117,6 +117,31 @@ def test_ler_conceitos(proj):
     assert c["animatic"] is None
 
 
+def test_ler_null_vira_texto_vazio(proj):
+    _w(proj / "conceitos.json", {"conceitos": [{"id": "A", "ideia": None, "mantem": None, "muda": None, "custo": None}]})
+    a = folha.ler(proj, "conceitos")["conceitos"][0]
+    assert a["ideia"] == a["mantem"] == a["muda"] == a["custo"] == ""
+    _w(proj / "broll.json", {"momentos": [{"id": "b01", "status": "proposto", "termo": None, "modo": None,
+                                           "candidatos": [{"fonte": None, "tipo": None, "arq": None, "licenca": None, "autor": None}]}]})
+    m = folha.ler(proj, "broll")["momentos"][0]
+    assert m["termo"] == m["modo"] == "" and m["candidatos"][0]["tipo"] == "video"
+    assert all(m["candidatos"][0][k] == "" for k in ("fonte", "arq", "licenca", "autor"))
+    _w(proj / "clips" / "clips.json", {"clipes": [{"id": "c01", "status": "proposto", "slug": None, "gancho": None,
+                                                   "plataformas": "shorts", "ranges": [{"t_in": 0, "t_out": 1}]}]})
+    c = folha.ler(proj, "clips")["clipes"][0]
+    assert c["slug"] == c["gancho"] == "" and c["plataformas"] == ["shorts"]
+    (proj / "overlays").mkdir()
+    _w(proj / "overlays" / "folha.json", {"overlays": [{"id": "o01", "arquivo": None}]})
+    assert folha.ler(proj, "overlays")["overlays"][0]["arquivo"] == ""
+
+
+def test_ler_clips_x_infinito(proj):
+    (proj / "clips").mkdir()
+    (proj / "clips" / "clips.json").write_text('{"x_padrao": Infinity, "clipes": []}', encoding="utf-8")
+    with pytest.raises(ValueError, match="x_padrao"):
+        folha.ler(proj, "clips")
+
+
 def test_ler_overlays(proj):
     (proj / "overlays").mkdir()
     (proj / "overlays" / "o01.png").write_bytes(b"\x89PNG")
@@ -200,6 +225,18 @@ def test_overlays_preview_desatualizado_usa_preto(proj):
     args = calls[0]
     assert "lavfi" in args and str(proj / "preview.mp4") not in args
     assert str(proj / "A.mov") in args and "1.000" in args
+    assert any("overlay=0:0" in a for a in args)                          # como o render.py: 0:0, sem centralizar
+
+
+def test_overlays_final_velho_nao_esconde_preview_novo(proj):
+    (proj / "A.mov").write_bytes(b"mov")
+    _edl_com_overlays(proj, [{"file": "A.mov", "start_in_output": 4.0, "duration": 2.0}])
+    (proj / "final.mp4").write_bytes(b"mp4")
+    _mtime(proj / "final.mp4", -10)
+    _mtime(proj / "preview.mp4", +10)
+    calls = []
+    folha.overlays(proj, _run=_fake_run(calls))
+    assert calls[0][calls[0].index("-i") + 1] == str(proj / "preview.mp4")
 
 
 def test_overlays_sem_video_base_usa_preto(proj):
@@ -257,4 +294,6 @@ def test_protocolo_folhas_documentado():
     assert "python ui/folha.py overlays" in longo and "§5.2" in longo
     assert 'folha: "clips"' in _txt("Formatos/padrao-youtube-shorts.md")
     ref = _txt("Formatos/referencia.md")
-    assert "conceitos.json" in ref and 'folha: "conceitos"' in ref
+    assert "conceitos.json" in ref and '"folha": "conceitos"' in ref
+    assert "ui/queue.json" in ref and "aguardando escolha" in ref
+    assert "fila do projeto" in claude

@@ -316,9 +316,11 @@ Instrução pontual ("b-roll de tribunal no corte 12"): mesmo fluxo com um momen
 Antes do render final, com overlays Remotion e b-roll já no `edl.json`:
 
 1. `python ui/folha.py overlays edit/<proj>` → `overlays/oNN.png` (frame do meio de cada
-   overlay sobre o vídeo base no mesmo tempo) + `overlays/folha.json`.
+   overlay sobre o vídeo base no mesmo tempo) + `overlays/folha.json`. Sem render atual
+   (final/preview mais velhos que o edl.json) o frame é o overlay sozinho sobre preto.
 2. `waiting_reply` com `folha: "overlays"`: "overlays: N — aprove na aba Aprovação".
-3. Resposta `ok` + exceções: `oNN:não` = remover o overlay do `edl.json`;
+3. Resposta `ok` + exceções (`oNN` = N-ésimo item de `edl.json.overlays`; ver `arquivo`/`t` em
+   `overlays/folha.json`): `oNN:não` = remover o overlay do `edl.json`;
    `oNN: <texto>` = refazer o overlay conforme o texto (re-render Remotion) e repetir o passo 1
    só se algo mudou.
 

@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import eventos
-import folha
 import server
 import server as server_mod
 from test_pipeline import fake_root  # fixture reexport
@@ -83,6 +82,21 @@ def test_reply(client):
     q = client.get("/api/project", params={"id": "edit-fake"}).json()["queue"]
     entry = next(e for e in q if e["id"] == qid)
     assert entry["reply"] == "sim, pode" and entry["status"] == "pending"
+
+
+def test_reply_consome_folha(client, fake_root):
+    qid = client.post("/api/queue", params={"id": "edit-fake"},
+                      json={"type": "instrucao", "text": "escolher"}).json()["id"]
+    qpath = fake_root / "edit-fake" / "ui" / "queue.json"
+    q = json.loads(qpath.read_text(encoding="utf-8"))
+    for e in q:
+        if e["id"] == qid:
+            e.update(status="waiting_reply", folha="conceitos")
+    qpath.write_text(json.dumps(q), encoding="utf-8")
+    r = client.post("/api/reply", params={"id": "edit-fake"}, json={"qid": qid, "text": "A"})
+    assert r.status_code == 200 and "folha" not in r.json()
+    entry = next(e for e in json.loads(qpath.read_text(encoding="utf-8")) if e["id"] == qid)
+    assert entry["reply"] == "A" and entry["status"] == "pending" and "folha" not in entry
 
 
 def test_state_merge(client):

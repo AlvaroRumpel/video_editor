@@ -54,14 +54,14 @@ def _broll(proj: Path) -> dict:
         cands = m.get("candidatos")
         if not isinstance(cands, list):
             raise ValueError(f"broll.json: {m['id']} sem candidatos")
-        cs = [{"rotulo": f"{m['id']}-{k + 1}", "fonte": c.get("fonte", ""), "tipo": c.get("tipo", "video"),
-               "arq": c.get("arq", ""), "dur": _f(c.get("dur")), "licenca": c.get("licenca", ""),
-               "autor": c.get("autor", "")}
+        cs = [{"rotulo": f"{m['id']}-{k + 1}", "fonte": c.get("fonte") or "", "tipo": c.get("tipo") or "video",
+               "arq": c.get("arq") or "", "dur": _f(c.get("dur")), "licenca": c.get("licenca") or "",
+               "autor": c.get("autor") or ""}
               for k, c in enumerate(cands) if isinstance(c, dict)]
         rotulos = [c["rotulo"] for c in cs]
         esc = m.get("escolhido") if m.get("escolhido") in rotulos else (rotulos[0] if rotulos else None)
         out.append({"id": m["id"], "t_in": _f(m.get("t_in")), "t_out": _f(m.get("t_out")),
-                    "termo": m.get("termo", ""), "modo": m.get("modo", ""), "status": "proposto",
+                    "termo": m.get("termo") or "", "modo": m.get("modo") or "", "status": "proposto",
                     "escolhido": esc, "candidatos": cs})
     return {"momentos": out}
 
@@ -71,7 +71,7 @@ def _x(v, default: int, nome: str) -> int:
         return default
     try:
         return int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f"clips.json: {nome} inválido: {v!r}")
 
 
@@ -93,9 +93,10 @@ def _clips(proj: Path) -> dict:
         if c.get("status") != "proposto":
             continue
         rs = _ranges(c)
-        out.append({"id": c["id"], "slug": c.get("slug", ""), "nota": c.get("nota"), "gancho": c.get("gancho", ""),
+        pl = c.get("plataformas") or []
+        out.append({"id": c["id"], "slug": c.get("slug") or "", "nota": c.get("nota"), "gancho": c.get("gancho") or "",
                     "ranges": rs, "x": _x(c.get("x"), xp, f"{c['id']}.x"), "legenda": bool(c.get("legenda")),
-                    "plataformas": list(c.get("plataformas") or []),
+                    "plataformas": [pl] if isinstance(pl, str) else list(pl),
                     "dur": round(sum(r["t_out"] - r["t_in"] for r in rs), 3)})
     return {"x_padrao": xp, "clipes": out}
 
@@ -106,8 +107,8 @@ def _conceitos(proj: Path) -> dict:
     for c in _itens(d, "conceitos", "conceitos.json"):
         an = c.get("animatic")
         ok = isinstance(an, str) and ANIMATIC_RE.fullmatch(an) and (proj / an).is_file()
-        out.append({"id": str(c["id"]), "ideia": c.get("ideia", ""), "mantem": c.get("mantem", ""),
-                    "muda": c.get("muda", ""), "custo": str(c.get("custo", "")), "horas": c.get("horas"),
+        out.append({"id": str(c["id"]), "ideia": c.get("ideia") or "", "mantem": c.get("mantem") or "",
+                    "muda": c.get("muda") or "", "custo": str(c.get("custo") or ""), "horas": c.get("horas"),
                     "exige_ia": bool(c.get("exige_ia")), "animatic": an if ok else None})
     return {"conceitos": out}
 
@@ -118,7 +119,7 @@ def _overlays_ler(proj: Path) -> dict:
     for o in _itens(d, "overlays", "folha.json"):
         png = o.get("png")
         ok = isinstance(png, str) and OVERLAY_PNG_RE.fullmatch(png) and (proj / png).is_file()
-        out.append({"id": o["id"], "arquivo": o.get("arquivo", ""), "t": _f(o.get("t")), "dur": _f(o.get("dur")),
+        out.append({"id": o["id"], "arquivo": o.get("arquivo") or "", "t": _f(o.get("t")), "dur": _f(o.get("dur")),
                     "png": png if ok else None, "erro": o.get("erro")})
     return {"overlays": out}
 
@@ -136,13 +137,13 @@ def overlays(proj: Path, _run=None) -> dict:
     """Frame no meio de cada overlay do edl.json. Render (final.mp4, senão
     preview.mp4) não mais velho que o edl.json já tem o overlay queimado com o
     modo certo → frame dele no tempo de saída. Sem render atual → overlay sozinho
-    sobre fundo preto."""
+    em 0:0 sobre fundo preto (como o render.py compõe)."""
     run = _run or subprocess.run
     proj = Path(proj)
     edl = _json(proj / "edl.json")
-    base = next((proj / n for n in ("final.mp4", "preview.mp4") if (proj / n).is_file()), None)
-    if base and base.stat().st_mtime < (proj / "edl.json").stat().st_mtime:
-        base = None
+    t_edl = (proj / "edl.json").stat().st_mtime
+    base = next((proj / n for n in ("final.mp4", "preview.mp4")
+                 if (proj / n).is_file() and (proj / n).stat().st_mtime >= t_edl), None)
     dst = proj / "overlays"
     dst.mkdir(exist_ok=True)
     itens = []
@@ -165,7 +166,7 @@ def overlays(proj: Path, _run=None) -> dict:
             entrada = ["-f", "lavfi", "-i", "color=c=black:s=1920x1080", "-ss", f"{meio:.3f}", "-i", str(src),
                          # setpts zera os dois relógios: sem isso o fundo lavfi sai sem o overlay
                          "-filter_complex", "[0:v]setpts=PTS-STARTPTS[b];[1:v]setpts=PTS-STARTPTS[o];"
-                                            "[b][o]overlay=(W-w)/2:(H-h)/2,scale=640:-2"]
+                                            "[b][o]overlay=0:0,scale=640:-2"]
         args = ["ffmpeg", "-y", "-loglevel", "error", *entrada, "-frames:v", "1", str(png)]
         try:
             run(args, capture_output=True, check=True, timeout=60)

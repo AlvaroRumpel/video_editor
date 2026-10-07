@@ -612,7 +612,7 @@ body[data-tab="aprovacao"] #tab-aprovacao { display: flex; flex-direction: colum
   cursor: pointer; outline: 2px solid transparent; }
 .fl-cand.sel { outline-color: var(--accent); }
 .fl-cand video, .fl-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.fl-leg { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 6px; font-size: 10px;
+.fl-leg { pointer-events: none; position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 6px; font-size: 10px;
   background: linear-gradient(transparent, #000c); color: #ddd; }
 
 .board-folha { color: var(--accent); text-decoration: none; font-weight: 600; justify-self: start; }

@@ -185,6 +185,7 @@ def reply(request: Request, id: str, body: dict):
         if e["id"] == body.get("qid"):
             e["reply"] = body.get("text", "")
             e["status"] = "pending"
+            e.pop("folha", None)   # qualquer resposta consome a folha; o Claude regrava se perguntar de novo
             pipeline.atomic_write_json(qpath, queue)
             return e
     raise HTTPException(404, "pedido não encontrado")

@@ -392,11 +392,12 @@ def test_folha_conceitos(page, ui_url, fake_root):
     page.click(".fl-col[data-cc=C] .fl-mult-cb")
     page.click(".fl-col[data-cc=A] .fl-mult-cb")
     assert page.locator("#fl-resp").inner_text() == "produzir: A C"
-    page.fill(".fl-ajuste", "mais curto")
+    page.fill(".fl-ajuste", "  mais\n  curto ")                         # vira uma linha só
     assert page.locator("#fl-resp").inner_text() == "ajuste: mais curto"
     page.click("#fl-enviar")
     page.wait_for_function("document.body.dataset.tab === 'board'")
-    assert _queue(proj)[0]["reply"] == "ajuste: mais curto"
+    q = _queue(proj)[0]
+    assert q["reply"] == "ajuste: mais curto" and "folha" not in q          # resposta consome a folha
 
 
 def test_folha_overlays(page, ui_url, fake_root):

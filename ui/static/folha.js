@@ -23,6 +23,7 @@ function resposta(tipo, d, s) {   // pura
 // waiting_reply com artefato refeito, então a próxima folha redesenha do zero
 function esqueceFolha() {
   el('tab-aprovacao').dataset.key = '';
+  folhaAtual.key = null;   // fetch em voo não redesenha folha velha nem recria seleção
   for (const k in folhaSel) if (k.startsWith(S.pid + ':')) delete folhaSel[k];
 }
 
@@ -55,6 +56,7 @@ function desenhaFolha(box, p) {
   if (erro || !T) {
     box.innerHTML = cab + `<div class="fl-erro">folha indisponível — responda pela fila
       <div class="dim">${escapeHtml(erro || 'tipo desconhecido')}</div></div>`;
+    box.dataset.key = '';   // próximo renderFolha (SSE) tenta de novo
     return;
   }
   if (!folhaSel[key]) folhaSel[key] = { ...T.sel(dados), coment: '' };
@@ -127,11 +129,11 @@ FOLHA_TIPOS.broll = {
   html: d => d.momentos.map(m => `<div class="fl-row" data-m="${escapeHtml(m.id)}">
       <div class="fl-lab"><b>${escapeHtml(m.id)}</b><span class="mono">${fmtMSS(m.t_in)}</span>
         <span>${escapeHtml(m.termo)}</span><span class="dim">${escapeHtml(m.modo)}</span></div>
-      <div class="fl-cands">${m.candidatos.map((c, i) => `<div class="fl-cand" data-k="${i + 1}">
+      <div class="fl-cands">${m.candidatos.map(c => `<div class="fl-cand" data-k="${kDe(c.rotulo)}">
         ${c.tipo === 'video'
           ? `<video muted loop preload="metadata" src="${midia(c.arq)}" onerror="${falta}"></video>`
           : `<img alt="" src="${midia(c.arq)}" onerror="${falta}">`}
-        <span class="fl-leg">${i + 1} · ${escapeHtml(c.fonte)} · ${c.tipo === 'video' ? Math.round(c.dur) + 's' : 'foto'}${c.licenca ? ' · ' + escapeHtml(c.licenca) : ''}</span>
+        <span class="fl-leg">${kDe(c.rotulo)} · ${escapeHtml(c.fonte)} · ${c.tipo === 'video' ? Math.round(c.dur) + 's' : 'foto'}${c.licenca ? ' · ' + escapeHtml(c.licenca) : ''}</span>
       </div>`).join('')}</div>
       <button class="fl-veto">vetar</button>
     </div>`).join('') || '<div class="dim">nenhum momento proposto</div>',
@@ -172,6 +174,7 @@ function tocaClipe(card, c) {
     if (i >= c.ranges.length) { v.pause(); v.ontimeupdate = null; return; }
     v.currentTime = c.ranges[i].t_in;
   };
+  v.muted = false;   // clique do usuário libera áudio; atributo muted fica só pro preload
   v.play().catch(() => {});
 }
 
@@ -271,7 +274,7 @@ FOLHA_TIPOS.conceitos = {
     return true;
   },
   resposta: (d, s) => {
-    if (s.ajuste.trim()) return 'ajuste: ' + s.ajuste.trim();
+    if (s.ajuste.trim()) return 'ajuste: ' + s.ajuste.trim().replace(/\s+/g, ' ');
     if (s.varios) return s.marcados.length >= 2 ? 'produzir: ' + [...s.marcados].sort().join(' ') : (s.marcados[0] || '');
     return s.um || '';
   },

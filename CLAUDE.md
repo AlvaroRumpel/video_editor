@@ -54,7 +54,8 @@ em vez de sobrescrever o objeto inteiro.
    pergunta — a UI mostra a aba Aprovação e devolve a resposta no formato
    `ok` + exceções: `ok` = tudo como proposto; `ok b03:2 b05:não` = as
    exceções valem e o resto fica aprovado como proposto. Resposta só com
-   tokens (sem `ok`) continua válida.
+   tokens (sem `ok`) continua válida. Pedido da fila global (ex.: referencia):
+   criar o pedido com `folha` na fila do projeto (a folha só abre de lá).
 5. Tarefa longa (ex.: novo-projeto): manter `status: "executing"` e ir
    atualizando `resultado` com o status atual em uma frase curta a cada
    etapa concluída ("transcrevendo...", "gerando animações 2/5..."). A UI

@@ -26,6 +26,13 @@ mesma resposta de texto que o Claude já sabe aplicar.
   `broll | clips | conceitos | overlays`. O Claude o grava ao abrir o
   `waiting_reply` de uma aprovação (junto com `resultado` = pergunta).
   Sem `folha`, nada muda.
+- Qualquer resposta (`/api/reply`) consome a folha: o servidor remove
+  `folha` do pedido junto com `reply` + `pending`; o Claude regrava ao
+  perguntar de novo.
+- A folha só abre da fila do projeto. Pedido da fila global (ex.:
+  `referencia`) → o Claude cria na fila do projeto um pedido `instrucao`
+  `waiting_reply` com `folha`; o global fica `executing` ("aguardando
+  escolha no projeto <proj>") e vira `done` junto com o do projeto.
 - Sintaxe de resposta unificada: **`ok` + exceções**. `ok` sozinho = tudo
   aprovado como proposto; `ok b02:2 b05:não` = exceções valem, o resto
   aprovado como proposto. Receitas passam a dizer isso explicitamente.
@@ -64,8 +71,9 @@ stdout, exit 0 / 1 (`ValueError`) / 2.
     cada item; `candidatos` (lista) no b-roll; `ranges` no clipe.
 - `overlays(proj: Path, _run=None) -> dict` — para cada item de
   `edl.json["overlays"]` (com `file`, `start_in_output`, `duration`):
-  frame no meio do overlay (`t = start + dur/2`) composto sobre o
-  `final.mp4` (ou `preview.mp4`) no mesmo tempo; sem vídeo base, sobre
+  frame no meio do overlay (`t = start + dur/2`) do 1º entre `final.mp4`,
+  `preview.mp4` que exista e não seja mais velho que o `edl.json` (overlay
+  já queimado), no mesmo tempo; sem render atual, overlay em 0:0 sobre
   fundo preto 1920x1080. Saída `overlays/oNN.png` (640 de largura) +
   `overlays/folha.json`. `edl.json` sem overlays → folha com lista vazia.
   Overlay cujo arquivo falta → item com `png: null` e `erro`.
@@ -156,7 +164,8 @@ Resposta: `ok` + exceções: `oNN:não`, `oNN: <texto>`.
   `oNN: <texto>` = refazer conforme instrução.
 - `padrao-youtube-shorts.md` passo 5: `folha: clips`; sintaxe `ok` + tokens.
 - `referencia.md` passo 4: escrever também `conceitos.json` (campos da
-  tabela acima); passo 6: `folha: conceitos`.
+  tabela acima); passo 6: pedido `folha: conceitos` na fila do projeto
+  (o `referencia` é da fila global).
 
 ## Testes
 

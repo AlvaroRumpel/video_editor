@@ -32,8 +32,13 @@ de texto, visual ou música. `conceitos.md` registra URL e autor.
    "custo" (texto, ex. "US$ 0,40 + 600 créditos"), "horas", "exige_ia" (bool),
    "animatic": "animatic-A.png"}, ...]}` — é o que a folha de conceitos mostra.
 5. `python ui/referencia.py animatic edit/shorts/<proj>/roteiro-A.md edit/shorts/<proj>/animatic-A.png --marca <marca>` (B, C idem).
-6. `waiting_reply` com `folha: "conceitos"`: "referência analisada — escolha na aba Aprovação (ou Docs › conceitos.md, animatic-A/B/C.png).
-   responda `A` | `B` | `C` | `ajuste: ...` | `produzir: A B`".
-7. Escolhido: copiar `roteiro-X.md` → `roteiro.md`; `state.json.ref = {"conceitos": 3, "escolhido": "X", "produzidos": []}`
+6. A folha só abre da fila do projeto: acrescentar em `edit/shorts/<proj>/ui/queue.json` (reler + merge
+   por `id`, nunca sobrescrever) `{"id": <timestamp ms>, "ts", "type": "instrucao", "target": null,
+   "text": "escolher conceito", "status": "waiting_reply", "resultado": "<pergunta>", "reply": null,
+   "folha": "conceitos"}`, pergunta = "referência analisada — escolha na aba Aprovação (ou Docs › conceitos.md, animatic-A/B/C.png).
+   responda `A` | `B` | `C` | `ajuste: ...` | `produzir: A B`". O pedido `referencia` da fila global
+   fica `executing` com `resultado` = "aguardando escolha no projeto <proj>".
+7. Com o `reply` no pedido do projeto: aplicar (abaixo), marcar o pedido do projeto `done` e o
+   `referencia` global `done`. Escolhido: copiar `roteiro-X.md` → `roteiro.md`; `state.json.ref = {"conceitos": 3, "escolhido": "X", "produzidos": []}`
    (merge); seguir `Formatos/padrao-ads.md` a partir de "Técnica de produção".
    `produzir: A B` → cada um em `edit/shorts/<proj>/<X>/` com `ui/`, `state.json.ref.produzidos += [X]`.
