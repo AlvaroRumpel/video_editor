@@ -17,6 +17,61 @@ const putJSON = (path, params, body) =>
 const escapeHtml = s => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const TABS = ['board', 'edicao', 'docs', 'custos'];
+const STATUS_LABEL = { pendente: 'pendente', andamento: 'em andamento', fim: 'ok',
+  espera: 'esperando você', pulada: 'pulada', falha: 'falha' };
+const hashFor = (pid, tab) => `#/p/${encodeURIComponent(pid)}/${tab}`;
+
+function parseHash() {
+  const m = location.hash.match(/^#\/p\/([^/]+)(?:\/([a-z]+))?$/);
+  if (!m) return { route: 'library' };
+  return { route: 'project', pid: decodeURIComponent(m[1]), tab: TABS.includes(m[2]) ? m[2] : null };
+}
+
+function lastTab(pid) { try { return localStorage.getItem('tab:' + pid); } catch { return null; } }
+function saveTab(pid, tab) { try { localStorage.setItem('tab:' + pid, tab); } catch { /* sem storage */ } }
+
+function goTab(tab) {
+  const h = hashFor(S.pid, tab);
+  if (location.hash === h) route(); else location.hash = h;
+}
+
+async function route() {
+  const r = parseHash();
+  const body = document.body;
+  if (r.route === 'library') {
+    body.dataset.route = 'library';
+    if (S.es) { S.es.close(); S.es = null; }
+    S.pid = null; S.proj = null; S.quadro = null; S.selected = null;
+    const v = el('player');
+    v.pause(); if (v.getAttribute('src')) v.removeAttribute('src');
+    el('render-progress').hidden = true;   // progresso é por projeto
+    renderBudget();
+    startLibrary();
+    return;
+  }
+  stopLibrary();
+  let tab = r.tab || lastTab(r.pid) || 'board';
+  if (!TABS.includes(tab)) tab = 'board';
+  if (r.tab !== tab) { history.replaceState(null, '', hashFor(r.pid, tab)); }
+  const prev = body.dataset.tab;
+  body.dataset.route = 'project';
+  body.dataset.tab = tab;
+  saveTab(r.pid, tab);
+  if (S.pid !== r.pid || !S.proj) await loadProject(r.pid);
+  else renderTab(tab, prev);
+}
+
+window.addEventListener('hashchange', route);
+// aba clicável antes do load terminar (href só é preenchido em renderTabs)
+el('tabs').addEventListener('click', e => {
+  const a = e.target.closest('a[data-tab]');
+  if (!a || a.classList.contains('off')) return;
+  e.preventDefault();
+  const h = hashFor(parseHash().pid, a.dataset.tab);
+  if (location.hash === h) route(); else location.hash = h;
+});
+
 // stubs — reatribuídos por buildTimeMap() após cada load de projeto
 let outToSrc = t => t, srcToOut = t => t;
 
@@ -44,48 +99,35 @@ function buildTimeMap() {
   return map;
 }
 
-async function refreshProjectList() {
-  const projs = await getJSON('/api/projects');
-  const sel = el('proj-select');
-  sel.innerHTML = projs.map(p =>
-    `<option value="${p.id}">${p.name}${p.started ? '' : ' (não iniciado)'}</option>`).join('');
-  if (S.pid && projs.some(p => p.id === S.pid)) sel.value = S.pid;
-  return projs;
-}
-
-async function loadProjects() {
-  const projs = await refreshProjectList();
-  const sel = el('proj-select');
-  sel.onchange = () => loadProject(sel.value);
-  if (!projs.length) return;
-  const last = localStorage.lastPid;
-  loadProject(projs.some(p => p.id === last) ? last : projs[0].id);
-}
-
 async function loadProject(pid) {
   try {
     await loadProjectInner(pid);
-  } catch (err) {   // servidor reiniciando etc.: tenta de novo em 2s
+  } catch (err) {   // servidor reiniciando etc.: tenta de novo em 2s se ainda estamos nele
     console.warn('loadProject falhou, retry em 2s', err);
-    setTimeout(() => loadProject(pid), 2000);
+    setTimeout(() => { if (parseHash().pid === pid) loadProject(pid); }, 2000);
   }
 }
 
 async function loadProjectInner(pid) {
-  S.pid = pid; localStorage.lastPid = pid;
-  S.proj = await getJSON('/api/project', { id: pid });
-  S.wave = await getJSON('/api/waveform', { id: pid });
-  S.globalQueue = await getJSON('/api/global-queue');
-  S.activity = await getJSON('/api/activity');
-  S.budget = await getJSON('/api/budget').catch(() => null);
-  refreshProjectList();   // projeto novo criado pelo Claude aparece sem F5
+  const r = await fetch(api('/api/project', { id: pid }));
+  if (r.status === 400 || r.status === 404) { location.hash = '#/'; return; }
+  const proj = await r.json();
+  const [wave, quadro, gq, act, bud] = await Promise.all([
+    getJSON('/api/waveform', { id: pid }), getJSON('/api/quadro', { id: pid }),
+    getJSON('/api/global-queue'), getJSON('/api/activity'),
+    getJSON('/api/budget').catch(() => null)]);
+  if (parseHash().pid !== pid) return;   // usuário saiu do projeto durante o load
+  const novo = S.pid !== pid;
+  S.pid = pid; S.proj = proj; S.wave = wave; S.quadro = quadro;
+  S.globalQueue = gq; S.activity = act; S.budget = bud;
+  if (novo) { S.selected = null; S.docsPid = null; }
   const v = el('player');
   el('no-preview').hidden = S.proj.has_preview;
   if (S.proj.has_preview)
     v.src = api('/api/video', { id: pid, kind: 'preview' });
   else if (v.getAttribute('src')) v.removeAttribute('src');
-  renderAll();          // definida nas tasks 7-9
-  connectSSE(pid);
+  renderAll();
+  if (novo || !S.es) connectSSE(pid);
 }
 
 function connectSSE(pid) {
@@ -101,7 +143,7 @@ function connectSSE(pid) {
       const changed = Object.keys(snap.mtimes)
         .filter(k => snap.mtimes[k] !== last.mtimes[k]);
       if (changed.length) await loadProject(pid);   // recarrega tudo (simples)
-      if (changed.includes('docs') && S.docsOpen && !el('modal').hidden) openDocsModal();
+      if (changed.includes('docs') && document.body.dataset.tab === 'docs') renderDocsTab();
     }
     last = snap;
   };
@@ -589,19 +631,50 @@ function initTimelineOnce() {
 
 function renderAll() {
   if (!S.proj) return;
+  const body = document.body;
+  if (body.dataset.tab === 'edicao' && !S.proj.has_edl) {   // sem edl.json: Edição desabilitada
+    body.dataset.tab = 'board';
+    history.replaceState(null, '', hashFor(S.pid, 'board'));
+  }
   buildTimeMap();
   initTimelineOnce();
   if (S.pid !== lastFitPid) { fitView(); lastFitPid = S.pid; }
+  renderHeader();
+  renderTabs();
+  renderStepper();
   renderCutList();
   renderTimeline();
   renderQueue();
   renderProgress();
   renderBudget();
-  renderAudioInfo();
-  renderBrollInfo();
-  renderClipsInfo();
-  renderRefInfo();
+  const tab = body.dataset.tab;
+  if (tab === 'board') renderBoard();
+  if (tab === 'custos') renderCustosTab();
+  if (tab === 'docs' && S.docsPid !== S.pid) { S.docsPid = S.pid; renderDocsTab(); }
   if (S.formats) renderFormatSelect(); else loadFormats().then(renderFormatSelect);
+}
+
+function renderHeader() {
+  el('proj-name').textContent = S.pid.split('/').slice(-2).join('/');
+  el('proj-cost').textContent = fmtUSD((S.proj.custos || {}).usd);
+}
+
+function renderTabs() {
+  const tab = document.body.dataset.tab;
+  document.querySelectorAll('#tabs a').forEach(a => {
+    a.href = hashFor(S.pid, a.dataset.tab);
+    a.classList.toggle('on', a.dataset.tab === tab);
+    a.classList.toggle('off', a.dataset.tab === 'edicao' && !(S.proj && S.proj.has_edl));
+  });
+}
+
+function renderTab(tab, prev) {
+  renderTabs();
+  if (tab === 'board') renderBoard();
+  else if (tab === 'custos') renderCustosTab();
+  else if (tab === 'docs') { S.docsPid = S.pid; renderDocsTab(); }
+  else if (tab === 'edicao' && prev !== 'edicao')
+    requestAnimationFrame(() => { fitView(); renderTimeline(); });
 }
 
 // ---------------------------------------------------------------------
@@ -624,18 +697,20 @@ function renderActivity() {
 
 function renderQueue() {
   renderActivity();
-  const projEntries = (S.proj.queue || []).map(e => ({ ...e, _scope: 'proj' }));
+  const projEntries = S.proj
+    ? (S.proj.queue || []).map(e => ({ ...e, _scope: 'proj' }))
+    : (S.lib.items || []).flatMap(p => (p.fila || []).map(e => ({ ...e, _scope: p.id, _nome: p.name })));
   const globalEntries = (S.globalQueue || []).map(e => ({ ...e, _scope: 'global' }));
   const merged = projEntries.concat(globalEntries).sort((a, b) => b.id - a.id);
   el('queue-panel').innerHTML = merged.length ? merged.map(e => {
     const icon = STATUS_ICON[e.status] || '';
-    const prefix = e._scope === 'global' ? '[novo] ' : '';
+    const prefix = e._scope === 'global' ? '[novo] ' : e._nome ? `[${escapeHtml(e._nome)}] ` : '';
     const sub = e.resultado ? `<div class="queue-sub">${escapeHtml(e.resultado)}</div>` : '';
     const replySent = e.reply && e.status !== 'waiting_reply'
       ? `<div class="queue-sub queue-you">você: ${escapeHtml(e.reply)}${e.status === 'pending' ? ' — aguardando o Claude retomar' : ''}</div>` : '';
     const reply = e.status === 'waiting_reply' ? `<div class="queue-reply">
-        <textarea class="queue-reply-input" data-qid="${e.id}" data-scope="${e._scope}" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)" rows="2"></textarea>
-        <button class="queue-reply-send" data-qid="${e.id}" data-scope="${e._scope}">Enviar</button>
+        <textarea class="queue-reply-input" data-qid="${e.id}" data-scope="${escapeHtml(e._scope)}" placeholder="responder... (Enter envia, Ctrl+Enter quebra linha)" rows="2"></textarea>
+        <button class="queue-reply-send" data-qid="${e.id}" data-scope="${escapeHtml(e._scope)}">Enviar</button>
       </div>` : '';
     return `<div class="queue-row">
       <div class="queue-main"><span class="queue-icon">${icon}</span><span class="queue-text">${prefix}${escapeHtml(e.text || e.type)}</span></div>
@@ -645,8 +720,9 @@ function renderQueue() {
 }
 
 function sendReply(qid, text, scope) {
-  const pid = scope === 'global' ? '_global' : S.pid;
-  return postJSON('/api/reply', { id: pid }, { qid, text }).then(() => loadProject(S.pid));
+  const pid = scope === 'global' ? '_global' : scope === 'proj' ? S.pid : scope;
+  return postJSON('/api/reply', { id: pid }, { qid, text })
+    .then(() => (S.pid ? loadProject(S.pid) : loadLibrary()));
 }
 
 el('queue-panel').addEventListener('click', e => {
@@ -689,53 +765,16 @@ function renderProgress() {
 const fmtUSD = v => `US$ ${(v || 0).toFixed(2)}`;
 
 function renderBudget() {
-  const c = S.proj.custos || { usd: 0, creditos: 0 };
-  const teto = S.proj.teto_projeto || 0;
-  const pct = teto ? Math.min(100, c.usd / teto * 100) : 0;
+  let usd, teto;
+  if (S.proj) { usd = (S.proj.custos || {}).usd || 0; teto = S.proj.teto_projeto || 0; }
+  else {
+    const b = S.budget || {};
+    usd = (b.gasto_mes || {}).usd || 0; teto = (b.budget || {}).teto_mensal_usd || 0;
+  }
+  const pct = teto ? Math.min(100, usd / teto * 100) : 0;
   el('budget-badge').className = 'budget' + (pct >= 80 ? ' warn' : '');
   el('budget-bar').style.width = `${pct}%`;
-  el('budget-label').textContent = `${fmtUSD(c.usd)} / ${fmtUSD(teto)}`;
-}
-
-function renderAudioInfo() {
-  const a = S.proj.state && S.proj.state.audio;
-  const box = el('audio-info');
-  if (!a) { box.hidden = true; return; }
-  const partes = [];
-  if (a.trilha) partes.push(`trilha ${a.trilha} · ${a.nivel_db ?? -18} dB · duck ${a.duck_db ?? -8} dB`);
-  if (a.denoise) partes.push(`denoise ${a.denoise}`);
-  if (a.ruido_db != null) partes.push(`ruído ${Number(a.ruido_db).toFixed(0)} dB`);
-  box.textContent = 'áudio: ' + partes.join(' · ');
-  box.hidden = !partes.length;
-}
-
-function renderBrollInfo() {
-  const b = S.proj.state && S.proj.state.broll;
-  const box = el('broll-info');
-  if (!b) { box.hidden = true; return; }
-  const cnt = v => Array.isArray(v) ? v.length : (v ?? 0);
-  const fontes = Object.entries(b.fontes || {}).map(([k, v]) => `${k} ${v}`).join(', ');
-  box.textContent = `b-roll: ${cnt(b.aprovados)}/${cnt(b.momentos)} aprovados${fontes ? ' · ' + fontes : ''}`;
-  box.hidden = false;
-}
-
-function renderClipsInfo() {
-  const c = S.proj.state && S.proj.state.clips;
-  const box = el('clips-info');
-  if (!c) { box.hidden = true; return; }
-  const cnt = v => Array.isArray(v) ? v.length : (v ?? 0);
-  box.textContent = `clips: ${cnt(c.aprovados)} aprovados · ${cnt(c.renderizados)} renderizados · ${cnt(c.publora_drafts)} drafts`;
-  box.hidden = false;
-}
-
-function renderRefInfo() {
-  const r = S.proj.state && S.proj.state.ref;
-  const box = el('ref-info');
-  if (!r) { box.hidden = true; return; }
-  const n = Array.isArray(r.conceitos) ? r.conceitos.length : (r.conceitos ?? 0);
-  box.textContent = `ref: ${n} conceitos` + (r.escolhido ? ` · escolhido ${r.escolhido}` : '') +
-    (r.produzidos && r.produzidos.length ? ` · produzidos ${r.produzidos.join(', ')}` : '');
-  box.hidden = false;
+  el('budget-label').textContent = `${fmtUSD(usd)} / ${fmtUSD(teto)}`;
 }
 
 function openBudgetModal() {
@@ -747,32 +786,34 @@ function openBudgetModal() {
       <button class="modal-close">×</button>
       <h3>Orçamento</h3>
       <div>Mês ${escapeHtml(b.mes || '')}: <b>${fmtUSD(m.usd)}</b> / ${fmtUSD(bb.teto_mensal_usd)} · ElevenLabs ${cota}</div>
-      <div>Projeto atual: <b>${fmtUSD((S.proj.custos || {}).usd)}</b> / ${fmtUSD(S.proj.teto_projeto)}</div>
+      ${S.proj ? `<div>Projeto atual: <b>${fmtUSD((S.proj.custos || {}).usd)}</b> / ${fmtUSD(S.proj.teto_projeto)}</div>` : ''}
       <label>Teto mensal (US$) <input type="number" min="0" step="0.5" id="b-mensal" value="${bb.teto_mensal_usd ?? ''}"></label>
       <label>Teto padrão por projeto (US$) <input type="number" min="0" step="0.5" id="b-proj" value="${bb.teto_projeto_usd ?? ''}"></label>
-      <label>Teto deste projeto (US$) <input type="number" min="0" step="0.5" id="b-este" value="${S.proj.teto_projeto ?? ''}"></label>
+      ${S.proj ? `<label>Teto deste projeto (US$) <input type="number" min="0" step="0.5" id="b-este" value="${S.proj.teto_projeto ?? ''}"></label>` : ''}
       <label>Pedir aprovação acima de (US$) <input type="number" min="0" step="0.1" id="b-acima" value="${bb.aprovar_acima_usd ?? ''}"></label>
       <div id="b-erro" class="error" style="color:#c33"></div>
       <button id="b-save">Salvar</button>
     </div>`;
   el('modal').hidden = false;
-  const inicialEste = el('b-este').value;
+  const inicialEste = S.proj ? el('b-este').value : null;
   el('b-save').onclick = () => {
     const body = {
       teto_mensal_usd: +el('b-mensal').value,
       teto_projeto_usd: +el('b-proj').value,
       aprovar_acima_usd: +el('b-acima').value,
     };
-    const este = el('b-este').value;
-    if (este !== inicialEste)   // só fixa/remove o teto próprio se o campo mudou
-      body.tetos_projeto = { [S.pid]: este === '' ? null : +este };
+    if (S.proj) {
+      const este = el('b-este').value;
+      if (este !== inicialEste)   // só fixa/remove o teto próprio se o campo mudou
+        body.tetos_projeto = { [S.pid]: este === '' ? null : +este };
+    }
     putJSON('/api/budget', {}, body).then(async r => {
       if (r && r.ok === false) {
         const j = await r.json().catch(() => ({}));
         el('b-erro').textContent = j.detail || 'erro ao salvar';
         return;
       }
-      closeModal(); loadProject(S.pid);
+      closeModal(); if (S.pid) loadProject(S.pid); else getJSON('/api/budget').then(b => { S.budget = b; renderBudget(); });
     }).catch(e => { el('b-erro').textContent = String(e); });
   };
 }
@@ -849,44 +890,6 @@ async function openFormatsModal() {
 
 el('btn-formats').addEventListener('click', openFormatsModal);
 
-async function openDocsModal() {
-  if (!S.pid) {
-    el('modal').innerHTML = '<div class="modal-box modal-docs"><button class="modal-close">×</button><div class="modal-docs-empty">abra um projeto primeiro</div></div>';
-    el('modal').hidden = false;
-    return;
-  }
-  const docs = await getJSON('/api/docs', { id: S.pid });
-  el('modal').innerHTML = `
-    <div class="modal-box modal-formats modal-docs">
-      <button class="modal-close">×</button>
-      <h3>Docs — ${escapeHtml(S.pid)}</h3>
-      <div class="modal-formats-body">
-        <div class="modal-formats-list">${docs.map(d =>
-          `<div class="modal-formats-item" data-name="${escapeHtml(d.name)}">${escapeHtml(d.name)}</div>`).join('')
-          || '<div class="modal-docs-empty">nenhum .md no projeto</div>'}</div>
-        <div class="modal-docs-view" id="docs-view"></div>
-      </div>
-    </div>`;
-  el('modal').hidden = false;
-  const show = async name => {
-    S.docsName = name;
-    if (name.endsWith('.png')) {
-      el('docs-view').innerHTML = '<img style="max-width:100%" src="' + api('/api/file', { id: S.pid, name }) + '">';
-    } else {
-      const d = await getJSON('/api/doc', { id: S.pid, name });
-      el('docs-view').innerHTML = d.html;   // servidor já escapou tudo
-    }
-    el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
-      it.classList.toggle('active', it.dataset.name === name));
-  };
-  el('modal').querySelectorAll('.modal-formats-item').forEach(it =>
-    it.addEventListener('click', () => show(it.dataset.name)));
-  const ini = docs.find(d => d.name === S.docsName) || docs[0];
-  if (ini) show(ini.name);
-  S.docsOpen = true;
-}
-el('btn-docs').addEventListener('click', openDocsModal);
-
 async function openNewProjectModal() {
   const [brutos, formats, brutosRef] = await Promise.all([getJSON('/api/brutos'), loadFormats(), getJSON('/api/brutos-ref')]);
   el('modal').innerHTML = `
@@ -960,4 +963,51 @@ async function openNewProjectModal() {
 
 el('btn-new').addEventListener('click', openNewProjectModal);
 
-loadProjects();
+async function renderDocsTab() {
+  const pid = S.pid;
+  const docs = await getJSON('/api/docs', { id: pid });
+  if (S.pid !== pid) return;
+  const box = el('tab-docs');
+  box.innerHTML = `<div class="docs-body">
+      <div class="modal-formats-list">${docs.map(d =>
+        `<div class="modal-formats-item" data-name="${escapeHtml(d.name)}">${escapeHtml(d.name)}</div>`).join('')
+        || '<div class="modal-docs-empty">nenhum doc no projeto</div>'}</div>
+      <div class="modal-docs-view" id="docs-view"></div>
+    </div>`;
+  const show = async name => {
+    S.docsName = name;
+    if (name.endsWith('.png')) {
+      el('docs-view').innerHTML = '<img style="max-width:100%" src="' + api('/api/file', { id: pid, name }) + '">';
+    } else {
+      const d = await getJSON('/api/doc', { id: pid, name });
+      el('docs-view').innerHTML = d.html;   // servidor já escapou tudo
+    }
+    box.querySelectorAll('.modal-formats-item').forEach(it =>
+      it.classList.toggle('active', it.dataset.name === name));
+  };
+  box.querySelectorAll('.modal-formats-item').forEach(it =>
+    it.addEventListener('click', () => show(it.dataset.name)));
+  const ini = docs.find(d => d.name === S.docsName) || docs[0];
+  if (ini) show(ini.name);
+}
+
+function renderCustosTab() {
+  const c = S.proj.custos || { usd: 0, creditos: 0 };
+  const q = S.quadro || { etapas: [], fora_da_receita: [] };
+  const linhas = q.etapas.concat(q.fora_da_receita).filter(e => e.custo_usd > 0);
+  const soma = linhas.reduce((s, e) => s + e.custo_usd, 0);
+  const resto = Math.max(0, (c.usd || 0) - soma);
+  const temResto = resto > 0.00005;
+  el('tab-custos').innerHTML = `<div class="custos">
+      <div class="custos-total">Projeto: <b class="mono">${fmtUSD(c.usd)}</b> / <span class="mono">${fmtUSD(S.proj.teto_projeto)}</span> · <span class="mono">${c.creditos || 0}</span> créditos</div>
+      <table class="custos-tab"><thead><tr><th>etapa</th><th>US$</th></tr></thead><tbody>
+        ${linhas.map(e => `<tr><td>${escapeHtml(e.rotulo)}</td><td class="mono">${fmtUSD(e.custo_usd)}</td></tr>`).join('')}
+        ${temResto ? `<tr><td class="dim">fora de etapa</td><td class="mono">${fmtUSD(resto)}</td></tr>` : ''}
+      </tbody></table>
+      ${linhas.length || temResto ? '' : '<div class="dim">nenhum gasto ainda</div>'}
+      <button id="custos-tetos">Editar tetos</button>
+    </div>`;
+  el('custos-tetos').onclick = openBudgetModal;
+}
+
+window.addEventListener('DOMContentLoaded', route);   // depois de library.js e board.js

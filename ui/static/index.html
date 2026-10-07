@@ -1,16 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>video_editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+</head>
+<body data-route="library" data-tab="board">
 <header>
-  <select id="proj-select" title="Projeto ativo"></select>
-  <select id="format-select" title="Formato/receita que o Claude segue neste projeto"></select>
-  <button id="btn-new" title="Criar projeto novo a partir de um arquivo de bruto/">Novo vídeo</button>
-  <button id="btn-formats" title="Ver e editar as receitas de formato">Formatos</button>
-  <button id="btn-docs" title="Pesquisa, roteiro, fatos e pauta do projeto (somente leitura)">Docs</button>
+  <span class="only-library brand">video_editor</span>
+  <button class="only-library" id="btn-new" title="Criar projeto novo">+ Novo vídeo</button>
+  <button class="only-library" id="btn-formats" title="Ver e editar as receitas de formato">Formatos</button>
+  <a class="only-project back" id="btn-back" href="#/" title="Voltar à biblioteca">←</a>
+  <span class="only-project proj-name" id="proj-name"></span>
+  <select class="only-project" id="format-select" title="Formato/receita que o Claude segue neste projeto"></select>
+  <span class="only-project mono" id="proj-cost" title="Gasto total do projeto"></span>
   <span class="spacer"></span>
   <div id="render-progress" hidden><div id="render-bar"></div><span id="render-label"></span></div>
-  <button id="btn-render-preview" title="Enfileira render de preview (rápido, 720p)">Render Preview</button>
-  <button id="btn-render-final" title="Enfileira render final (qualidade completa)">Render Final</button>
-  <button id="budget-badge" class="budget" title="Gasto do projeto / teto. Clique pra ver o mês e editar tetos"><span id="budget-bar"></span><span id="budget-label">US$ —</span></button>
+  <button class="only-project" id="btn-render-preview" title="Enfileira render de preview (rápido, 720p)">Render Preview</button>
+  <button class="only-project" id="btn-render-final" title="Enfileira render final (qualidade completa)">Render Final</button>
+  <button id="budget-badge" class="budget" title="Gasto / teto. Clique pra ver o mês e editar tetos"><span id="budget-bar"></span><span id="budget-label">US$ —</span></button>
   <span id="claude-status" class="offline" title="Fica verde quando uma sessão do Claude está escutando a fila">Claude offline</span>
 </header>
 <main>
@@ -21,29 +33,47 @@
       <div id="activity-prev" hidden>✓ <span id="activity-prev-text"></span></div>
     </div>
     <div id="queue-panel"></div>
-  </aside>
-  <section id="player-pane">
-    <div id="stage">
-      <video id="player" controls title="Espaço = play/pause"></video>
-      <div id="no-preview" hidden>sem preview — peça um render</div>
-    </div>
-  </section>
-  <aside id="side-pane">
-    <div class="pane-title">Cortes</div>
-    <div id="audio-info" class="info-line" hidden></div>
-    <div id="broll-info" class="info-line" hidden></div>
-    <div id="clips-info" class="info-line" hidden></div>
-    <div id="ref-info" class="info-line" hidden></div>
-    <div id="cut-list" title="Clique num corte pra ver o trecho no player"></div>
-    <div id="instruction-pane">
+    <div id="instruction-pane" class="only-project">
       <div id="instr-context">instrução geral</div>
       <textarea id="instr-text" placeholder="o que fazer..."></textarea>
       <button id="instr-send" title="Enviar instrução pro Claude (Ctrl+Enter). Ctrl+Z cancela o último pedido">Enviar</button>
     </div>
   </aside>
+  <section id="library-view" class="only-library">
+    <div id="lib-filters">
+      <div id="lib-chips"></div>
+      <input type="search" id="lib-busca" placeholder="buscar projeto...">
+    </div>
+    <div id="lib-grid"></div>
+  </section>
+  <section id="project-view" class="only-project">
+    <div id="stepper"></div>
+    <nav id="tabs">
+      <a data-tab="board">Board</a><a data-tab="edicao">Edição</a><a data-tab="docs">Docs</a><a data-tab="custos">Custos</a>
+    </nav>
+    <div id="tab-board" class="tab-pane"></div>
+    <div id="tab-edicao" class="tab-pane">
+      <section id="player-pane">
+        <div id="stage">
+          <video id="player" controls title="Espaço = play/pause"></video>
+          <div id="no-preview" hidden>sem preview — peça um render</div>
+        </div>
+      </section>
+      <aside id="side-pane">
+        <div class="pane-title">Cortes</div>
+        <div id="cut-list" title="Clique num corte pra ver o trecho no player"></div>
+      </aside>
+    </div>
+    <div id="tab-docs" class="tab-pane"></div>
+    <div id="tab-custos" class="tab-pane"></div>
+  </section>
 </main>
-<footer>
+<footer class="only-edicao">
   <canvas id="timeline" title="Clique num clipe = preview; roda do mouse = zoom; arrastar fundo = pan; arrastar borda de clipe (com zoom) = ajuste fino ±2s"></canvas>
 </footer>
 <div id="modal" hidden></div>
 <script src="app.js"></script>
+<script src="library.js"></script>
+<script src="board.js"></script>
+</body>
+</html>

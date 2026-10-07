@@ -1,13 +1,15 @@
 :root {
-  --bg: #1e1e1e;
-  --panel: #252526;
-  --border: #3c3c3c;
-  --accent: #4f8cff;
-  --ok: #4caf50;
-  --pending: #e6a23c;
+  --bg: #0e0e10;
+  --panel: #151518;
+  --panel-2: #1b1b20;
+  --border: #232328;
+  --accent: #f0b24a;
+  --ok: #5fd38a;
+  --pending: #f0b24a;
   --fail: #e05252;
-  --text: #ddd;
-  --text-dim: #999;
+  --text: #e8e6e3;
+  --text-dim: #77757d;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -23,7 +25,7 @@ body {
   grid-template-areas: "header" "main" "footer";
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  font: 13px/1.45 Inter, system-ui, -apple-system, sans-serif;
 }
 
 button, select, textarea, input {
@@ -31,7 +33,7 @@ button, select, textarea, input {
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 6px;
 }
 
 button {
@@ -132,7 +134,7 @@ header .spacer {
 main {
   grid-area: main;
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr minmax(260px, 320px);
+  grid-template-columns: minmax(220px, 280px) 1fr;
   overflow: hidden;
 }
 
@@ -148,7 +150,7 @@ main {
 
 #stage {
   position: relative;
-  width: min(100%, calc((100vh - 44px - 220px - 40px) * 16 / 9), 1100px);
+  width: min(100%, calc((100vh - 44px - 84px - 220px - 40px) * 16 / 9), 1100px);
   aspect-ratio: 16 / 9;
   background: #000;
   border: 1px solid var(--border);
@@ -224,9 +226,9 @@ main {
   flex-shrink: 0;
   margin: 8px;
   padding: 8px 10px;
-  background: rgba(79, 140, 255, 0.08);
-  border: 1px solid rgba(79, 140, 255, 0.25);
-  border-radius: 4px;
+  background: rgba(240, 178, 74, 0.07);
+  border: 1px solid rgba(240, 178, 74, 0.25);
+  border-radius: 8px;
   font-size: 12px;
 }
 
@@ -261,7 +263,7 @@ main {
 
 #instruction-pane {
   padding: 8px;
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -488,3 +490,41 @@ footer {
 }
 
 .modal-box label[hidden] { display: none; }   /* label{display:block} anularia o atributo hidden */
+
+/* ---- shell Backlot ---- */
+.mono { font-family: var(--mono); font-size: 12px; }
+.dim { color: var(--text-dim); }
+
+body[data-route="library"] .only-project,
+body[data-route="project"] .only-library { display: none !important; }
+body:not([data-route="project"][data-tab="edicao"]) { grid-template-rows: 44px 1fr; }
+body:not([data-route="project"][data-tab="edicao"]) .only-edicao { display: none !important; }
+
+header .brand { font-weight: 700; letter-spacing: .02em; }
+header .back { color: var(--text); text-decoration: none; font-size: 18px; padding: 0 4px; }
+header .proj-name { font-weight: 700; font-size: 14px; }
+
+#library-view, #project-view { overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+
+#stepper { display: flex; gap: 4px; padding: 10px 14px 6px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+#tabs { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#tabs a { padding: 6px 12px; color: var(--text-dim); text-decoration: none; border-bottom: 2px solid transparent; cursor: pointer; }
+#tabs a.on { color: var(--text); border-color: var(--accent); }
+#tabs a.off { opacity: .35; pointer-events: none; }
+
+.tab-pane { display: none; flex: 1 1 0; min-height: 0; overflow: auto; }
+body[data-tab="board"] #tab-board,
+body[data-tab="docs"] #tab-docs,
+body[data-tab="custos"] #tab-custos { display: block; }
+body[data-tab="edicao"] #tab-edicao { display: grid; grid-template-columns: 1fr minmax(260px, 320px); overflow: hidden; }
+
+#tab-board, #tab-custos { padding: 12px 14px; }
+.docs-body { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
+.docs-body .modal-formats-list { border-right: 1px solid var(--border); overflow: auto; }
+.docs-body .modal-docs-view { padding: 12px 18px; overflow: auto; }
+
+.custos { display: grid; gap: 12px; max-width: 560px; }
+.custos-tab { border-collapse: collapse; width: 100%; }
+.custos-tab th, .custos-tab td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.custos-tab th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.custos button { justify-self: start; }
