@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 import budget
 import eventos
+import folha
 import md_min
 import pipeline
 import waveform as wf
@@ -108,7 +109,7 @@ def doc(request: Request, id: str, name: str):
 
 @app.get("/api/file")
 def file_(request: Request, id: str, name: str):
-    if not FILE_NAME.fullmatch(name):
+    if not (FILE_NAME.fullmatch(name) or MIDIA.fullmatch(name)):
         raise HTTPException(400, "nome inválido")
     proj = _proj(request, id)
     path = proj / name
@@ -116,7 +117,7 @@ def file_(request: Request, id: str, name: str):
         raise HTTPException(400, "nome inválido")
     if not path.is_file():
         raise HTTPException(404, "arquivo não encontrado")
-    return FileResponse(path, media_type="image/png")
+    return FileResponse(path, media_type=TIPO_MIDIA.get(path.suffix.lower(), "image/png"))
 
 
 @app.get("/api/formats")
@@ -144,6 +145,9 @@ HIDDEN_FORMATS = {"thumbnail", "pauta", "referencia"}  # receitas internas, fora
 QUEUE_TYPES = {"instrucao", "render", "borda", "veto", "roteiro", "pauta", "referencia"}
 DOC_NAME = re.compile(r"^[\w\-. ]+\.md$")
 FILE_NAME = re.compile(r"^(broll|ref)/[\w\-]+\.png$|^animatic-[A-Z]\.png$")
+MIDIA = re.compile(r"^broll/cand/[\w\-.]+\.(mp4|webm|jpg|jpeg|png)$|^overlays/o\d{2,3}\.png$")
+TIPO_MIDIA = {".mp4": "video/mp4", ".webm": "video/webm", ".jpg": "image/jpeg",
+              ".jpeg": "image/jpeg", ".png": "image/png"}
 
 
 def _append_queue(qpath, entry):
@@ -273,6 +277,17 @@ def global_queue(request: Request):
 @app.get("/api/quadro")
 def quadro_route(request: Request, id: str):
     return eventos.quadro(_proj(request, id), root=_root(request))
+
+
+@app.get("/api/folha")
+def folha_route(request: Request, id: str, tipo: str):
+    if tipo not in folha.TIPOS:
+        raise HTTPException(400, "tipo inválido")
+    proj = _proj(request, id)
+    try:
+        return folha.ler(proj, tipo)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 FILA_ATIVA = {"pending", "executing", "waiting_reply"}

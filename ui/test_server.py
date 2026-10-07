@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import eventos
+import folha
 import server
 import server as server_mod
 from test_pipeline import fake_root  # fixture reexport
@@ -507,3 +508,42 @@ def test_capa_sem_fonte_404(client, monkeypatch):
     monkeypatch.setattr(server_mod, "_run", _fake_run_falha)
     assert client.get("/api/capa", params={"id": "edit-raw"}).status_code == 404
     assert client.get("/api/capa", params={"id": "../x"}).status_code == 400
+
+
+def test_folha_route(client, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "conceitos.json").write_text(json.dumps({"conceitos": [{"id": "A", "ideia": "x"}]}), encoding="utf-8")
+    r = client.get("/api/folha", params={"id": "edit-fake", "tipo": "conceitos"})
+    assert r.status_code == 200 and r.json()["conceitos"][0]["id"] == "A"
+
+
+def test_folha_route_erros(client):
+    assert client.get("/api/folha", params={"id": "edit-fake", "tipo": "nada"}).status_code == 400
+    r = client.get("/api/folha", params={"id": "edit-fake", "tipo": "broll"})
+    assert r.status_code == 422 and "não encontrado" in r.json()["detail"]
+    assert client.get("/api/folha", params={"id": "../x", "tipo": "broll"}).status_code == 400
+
+
+@pytest.mark.parametrize("nome,tipo", [("broll/cand/pexels-1.mp4", "video/mp4"),
+                                       ("broll/cand/unsplash-2.jpg", "image/jpeg"),
+                                       ("overlays/o01.png", "image/png")])
+def test_file_midia(client, fake_root, nome, tipo):
+    p = fake_root / "edit-fake" / nome
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"0123456789")
+    r = client.get("/api/file", params={"id": "edit-fake", "name": nome})
+    assert r.status_code == 200 and r.headers["content-type"].startswith(tipo) and r.content == b"0123456789"
+
+
+def test_file_midia_range(client, fake_root):
+    p = fake_root / "edit-fake" / "broll" / "cand" / "v.mp4"
+    p.parent.mkdir(parents=True)
+    p.write_bytes(b"0123456789")
+    r = client.get("/api/file", params={"id": "edit-fake", "name": "broll/cand/v.mp4"}, headers={"Range": "bytes=0-3"})
+    assert r.status_code == 206 and r.content == b"0123"
+
+
+@pytest.mark.parametrize("nome", ["broll/cand/../../x.mp4", "broll/cand/a.exe", "overlays/x.png",
+                                  "overlays/../broll/sheet.png", "broll/cand/sub/a.mp4"])
+def test_file_midia_traversal(client, nome):
+    assert client.get("/api/file", params={"id": "edit-fake", "name": nome}).status_code == 400
