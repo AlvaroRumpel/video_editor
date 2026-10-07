@@ -129,10 +129,16 @@ def _resumo(item: dict, evs: list[dict], custos: list[tuple], agora: datetime) -
     depois = evs[idx + 1:] if idx is not None else evs
     fims = [e["ts"] for e in depois if e["status"] == "fim"]
     fim = fims[-1] if fims else None
-    nota = next((e["nota"] for e in reversed(evs) if e.get("nota")), None)
+    nota = next((e["nota"] for e in reversed(evs[idx or 0:]) if e.get("nota")), None)
     custo = 0.0
     if inicio:
-        a, b = _dt(inicio), (_dt(fim) if fim else agora)
+        if fim:
+            b = _dt(fim)
+        elif status == "andamento":
+            b = agora
+        else:
+            b = _dt(evs[-1]["ts"])   # falha/pulada/espera: fecha no último evento
+        a = _dt(inicio)
         custo = round(sum(u for t, u in custos if a <= t <= b), 4)
     return {**item, "status": status, "inicio": inicio, "fim": fim,
             "nota": nota, "custo_usd": custo}

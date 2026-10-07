@@ -153,7 +153,7 @@ def test_quadro_falha(root):
 def test_quadro_reinicio_apos_fim(root):
     proj = _proj(root)
     _ev(proj, "cortes", "inicio", T(0))
-    _ev(proj, "cortes", "fim", T(5))
+    _ev(proj, "cortes", "fim", T(5), nota="12 min")
     _ev(proj, "cortes", "inicio", T(10))
     _custo(proj, T(2), 1.0)     # do 1º intervalo: não conta mais
     _custo(proj, T(12), 0.25)
@@ -161,6 +161,7 @@ def test_quadro_reinicio_apos_fim(root):
     e = eventos.quadro(proj, root=root, agora=agora)["etapas"][2]
     assert e["status"] == "andamento" and e["inicio"] == T(10) and e["fim"] is None
     assert e["custo_usd"] == 0.25
+    assert e["nota"] is None   # nota do ciclo anterior não vaza
 
 
 def test_quadro_custo_por_intervalo(root):
@@ -174,6 +175,17 @@ def test_quadro_custo_por_intervalo(root):
         f.write(json.dumps({"ts": T(4), "usd": "NaN?"}) + "\n")   # inválido: ignorado
     e = eventos.quadro(proj, root=root)["etapas"][1]
     assert e["custo_usd"] == 0.5
+
+
+def test_quadro_custo_falha_fecha_janela(root):
+    proj = _proj(root)
+    _ev(proj, "render", "inicio", T(0))
+    _ev(proj, "render", "falha", T(5))
+    _custo(proj, T(3), 0.4)        # dentro
+    _custo(proj, T(8), 9.0)        # depois da falha: fora
+    agora = datetime(2026, 10, 7, 10, 30, tzinfo=timezone.utc)
+    e = eventos.quadro(proj, root=root, agora=agora)["etapas"][3]
+    assert e["status"] == "falha" and e["custo_usd"] == 0.4
 
 
 def test_quadro_fora_da_receita(root):
