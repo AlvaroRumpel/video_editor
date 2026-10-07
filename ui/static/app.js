@@ -60,8 +60,8 @@ async function route() {
   if (r.route === 'decisoes') {
     body.dataset.route = 'decisoes';
     saiDoProjeto();
-    stopLibrary();
     renderBudget();
+    startLibrary();   // mantém a Fila viva (poll da biblioteca) e busca o orçamento
     renderDecisoesPage();
     return;
   }

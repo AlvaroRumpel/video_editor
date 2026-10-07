@@ -1,18 +1,19 @@
 // Página "Decisões" (#/decisoes): decisões do Claude em todos os projetos; filtro por assunto
 // (o servidor devolve as escolhas mais frequentes) e busca no cliente.
-const decEstado = { assunto: null, busca: '', assuntos: [], dados: { decisoes: [], frequentes: [] } };
+const decEstado = { assunto: null, busca: '', assuntos: [], dados: { decisoes: [], frequentes: [] }, req: 0 };
 
 async function renderDecisoesPage() {
+  const req = ++decEstado.req;   // clique rápido nos chips: só a resposta mais nova desenha
+  let assuntos = [], dados = { decisoes: [], frequentes: [] };
   try {
     const todos = await getJSON('/api/decisoes');
-    decEstado.assuntos = [...new Set(todos.decisoes.map(d => d.assunto))].sort();
-    decEstado.dados = decEstado.assunto ? await getJSON('/api/decisoes', { assunto: decEstado.assunto }) : todos;
+    assuntos = [...new Set(todos.decisoes.map(d => d.assunto))].sort();
+    dados = decEstado.assunto ? await getJSON('/api/decisoes', { assunto: decEstado.assunto }) : todos;
   } catch (e) {
     console.warn('decisões falhou', e);
-    decEstado.assuntos = [];
-    decEstado.dados = { decisoes: [], frequentes: [] };
   }
-  if (document.body.dataset.route !== 'decisoes') return;
+  if (req !== decEstado.req || document.body.dataset.route !== 'decisoes') return;
+  decEstado.assuntos = assuntos; decEstado.dados = dados;
   desenhaDecisoes();
 }
 
@@ -36,7 +37,7 @@ function desenhaDecisoes() {
         <td class="dim">${escapeHtml(d.alternativas.join(', '))}</td><td>${escapeHtml(d.motivo)}</td>
         <td>${d.confianca ? `<span class="conf conf-${escapeHtml(d.confianca)}">●</span> ${escapeHtml(d.confianca)}` : ''}</td>
         <td class="mono">${d.custo_usd != null ? fmtUSD(d.custo_usd) : ''}</td></tr>`).join('')}</tbody></table>`
-    : '<div class="dim dec-vazio">nenhuma decisão registrada</div>';
+    : `<div class="dim dec-vazio">${dados.decisoes.length ? 'nada encontrado' : 'nenhuma decisão registrada'}</div>`;
 }
 
 el('dec-chips').addEventListener('click', e => {

@@ -1,4 +1,4 @@
-// Biblioteca (#/): grade de projetos, filtros, poll de 5s enquanto visível.
+// Biblioteca (#/): grade de projetos, filtros, poll de 5s enquanto visível (também em #/decisoes, pela Fila).
 S.lib = { items: [], formato: null, soEsperando: false, busca: '', key: null };
 let libTimer = null;
 
@@ -22,9 +22,10 @@ async function loadLibrary() {
   try {
     const [items, gq, act] = await Promise.all([
       getJSON('/api/library'), getJSON('/api/global-queue'), getJSON('/api/activity')]);
-    if (document.body.dataset.route !== 'library') return;
+    const rota = document.body.dataset.route;
+    if (rota !== 'library' && rota !== 'decisoes') return;   // decisões também mostra a Fila
     S.lib.items = items; S.globalQueue = gq; S.activity = act;
-    renderLibrary();
+    if (rota === 'library') renderLibrary();
     renderQueue();
   } catch (e) {
     console.warn('biblioteca falhou', e);

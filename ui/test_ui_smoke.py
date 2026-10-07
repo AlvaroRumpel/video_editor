@@ -589,3 +589,50 @@ def test_pagina_decisoes_vazia(page, ui_url):
     assert "nenhuma decisão registrada" in page.locator("#decisoes-view").inner_text()
     page.click("#decisoes-voltar")
     page.wait_for_function("document.body.dataset.route === 'library'")
+
+
+def test_pagina_decisoes_fila_viva(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    (proj / "ui" / "queue.json").write_text(json.dumps([
+        {"id": 1, "type": "instrucao", "text": "pergunta do projeto", "status": "waiting_reply", "resultado": "?"}]),
+        encoding="utf-8")
+    rt = fake_root / ".ui-runtime"
+    rt.mkdir(exist_ok=True)
+    (rt / "queue.json").write_text(json.dumps([
+        {"id": 2, "type": "novo-projeto", "text": "projeto global", "status": "pending"}]), encoding="utf-8")
+    page.goto(ui_url + "/#/decisoes", wait_until="domcontentloaded")
+    page.wait_for_selector(".queue-reply-input")
+    fila = page.locator("#queue-panel").inner_text()
+    assert "[edit-fake] pergunta do projeto" in fila and "[novo] projeto global" in fila
+    page.fill(".queue-reply-input", "sim")
+    page.click(".queue-reply-send")
+    page.wait_for_function("!document.querySelector('.queue-reply-input')")
+    assert _queue(proj)[0]["reply"] == "sim"
+
+
+def test_pagina_decisoes_busca_sem_resultado(page, ui_url, fake_root):
+    _decisao_raw(fake_root / "edit-fake", "2026-10-07T10:01:00+00:00", "trilha", "Phoenix2026")
+    page.goto(ui_url + "/#/decisoes", wait_until="domcontentloaded")
+    page.wait_for_selector(".dec-tab tbody tr")
+    page.fill("#dec-busca", "zzz")
+    page.wait_for_selector(".dec-vazio")
+    assert "nada encontrado" in page.locator("#decisoes-view").inner_text()
+
+
+def test_pagina_decisoes_descarta_resposta_atrasada(page, ui_url, fake_root):
+    fake = fake_root / "edit-fake"
+    _decisao_raw(fake, "2026-10-07T10:01:00+00:00", "trilha", "Phoenix2026")
+    _decisao_raw(fake, "2026-10-07T10:02:00+00:00", "corte", "tirar gaguejo")
+    page.goto(ui_url + "/#/decisoes", wait_until="domcontentloaded")
+    page.wait_for_selector(".dec-tab tbody tr")
+
+    def lenta(r):
+        if "assunto=trilha" in r.request.url:
+            page.wait_for_timeout(1500)
+        r.continue_()
+    page.route("**/api/decisoes?assunto=*", lenta)
+    page.click("#dec-chips [data-assunto=trilha]")
+    page.click("#dec-chips [data-assunto=corte]")
+    page.wait_for_timeout(2500)
+    assert page.locator(".dec-tab tbody tr").count() == 1
+    assert "tirar gaguejo" in page.locator(".dec-tab").inner_text()
