@@ -88,7 +88,7 @@ Lidos de `costs.jsonl` (já têm `ts`, `provedor`, `usd`, `nota`).
     mantém ordem de origem, log antes de custos). Cada item ganha
     `custo_acum` (soma de `usd` dos custos até ele, 4 casas).
   - `quadros[i]` = resumo de `quadro(proj, ate=eventos[i].ts)`:
-    `{"etapas": [{"id","status"}], "atual"}`.
+    `{"etapas": [{"id","rotulo","status"}], "atual"}`.
 - `decisoes(root, assunto=None) -> dict` — varre `pipeline.find_projects`:
   `{"decisoes": [{"projeto","nome","ts","etapa","assunto","escolha",
   "alternativas","motivo","custo_usd","confianca"}], "frequentes":
