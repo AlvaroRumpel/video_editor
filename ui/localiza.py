@@ -24,30 +24,32 @@ def _norm(s: str) -> str:
 
 
 class _Visiveis(HTMLParser):
+    """Coleta (texto, contexto): "texto" fora de script/style/title, "atributo" (alt/title),
+    "script" (literal JS com cara de frase dentro de <script>)."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.ignora = 0
+        self.em = None
         self.out = []
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style", "title"):
-            self.ignora += 1
-        for k, v in attrs:
-            if k in ("alt", "title") and v and LETRA.search(v):
-                self.out.append(v)
+            self.em = tag
+        self.handle_startendtag(tag, attrs)
 
     def handle_startendtag(self, tag, attrs):
         for k, v in attrs:
             if k in ("alt", "title") and v and LETRA.search(v):
-                self.out.append(v)
+                self.out.append((v, "atributo"))
 
     def handle_endtag(self, tag):
-        if tag in ("script", "style", "title") and self.ignora:
-            self.ignora -= 1
+        if tag == self.em:
+            self.em = None
 
     def handle_data(self, data):
-        if not self.ignora and LETRA.search(data):
-            self.out.append(data)
+        if self.em == "script":
+            self.out += [(m.group(2), "script") for m in LITERAL.finditer(data) if _literal_ok(m.group(2))]
+        elif not self.em and LETRA.search(data):
+            self.out.append((data, "texto"))
 
 
 def _de_html(txt: str) -> list:
@@ -69,10 +71,10 @@ def _literal_ok(s: str) -> bool:
 
 
 def _de_tsx(txt: str) -> list:
-    out = [m.group(1) for m in JSX_TEXTO.finditer(txt)
+    out = [(m.group(1), "jsx") for m in JSX_TEXTO.finditer(txt)
            if LETRA.search(m.group(1)) and not CODIGO.search(m.group(1))]
     # ponytail: heurística de texto JSX/literal; o Claude marca "=" no que for código
-    out += [m.group(2) for m in LITERAL.finditer(txt) if _literal_ok(m.group(2))]
+    out += [(m.group(2), "literal") for m in LITERAL.finditer(txt) if _literal_ok(m.group(2))]
     return out
 
 
@@ -86,18 +88,22 @@ def extrair(arquivos, saida) -> dict:
     for arq in map(Path, arquivos):
         txt = arq.read_text(encoding="utf-8")
         brutos = _de_html(txt) if arq.suffix.lower() in (".html", ".htm") else _de_tsx(txt)
-        for b in brutos:
+        for b, ctx in brutos:
             k = _norm(b)
-            if not k or k in vistos and arq.name in vistos[k]:
+            if not k:
                 continue
-            vistos.setdefault(k, []).append(arq.name)
+            e = vistos.setdefault(k, {"arquivos": [], "contextos": []})
+            for campo, val in (("arquivos", arq.name), ("contextos", ctx)):
+                if val not in e[campo]:
+                    e[campo].append(val)
     novos = {}
-    for k, arqs in vistos.items():
+    for k, e in vistos.items():
         v = textos.get(k) if isinstance(textos.get(k), dict) else None
         if v:
-            novos[k] = {"id": v.get("id"), "trad": v.get("trad"), "arquivos": sorted(set(v.get("arquivos", [])) | set(arqs))}
+            novos[k] = {**v, "arquivos": sorted(set(v.get("arquivos", [])) | set(e["arquivos"])),
+                        "contextos": sorted(set(v.get("contextos", [])) | set(e["contextos"]))}
         else:
-            novos[k] = {"id": f"t{prox:02d}", "trad": None, "arquivos": arqs}
+            novos[k] = {"id": f"t{prox:02d}", "trad": None, **e}
             prox += 1
     for k, v in textos.items():          # textos antigos que sumiram dos arquivos continuam (histórico)
         novos.setdefault(k, v)
@@ -124,12 +130,55 @@ def _curvas(s: str, q: str) -> str:
     return "".join(out)
 
 
+CTX_HTML = ("texto", "atributo", "script")
+CTX_TSX = ("jsx", "literal")
+BLOCO = re.compile(r"(<script\b.*?</script\s*>|<style\b.*?</style\s*>)", re.S | re.I)
+SCRIPT = re.compile(r"(<script\b[^>]*>)(.*?)(</script\s*>)", re.S | re.I)
+
+
+def _troca(s: str, ctx: str, mapa: dict, cont: dict) -> str:
+    """Uma passada por contexto: alternação única (mais longo primeiro) + lookup — sem cascata."""
+    alt = "|".join(r"\s+".join(map(re.escape, k.split())) for k in sorted(mapa, key=len, reverse=True))
+
+    def trad(m):
+        k = _norm(m.group("t"))
+        cont[k] += 1
+        return mapa[k]
+
+    def entre_tags(txt, esc):
+        return re.sub(r"(?<=>)(\s*)(?P<t>" + alt + r")(\s*)(?=<)",
+                      lambda m: m.group(1) + esc(trad(m)) + m.group(3), txt)
+
+    def aspas(txt):
+        return re.sub(r"([\"'])(?P<t>" + alt + r")\1",
+                      lambda m: m.group(1) + _curvas(trad(m).replace("\\", "\\\\"), m.group(1)) + m.group(1), txt)
+
+    if ctx == "texto":     # só fora de <script>/<style> (split: texto, bloco, texto, ...)
+        return "".join(p if i % 2 else entre_tags(p, _esc_texto) for i, p in enumerate(BLOCO.split(s)))
+    if ctx == "atributo":
+        return re.sub(r"\b(alt|title)=([\"'])(?P<t>" + alt + r")\2",
+                      lambda m: f"{m.group(1)}={m.group(2)}{_curvas(_esc_texto(trad(m)), m.group(2))}{m.group(2)}", s)
+    if ctx == "script":    # só literais dentro de <script>
+        return SCRIPT.sub(lambda m: m.group(1) + aspas(m.group(2)) + m.group(3), s)
+    if ctx == "jsx":
+        return entre_tags(s, lambda t: _esc_texto(t).replace("{", "&#123;").replace("}", "&#125;"))
+    return aspas(s)        # "literal"
+
+
 def aplicar(textos_json, origem, destino) -> dict:
     tx = (json.loads(Path(textos_json).read_text(encoding="utf-8")).get("textos") or {})
-    faltam = [v.get("id", k) for k, v in tx.items() if not (isinstance(v, dict) and str(v.get("trad") or "").strip())]
+    ruins = [k for k, v in tx.items() if not isinstance(v, dict)]
+    if ruins:
+        raise ValueError(f"entradas malformadas (não são objeto): {', '.join(ruins)}")
+    faltam = [v.get("id", k) for k, v in tx.items() if not str(v.get("trad") or "").strip()]
     if faltam:
         raise ValueError(f"textos sem tradução: {', '.join(faltam)}")
+    quebra = [v.get("id", k) for k, v in tx.items() if re.search(r"[\r\n]", str(v["trad"]).strip())]
+    if quebra:
+        raise ValueError(f"tradução com quebra de linha: {', '.join(quebra)}")
     origem, destino = Path(origem).resolve(), Path(destino).resolve()
+    if not origem.exists():
+        raise ValueError(f"origem não existe: {origem}")
     if destino.is_relative_to(origem) or origem.is_relative_to(destino):
         raise ValueError("destino não pode ser a origem, ficar dentro dela nem contê-la")
     if destino.is_dir():
@@ -141,22 +190,20 @@ def aplicar(textos_json, origem, destino) -> dict:
         destino.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(origem, destino)
         arquivos = [destino]
-    pares = sorted(((k, str(v["trad"]).strip()) for k, v in tx.items() if str(v["trad"]).strip() != "="),
-                   key=lambda kv: -len(kv[0]))
-    contagem = {k: 0 for k, _ in pares}
+    ativos = {k: v for k, v in tx.items() if str(v["trad"]).strip() != "="}
+    contagem = {k: 0 for k in ativos}
     for arq in arquivos:
-        s = arq.read_text(encoding="utf-8")
-        antes = s
-        for orig, trad in pares:
-            corpo = r"\s+".join(map(re.escape, orig.split()))
-            s, n1 = re.subn(r"(>\s*)" + corpo + r"(\s*<)", lambda m: m.group(1) + _esc_texto(trad) + m.group(2), s)
-            s, n2 = re.subn(r"([\"'])" + corpo + r"\1",
-                            lambda m: m.group(1) + _curvas(trad, m.group(1)) + m.group(1), s)
-            contagem[orig] += n1 + n2
+        ctxs = CTX_HTML if arq.suffix.lower() in (".html", ".htm") else CTX_TSX
+        s = antes = arq.read_text(encoding="utf-8", newline="")
+        for ctx in ctxs:
+            # entrada sem "contextos" (textos.json antigo) vale em todos os contextos do tipo de arquivo
+            mapa = {k: str(v["trad"]).strip() for k, v in ativos.items() if ctx in v.get("contextos", ctxs)}
+            if mapa:
+                s = _troca(s, ctx, mapa, contagem)
         if s != antes:
-            arq.write_text(s, encoding="utf-8")
+            arq.write_text(s, encoding="utf-8", newline="")
     return {"substituicoes": sum(contagem.values()), "arquivos": [str(a) for a in arquivos],
-            "nao_encontrados": [tx[k]["id"] for k, n in contagem.items() if n == 0]}
+            "nao_encontrados": [tx[k].get("id", k) for k, n in contagem.items() if n == 0]}
 
 
 JS_ESTOURO = """() => {

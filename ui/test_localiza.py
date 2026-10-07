@@ -8,7 +8,7 @@ import pytest
 import localiza
 
 HTML = """<!doctype html><html><head><title>t</title><style>.a{color:red}</style>
-<script>const msg = "não extrair isto";</script></head><body>
+<script>const msg = "não-extrair";</script></head><body>
 <div class="t1">TE DÁ A SENSAÇÃO
    DE QUE VOCÊ SABE</div><span>e é só sensação.</span>
 <img alt="logo da marca" src="x.png"><p>Fecha o caderno</p><p>Anotus</p><p>123</p>
@@ -77,7 +77,7 @@ def test_aplicar_html(tmp_path):
     out = (tmp_path / "anim.es.html").read_text(encoding="utf-8")
     assert "TE DA LA SENSACIÓN DE QUE SABES" in out and "y es solo sensación." in out
     assert 'alt="logo de la marca"' in out and "Cierra el cuaderno &lt;ya&gt;" in out
-    assert "<p>Anotus</p>" in out and 'const msg = "não extrair isto"' in out
+    assert "<p>Anotus</p>" in out and 'const msg = "não-extrair"' in out
     assert r["substituicoes"] == 4 and r["nao_encontrados"] == []
     assert h.read_text(encoding="utf-8") == HTML                    # origem intacta
 
@@ -172,3 +172,91 @@ def test_cli(tmp_path):
 def test_extrair_tsx_ignora_svg_path(tmp_path):
     x = _arq(tmp_path, "i.tsx", '<path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3z" />')
     assert localiza.extrair([x], tmp_path / "textos.json")["textos"] == {}
+
+
+HTML_CTX = """<html><head><style>.caderno{color:red}</style></head><body>
+<p class="caderno" id="caderno" data-x="caderno">caderno</p>
+<script>el.classList.add("caderno"); el.innerHTML = "<b>caderno</b>"; const t = "Reler o resumo três vezes".split(" ");</script>
+</body></html>"""
+
+
+def test_html_contextos(tmp_path):
+    h = _arq(tmp_path, "anim.html", HTML_CTX)
+    saida = tmp_path / "textos.json"
+    t = localiza.extrair([h], saida)["textos"]
+    assert {k: v["contextos"] for k, v in t.items()} == {"caderno": ["texto"], "Reler o resumo três vezes": ["script"]}
+    _traduz(saida, {"caderno": "cuaderno", "Reler o resumo três vezes": "Releer el resumen tres veces"})
+    r = localiza.aplicar(saida, h, tmp_path / "anim.es.html")
+    out = (tmp_path / "anim.es.html").read_text(encoding="utf-8")
+    assert '<p class="caderno" id="caderno" data-x="caderno">cuaderno</p>' in out
+    assert '.caderno{color:red}' in out and 'classList.add("caderno")' in out
+    assert '"Releer el resumen tres veces".split(" ")' in out and r["substituicoes"] == 2
+    assert out == HTML_CTX.replace('"caderno">caderno<', '"caderno">cuaderno<').replace("Reler o resumo três vezes", "Releer el resumen tres veces")
+
+
+def test_aplicar_sem_cascata(tmp_path):
+    h = _arq(tmp_path, "a.html", "<p>tá bom</p><p>ok</p>")
+    saida = tmp_path / "textos.json"
+    localiza.extrair([h], saida)
+    _traduz(saida, {"tá bom": "ok", "ok": "vale"})
+    r = localiza.aplicar(saida, h, tmp_path / "a.es.html")
+    assert (tmp_path / "a.es.html").read_text(encoding="utf-8") == "<p>ok</p><p>vale</p>"
+    assert r["substituicoes"] == 2
+
+
+def test_aplicar_origem_inexistente_nao_apaga_destino(tmp_path):
+    h = _arq(tmp_path, "a.html", "<p>ok</p>")
+    saida = tmp_path / "textos.json"
+    localiza.extrair([h], saida)
+    _traduz(saida, {})
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    (dst / "f.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="origem"):
+        localiza.aplicar(saida, tmp_path / "nao_existe", dst)
+    assert (dst / "f.txt").exists()
+
+
+def test_aplicar_escapes_e_quebra_de_linha(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    _arq(src, "goat.tsx", TSX)
+    saida = tmp_path / "textos.json"
+    localiza.extrair([src / "goat.tsx"], saida)
+    _traduz(saida, {"feito por Álvaro": "hecho {por} Álvaro", "Seu cérebro confunde": "Tu cerebro \\ confunde"})
+    localiza.aplicar(saida, src, tmp_path / "src.es")
+    out = (tmp_path / "src.es" / "goat.tsx").read_text(encoding="utf-8")
+    assert "<h1>hecho &#123;por&#125; Álvaro</h1>" in out and 'title="Tu cerebro \\\\ confunde"' in out
+    _traduz(saida, {"feito por Álvaro": "hecho\npor"})
+    with pytest.raises(ValueError, match="t01"):
+        localiza.aplicar(saida, src, tmp_path / "src.es2")
+
+
+def test_aplicar_entrada_malformada(tmp_path):
+    saida = _arq(tmp_path, "textos.json", json.dumps({"textos": {"quebrado": "x"}}))
+    h = _arq(tmp_path, "a.html", "<p>ok</p>")
+    with pytest.raises(ValueError, match="quebrado"):
+        localiza.aplicar(saida, h, tmp_path / "b.html")
+
+
+def test_aplicar_textos_antigos_sem_contextos(tmp_path):
+    h = _arq(tmp_path, "anim.html", HTML)
+    saida = tmp_path / "textos.json"
+    localiza.extrair([h], saida)
+    _traduz(saida, {"Fecha o caderno": "Cierra el cuaderno", "logo da marca": "logo de la marca"})
+    d = json.loads(saida.read_text(encoding="utf-8"))
+    for v in d["textos"].values():
+        del v["contextos"]
+    saida.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = localiza.aplicar(saida, h, tmp_path / "anim.es.html")
+    assert r["substituicoes"] == 2 and r["nao_encontrados"] == []
+
+
+def test_aplicar_preserva_fim_de_linha(tmp_path):
+    h = tmp_path / "a.html"
+    h.write_bytes("<p>tá bom</p>\n<p>ok</p>\n".encode())
+    saida = tmp_path / "textos.json"
+    localiza.extrair([h], saida)
+    _traduz(saida, {"tá bom": "vale"})
+    localiza.aplicar(saida, h, tmp_path / "b.html")
+    assert (tmp_path / "b.html").read_bytes() == "<p>vale</p>\n<p>ok</p>\n".encode()
