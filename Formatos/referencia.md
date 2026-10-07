@@ -28,8 +28,11 @@ de texto, visual ou música. `conceitos.md` registra URL e autor.
    **C** o contrário do original. Cada conceito → `roteiro-X.md` no formato de ads
    (`## Hook`, `## Cenas` numeradas com `sfx:` opcional, `## CTA`, `## Cues`). Fato citado →
    `pesquisa.md` + `python ui/pesquisa.py validar edit/shorts/<proj>/pesquisa.md --roteiro edit/shorts/<proj>/roteiro-X.md`.
+   Escrever também `conceitos.json` = `{"conceitos": [{"id": "A", "ideia", "mantem", "muda",
+   "custo" (texto, ex. "US$ 0,40 + 600 créditos"), "horas", "exige_ia" (bool),
+   "animatic": "animatic-A.png"}, ...]}` — é o que a folha de conceitos mostra.
 5. `python ui/referencia.py animatic edit/shorts/<proj>/roteiro-A.md edit/shorts/<proj>/animatic-A.png --marca <marca>` (B, C idem).
-6. `waiting_reply`: "referência analisada — ver Docs › conceitos.md, animatic-A/B/C.png.
+6. `waiting_reply` com `folha: "conceitos"`: "referência analisada — escolha na aba Aprovação (ou Docs › conceitos.md, animatic-A/B/C.png).
    responda `A` | `B` | `C` | `ajuste: ...` | `produzir: A B`".
 7. Escolhido: copiar `roteiro-X.md` → `roteiro.md`; `state.json.ref = {"conceitos": 3, "escolhido": "X", "produzidos": []}`
    (merge); seguir `Formatos/padrao-ads.md` a partir de "Técnica de produção".

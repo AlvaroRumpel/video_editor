@@ -42,8 +42,9 @@ re-encode, não uma re-edição. Receita provada em `edit/shorts/build_shorts.py
    uma ideia por clipe; termina em virada ou CTA; nunca dois clipes do mesmo trecho.
 4. `python ui/clips.py validar edit/<proj>/clips/clips.json edit/<proj>/clips/words_out.json` → corrigir até `ok`.
 5. `python ui/clips.py edl edit/<proj>/clips/clips.json edit/<proj> "Export/<nome> - horizontal.mp4"`
-   → `waiting_reply`: "clipes: N propostos — ver Docs › clips.md. responda `ok`,
-   ou `c03:não c05:nota 3 c07:x=700 c02:sem-legenda`". Aplicar a resposta
+   → `waiting_reply` com `folha: "clips"`: "clipes: N propostos — aprove na aba Aprovação
+   (ou Docs › clips.md)". Resposta `ok` + exceções, ex. `ok c03:não c05:nota 3 c07:x=700 c02:sem-legenda`
+   (também `cNN:legenda`). Aplicar a resposta
    (`status`, `nota`, `x`, `legenda`), re-`validar`, re-`edl`. `ok` = todos os
    `proposto` viram `aprovado`; `cNN:não` = `vetado`; os demais campos (`nota`,
    `x`, `legenda`) só mudam onde indicado.

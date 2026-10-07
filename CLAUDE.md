@@ -49,6 +49,12 @@ em vez de sobrescrever o objeto inteiro.
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
    TODA pergunta ao usuário passa por aqui — nunca só no chat: o usuário
    acompanha e responde pela UI.
+   Aprovação com folha visual (b-roll, clipes, conceitos, overlays): gravar no
+   pedido `"folha": "broll" | "clips" | "conceitos" | "overlays"` junto com a
+   pergunta — a UI mostra a aba Aprovação e devolve a resposta no formato
+   `ok` + exceções: `ok` = tudo como proposto; `ok b03:2 b05:não` = as
+   exceções valem e o resto fica aprovado como proposto. Resposta só com
+   tokens (sem `ok`) continua válida.
 5. Tarefa longa (ex.: novo-projeto): manter `status: "executing"` e ir
    atualizando `resultado` com o status atual em uma frase curta a cada
    etapa concluída ("transcrevendo...", "gerando animações 2/5..."). A UI

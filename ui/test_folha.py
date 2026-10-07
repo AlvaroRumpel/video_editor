@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import folha
+import pipeline
 from test_pipeline import fake_root  # noqa: F401 — fixture reexport
 
 
@@ -242,3 +243,18 @@ def test_cli(proj):
     assert r.returncode == 0 and json.loads(r.stdout)["momentos"][0]["id"] == "b01"
     r = _cli("ler", str(proj), "clips")
     assert r.returncode == 1 and "erro" in json.loads(r.stdout)
+
+
+def _txt(rel):
+    return (pipeline.ROOT / rel).read_text(encoding="utf-8")
+
+
+def test_protocolo_folhas_documentado():
+    claude = _txt("CLAUDE.md")
+    assert '"folha"' in claude and "ok` + exceções" in claude
+    longo = _txt("Formatos/padrao-youtube-longo.md")
+    assert 'folha: "broll"' in longo and 'folha: "overlays"' in longo
+    assert "python ui/folha.py overlays" in longo and "§5.2" in longo
+    assert 'folha: "clips"' in _txt("Formatos/padrao-youtube-shorts.md")
+    ref = _txt("Formatos/referencia.md")
+    assert "conceitos.json" in ref and 'folha: "conceitos"' in ref

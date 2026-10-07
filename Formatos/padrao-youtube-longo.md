@@ -5,7 +5,7 @@ etapas: roteiro?=roteiro, transcricao=transcrição, cortes, fatos, visual, audi
 
 > Etapas (`python ui/eventos.py etapa <proj> <id> inicio|fim|espera|pulada|falha [--nota]`):
 > roteiro = §0.0 (pular se não houve pedido `roteiro`) · transcricao = §0.1 + `transcribe.py` do §1 ·
-> cortes = §2 (+ `plan_cuts.py`/`verify_text.py` do §1) · fatos = §1.1 · visual = §3, §4, §5, §5.1 ·
+> cortes = §2 (+ `plan_cuts.py`/`verify_text.py` do §1) · fatos = §1.1 · visual = §3, §4, §5, §5.1, §5.2 ·
 > audio = §0.3 + §8.1 · legenda = §7 · render = `rezoom.py` → `recomposite.py` do §1 + §6/§6.1 + §8 ·
 > entrega = §9 + §0 (export) · shorts = Formatos/padrao-youtube-shorts.md · thumbnail = Formatos/thumbnail.md.
 
@@ -297,8 +297,10 @@ vídeo bom. Termo de busca em inglês, concreto ("gavel on desk", não "justice"
 3. `python ui/stock.py ranquear edit/<proj>/broll.json edit/<proj>` (só reordena se CLIP instalado;
    senão escolher olhando o sheet).
 4. `python ui/stock.py sheet edit/<proj>/broll.json edit/<proj>/broll/sheet.png edit/<proj>`.
-5. `waiting_reply`: "b-roll: N momentos — ver Docs › broll/sheet.png. responda `ok`,
-   ou `b03:2 b05:não b07:1`". Aplicar: `escolhido = "bNN-k"`, `status = aprovado|vetado`.
+5. `waiting_reply` com `folha: "broll"` no pedido: "b-roll: N momentos — aprove na aba
+   Aprovação (ou Docs › broll/sheet.png)". Resposta = `ok` + exceções (`ok b03:2 b05:não`):
+   exceção vale, o resto fica aprovado com o `escolhido` proposto. Aplicar:
+   `escolhido = "bNN-k"`, `status = aprovado|vetado`.
 6. `python ui/stock.py preparar edit/<proj>/broll.json edit/<proj>/edl.json edit/<proj>`
    → `python video-use/helpers/render.py edit/<proj>/edl.json -o edit/<proj>/final.mp4`
    (`edit/recomposite.py` tem caminho fixo `F:\…`; só usar depois de corrigir para `Path(__file__).parent`).
@@ -308,6 +310,19 @@ vídeo bom. Termo de busca em inglês, concreto ("gavel on desk", não "justice"
    CONTAGENS (`len(...)`), não listas.
 
 Instrução pontual ("b-roll de tribunal no corte 12"): mesmo fluxo com um momento só.
+
+## 5.2 Aprovação dos overlays (folha)
+
+Antes do render final, com overlays Remotion e b-roll já no `edl.json`:
+
+1. `python ui/folha.py overlays edit/<proj>` → `overlays/oNN.png` (frame do meio de cada
+   overlay sobre o vídeo base no mesmo tempo) + `overlays/folha.json`.
+2. `waiting_reply` com `folha: "overlays"`: "overlays: N — aprove na aba Aprovação".
+3. Resposta `ok` + exceções: `oNN:não` = remover o overlay do `edl.json`;
+   `oNN: <texto>` = refazer o overlay conforme o texto (re-render Remotion) e repetir o passo 1
+   só se algo mudou.
+
+---
 
 ## 6. Deriva de timeline (a armadilha)
 
