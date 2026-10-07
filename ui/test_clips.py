@@ -282,3 +282,49 @@ def test_srt_fecha_antes_de_1_2s():
     c = {"ranges": [{"t_in": 0.0, "t_out": 2.0}]}
     srt = clips.srt_clipe(c, ws)
     assert "\na b\n" in srt and "\nc\n" in srt
+
+
+def test_edl_pasta_por_idioma(tmp_path, words60):
+    proj = tmp_path / "proj"; proj.mkdir()
+    export = tmp_path / "x - es.mp4"; export.write_bytes(b"0")
+    c = _clips(words60, plataformas=["shorts"], legenda=True)
+    r = clips.edl(c, proj, export, words60, pasta="clips/es")
+    assert r["gerados"] == ["clips/es/01-um-shorts"]
+    assert (proj / "clips" / "es" / "01-um-shorts" / "edl.json").exists()
+    assert (proj / "clips" / "es" / "01-um-shorts" / "legenda.srt").exists()
+    assert not (proj / "clips" / "01-um-shorts").exists()
+
+
+def test_render_pasta_por_idioma(tmp_path, words60):
+    proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    c = _clips(words60, plataformas=["shorts"])
+    clips.edl(c, proj, export, words60, pasta="clips/es")
+    vistos = []
+
+    def run(cmd):
+        vistos.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    r = clips.render(c, proj, tmp_path / "out", preview=True, _run=run, pasta="clips/es")
+    assert r["erros"] == [] and str(proj / "clips" / "es" / "01-um-shorts" / "edl.json") in vistos[0]
+
+
+def test_cli_edl_lang(tmp_path, words60):
+    import sys
+    proj = tmp_path / "p"; proj.mkdir()
+    (proj / "dub" / "es").mkdir(parents=True)
+    (proj / "dub" / "es" / "words.json").write_text(json.dumps(words60), encoding="utf-8")
+    export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    cj = tmp_path / "clips.json"; cj.write_text(json.dumps(_clips(words60, plataformas=["shorts"])), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(Path(clips.__file__)), "edl", str(cj), str(proj), str(export), "--lang", "es"],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert json.loads(r.stdout)["gerados"] == ["clips/es/01-um-shorts"]
+
+
+def test_cli_lang_invalido(tmp_path, words60):
+    import sys
+    cj = tmp_path / "clips.json"; cj.write_text("{}", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(Path(clips.__file__)), "edl", str(cj), str(tmp_path), str(tmp_path / "e.mp4"), "--lang", "../x"],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2 and "ValueError" in r.stdout

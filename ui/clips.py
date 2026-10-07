@@ -255,7 +255,7 @@ def _quote(r: dict, words) -> str:
     return " ".join(w["w"] for w in words if w["t"] >= float(r["t_in"]) and w["e"] <= float(r["t_out"]))[:120]
 
 
-def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
+def edl(clips: dict, proj: Path, export: Path, words: list[dict], pasta: str = "clips") -> dict:
     proj = Path(proj); export = Path(export)
     if not export.exists():
         raise FileNotFoundError(f"export não existe: {export}")
@@ -264,7 +264,7 @@ def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
     for n, c in enumerate(_aprovados(clips), 1):
         x = c.get("x", clips.get("x_padrao", 636))
         for plat in c.get("plataformas", []):
-            d = proj / "clips" / f"{n:02d}-{c['slug']}-{plat}"
+            d = proj / pasta / f"{n:02d}-{c['slug']}-{plat}"
             d.mkdir(parents=True, exist_ok=True)
             e = {"version": 1, "sources": {"EXPORT": str(export)},
                  "ranges": [{"source": "EXPORT", "start": float(r["t_in"]), "end": float(r["t_out"]),
@@ -274,7 +274,7 @@ def edl(clips: dict, proj: Path, export: Path, words: list[dict]) -> dict:
                 (d / "legenda.srt").write_text(srt_clipe(c, words), encoding="utf-8")
                 e["subtitles"] = "legenda.srt"
             pipeline.atomic_write_json(d / "edl.json", e)
-            gerados.append(f"clips/{d.name}")
+            gerados.append(f"{pasta}/{d.name}")
     for c in clips.get("clipes", []):
         linhas.append(f"| {c.get('id')} | {c.get('nota') or '-'} | {dur_clipe(c):.0f}s | {str(c.get('gancho', ''))[:60]} | "
                       f"{', '.join(c.get('plataformas', []))} | {c.get('status')} |")
@@ -294,7 +294,7 @@ def _run_padrao(cmd):
                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
-def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _run=None) -> dict:
+def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _run=None, pasta: str = "clips") -> dict:
     run = _run or _run_padrao
     proj = Path(proj); export_dir = Path(export_dir); export_dir.mkdir(parents=True, exist_ok=True)
     ok, erros, esperados = [], [], set()
@@ -305,7 +305,7 @@ def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _ru
         for plat in c.get("plataformas", []):
             nome = f"{n:02d}-{c['slug']}-{plat}"
             esperados.add(f"{nome}.mp4")
-            edl_path = proj / "clips" / nome / "edl.json"
+            edl_path = proj / pasta / nome / "edl.json"
             if not edl_path.exists():
                 erros.append(f"{nome}: edl.json não existe (rode `edl` antes)"); continue
             cmd = [sys.executable, str(RENDER), str(edl_path), "-o", str(export_dir / f"{nome}.mp4")]
@@ -335,10 +335,15 @@ def _cli(ns):
         pipeline.atomic_write_json(Path(ns.out), c); return c, 0
     if ns.cmd == "validar":
         r = validar(_ler(ns.clips), _ler(ns.words)); return r, (0 if r["ok"] else 1)
+    lang = getattr(ns, "lang", None)
+    if lang is not None and not re.fullmatch(r"[a-z]{2}", lang):
+        raise ValueError(f"--lang inválido: {lang!r}")
+    pasta = f"clips/{lang}" if lang else "clips"
     if ns.cmd == "edl":
-        c = _ler(ns.clips); w = _ler(Path(ns.proj) / "clips" / "words_out.json")
-        return edl(c, Path(ns.proj), Path(ns.export), w), 0
-    r = render(_ler(ns.clips), Path(ns.proj), Path(ns.export_dir), preview=ns.preview)
+        c = _ler(ns.clips)
+        w = _ler(Path(ns.proj) / "dub" / lang / "words.json") if lang else _ler(Path(ns.proj) / "clips" / "words_out.json")
+        return edl(c, Path(ns.proj), Path(ns.export), w, pasta=pasta), 0
+    r = render(_ler(ns.clips), Path(ns.proj), Path(ns.export_dir), preview=ns.preview, pasta=pasta)
     return r, (0 if not r["erros"] else 2)
 
 
@@ -351,8 +356,8 @@ if __name__ == "__main__":
     p = sub.add_parser("words-out"); p.add_argument("edl"); p.add_argument("transcript"); p.add_argument("real"); p.add_argument("out")
     p = sub.add_parser("candidatos"); p.add_argument("words"); p.add_argument("out"); p.add_argument("--n", type=int, default=20)
     p = sub.add_parser("validar"); p.add_argument("clips"); p.add_argument("words")
-    p = sub.add_parser("edl"); p.add_argument("clips"); p.add_argument("proj"); p.add_argument("export")
-    p = sub.add_parser("render"); p.add_argument("clips"); p.add_argument("proj"); p.add_argument("export_dir"); p.add_argument("--preview", action="store_true")
+    p = sub.add_parser("edl"); p.add_argument("clips"); p.add_argument("proj"); p.add_argument("export"); p.add_argument("--lang")
+    p = sub.add_parser("render"); p.add_argument("clips"); p.add_argument("proj"); p.add_argument("export_dir"); p.add_argument("--preview", action="store_true"); p.add_argument("--lang")
     ns = ap.parse_args()
     try:
         out, code = _cli(ns)
