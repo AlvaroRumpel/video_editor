@@ -36,9 +36,10 @@ SPA no mesmo `index.html`, rotas por hash:
   codificado com `encodeURIComponent`.
 - Link antigo sem hash → biblioteca.
 
-JS dividido em módulos ES sem build: `app.js` (roteador + shell + editor
-existente), `library.js`, `board.js`. `index.html` passa a usar
-`<script type="module">`.
+JS dividido em scripts clássicos sem build, compartilhando globais (mesmo
+padrão do `app.js` atual; converter 960 linhas para módulos ES não compra
+nada): `app.js` (roteador + shell + editor existente), `library.js`,
+`board.js`. Bootstrap no `DOMContentLoaded` (depois dos três scripts).
 
 ## Dados
 
@@ -57,7 +58,9 @@ etapas: roteiro?, transcricao=transcrição, cortes, fatos, visual, audio=áudio
   (exibição); sem rótulo, exibe o `id`.
 - Sufixo `?` no id = etapa opcional (exibição igual; só documenta).
 - Sem front-matter ou sem chave `etapas` → formato "sem etapas".
-- `/api/formats` remove o front-matter do `content` devolvido.
+- `/api/formats` devolve o texto cru (com front-matter): o editor de
+  Formatos salva o `content` inteiro via `PUT`, então esconder o
+  front-matter o apagaria no próximo salvar.
 - Cada seção da receita correspondente recebe a marca `[etapa: <id>]` no
   título ou na primeira linha, para o Claude saber quando logar.
 
@@ -67,13 +70,19 @@ Listas iniciais:
 |---|---|
 | padrao-youtube-longo | `roteiro?, transcricao=transcrição, cortes, fatos, visual, audio=áudio, legenda, render, entrega` |
 | padrao-youtube-shorts | `transcricao=transcrição, candidatos, aprovacao=aprovação, render, draft=draft Publora` |
-| padrao-ads | `pesquisa, roteiro, producao=produção, audio=áudio, render, qc=QC` |
+| padrao-ads | `referencia?=referência, pesquisa, roteiro, producao=produção, audio=áudio, render, qc=QC` |
 | pauta | `pesquisa, pauta, aprovacao=aprovação` |
-| referencia | `download, analise=análise, conceitos, animatic, escolha` |
 | thumbnail | `frame, recorte, composicao=composição, variacoes=variações` |
 
 `visual` (longo) agrupa grade, punch-in, motion e b-roll; `audio` agrupa
 limpeza e trilha.
+
+Projetos de referência têm `formato: padrao-ads` desde o passo 0 de
+`referencia.md`, então o fluxo referência é a etapa opcional `referencia` do
+ads (`inicio` no passo 0, notas por subpasso, `fim` na escolha) — sem lista
+própria. `pauta.md` e `padrao-youtube-longo.md` §0.0 passam a criar
+`ui/state.json` com `formato` (`pauta` / `padrao-youtube-longo`) junto com
+`ui/`, para o log validar.
 
 ### Log de eventos
 
@@ -131,8 +140,9 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
 
 - `GET /api/library` — para cada projeto de `find_projects`:
   `{id, name, formato, started, has_preview, has_final, etapas: [{id, rotulo, status}],
-  atual: {id, rotulo, status}|null, pendencias: int, custo_usd: float,
-  atividade: ISO}`.
+  atual: {id, rotulo, status}|null, sem_historico: bool, pendencias: int,
+  fila: [pedidos pending|executing|waiting_reply], custo_usd: float,
+  claude_online: bool, atividade: ISO|null}`.
   - `pendencias` = pedidos `waiting_reply` em `<proj>/ui/queue.json`.
   - `custo_usd` = `budget.gasto_projeto(proj)` total.
   - `atividade` = maior mtime entre `ui/*`, `edl.json`, `preview.mp4`,
@@ -150,7 +160,7 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
   Falha de ffmpeg → segue para as fontes seguintes. Caminho resolvido sempre
   contido no dir do projeto (`is_relative_to`).
 - SSE por projeto passa a observar também `ui/eventos.jsonl`.
-- `/api/formats` remove o front-matter.
+- `load_project` ganha `has_edl` (aba Edição).
 
 ## Frontend
 
@@ -162,7 +172,9 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
 - Lateral esquerda fixa: fila + atividade (existentes) e, abaixo, a caixa de
   instrução (movida do side-pane da edição). Contexto da instrução: "instrução
   geral" ou "corte N" quando há corte selecionado na Edição. Na biblioteca a
-  fila mostra a fila global; a caixa de instrução some.
+  fila mostra a fila global + pedidos ativos de todos os projetos (prefixo
+  `[nome]`, resposta vai para o projeto certo); a caixa de instrução some.
+  Status "Claude escutando" na biblioteca = algum projeto com heartbeat.
 
 ### Biblioteca (`library.js`)
 
@@ -186,7 +198,7 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
   `espera`: o pedido `waiting_reply` mais antigo do projeto aparece no card com
   campo de resposta (reusa `sendReply`). As linhas de info atuais entram no
   card da etapa: áudio → `audio`, b-roll → `visual`, clips → `candidatos`,
-  ref → `analise` (no formato sem essa etapa, ficam num card "outros" no
+  ref → `referencia` (no formato sem essa etapa, ficam num card "outros" no
   fim). `fora_da_receita` aparece no fim com etiqueta.
 - **Edição**: editor atual intacto; rodapé da timeline (220px) só nesta aba.
   Aba desabilitada se o projeto não tem `edl.json`.
@@ -234,8 +246,7 @@ Padrão dos módulos `ui/*.py` (stdlib, CLI com JSON UTF-8 no stdout, exit 0 ok
   custo por intervalo (dentro, fora, em andamento), CLI exit codes.
 - `tests/test_server_*.py`: `/api/library` (com log, sem log, sem formato,
   projeto ilegível, ordem por atividade, pendências), `/api/quadro`,
-  `/api/capa` em cada fallback (ffmpeg mockado) e contenção de caminho,
-  `/api/formats` sem front-matter.
+  `/api/capa` em cada fallback (ffmpeg mockado) e contenção de caminho.
 - Smoke Playwright (`tests/test_ui_smoke.py`, pula se chromium indisponível):
   sobe servidor com root temporário, abre `#/`, clica card, vê stepper, troca
   para Edição e vê o player.
