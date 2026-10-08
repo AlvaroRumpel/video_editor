@@ -40,7 +40,7 @@ def _luma_faixa(png: Path, crop: str) -> float:
     return hi - lo
 
 
-NUMERO = "crop=920:360:80:760"   # w:h:x:y, contém os dígitos do número da cena c03 (y~780-990)
+NUMERO = "crop=920:220:80:770"   # w:h:x:y, só os dígitos de c03 (y 792-982 nas refs das duas marcas); a legenda começa em y~1035, fora do recorte
 MARGEM_DB = 5                    # contador em movimento tem de ficar >= 5 dB abaixo do piso de "só grão"
 
 
