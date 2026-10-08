@@ -176,3 +176,109 @@ def test_baixar_sem_chave(root, midia, tmp_path):
     assert ia_video._baixar("https://cdn/v.mp4", dst, fake) == dst
     assert dst.read_bytes() == midia["mp4"]
     assert all("Authorization" not in c[3] for c in fake.cdn())
+
+
+def _broll(proj, *moms):
+    proj.mkdir(parents=True, exist_ok=True)
+    base = {"t_in": 10.0, "t_out": 13.0, "modo": "cutin", "frase": "x", "termo": "gavel",
+            "candidatos": [{"arq": "broll/cand/st-1.mp4", "fonte": "pexels", "tipo": "video", "dur": 6.0,
+                            "autor": "A", "url": "https://x/", "licenca": "Pexels License"}],
+            "escolhido": None, "offset": 0.0, "status": "proposto"}
+    bj = proj / "broll.json"
+    lista = [{**json.loads(json.dumps(base)), "id": "b01"}]
+    lista += [{**json.loads(json.dumps(base)), **m} for m in moms]
+    bj.write_text(json.dumps({"momentos": lista}), encoding="utf-8")
+    return bj
+
+
+def _ler(bj):
+    return json.loads(bj.read_text(encoding="utf-8"))
+
+
+def _mom(bj, mid):
+    return next(m for m in _ler(bj)["momentos"] if m["id"] == mid)
+
+
+def test_quadros(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj)
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.quadros(root, proj, "b01", "gavel on desk", _fetch=fake)
+    assert r["status"] == "ok"
+    assert r["candidatos"] == [f"broll/cand/b01-ia{k}.png" for k in (1, 2, 3)]
+    assert all((proj / a).read_bytes() == midia["png"] for a in r["candidatos"])
+    cs = _mom(bj, "b01")["candidatos"]
+    assert len(cs) == 4 and cs[0]["fonte"] == "pexels"
+    c = cs[1]
+    assert (c["fonte"], c["tipo"], c["estilo"], c["aspecto"]) == ("ia", "foto", "padrao", "16:9")
+    assert c["custo_est"] == 0.35 and c["prompt"] == "gavel on desk"
+    assert c["licenca"] == "gerado por IA (fal/fal-ai/flux/schnell)" and c["autor"] == "" and c["url"] == ""
+    body = fake.envios()[0][2]
+    assert body == {"output_format": "png", "prompt": "gavel on desk, neutral tones",
+                    "image_size": "landscape_16_9", "num_images": 3}
+    assert budget.gasto_projeto(proj)["usd"] == 0.018
+
+
+def test_quadros_numeracao_continua(root, midia):
+    proj = root / "edit-fake"; _broll(proj)
+    ia_video.quadros(root, proj, "b01", "a", n=1, _fetch=FakeFal(midia, polls=1))
+    r = ia_video.quadros(root, proj, "b01", "b", n=1, _fetch=FakeFal(midia, polls=1))
+    assert r["candidatos"] == ["broll/cand/b01-ia2.png"]
+
+
+def test_quadros_marca_e_vertical(root, midia):
+    proj = root / "edit" / "shorts" / "anotus" / "x"; bj = _broll(proj)
+    fake = FakeFal(midia, polls=1)
+    ia_video.quadros(root, proj, "b01", "gavel", n=1, aspecto="9:16", _fetch=fake)
+    body = fake.envios()[0][2]
+    assert body["prompt"] == "gavel, purple accents" and body["image_size"] == "portrait_16_9"
+    assert _mom(bj, "b01")["candidatos"][1]["estilo"] == "anotus"
+
+
+def test_quadros_precisa_aprovacao_nao_envia(root, midia):
+    (root / ".ui-runtime").mkdir(exist_ok=True)
+    (root / ".ui-runtime" / "budget.json").write_text(json.dumps({"aprovar_acima_usd": 0.001}), encoding="utf-8")
+    proj = root / "edit-fake"; bj = _broll(proj)
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.quadros(root, proj, "b01", "gavel", _fetch=fake)
+    assert r["status"] == "precisa_aprovacao" and fake.chamadas == []
+    assert len(_mom(bj, "b01")["candidatos"]) == 1
+    assert not (proj / "ui" / "costs.jsonl").exists()
+
+
+def test_quadros_validacoes(root, midia, monkeypatch):
+    proj = root / "edit-fake"; _broll(proj)
+    with pytest.raises(ValueError, match="b09"):
+        ia_video.quadros(root, proj, "b09", "x", _fetch=FakeFal(midia))
+    with pytest.raises(ValueError, match="aspecto"):
+        ia_video.quadros(root, proj, "b01", "x", aspecto="4:3", _fetch=FakeFal(midia))
+    with pytest.raises(ValueError, match="n "):
+        ia_video.quadros(root, proj, "b01", "x", n=9, _fetch=FakeFal(midia))
+    monkeypatch.delenv("FAL_KEY")
+    monkeypatch.setattr(stock, "_ler_env", lambda: {})
+    with pytest.raises(ValueError, match="FAL_KEY"):
+        ia_video.quadros(root, proj, "b01", "x", _fetch=FakeFal(midia))
+
+
+def test_quadros_erro_do_fal_nao_registra(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj)
+    with pytest.raises(RuntimeError, match="nsfw"):
+        ia_video.quadros(root, proj, "b01", "x", _fetch=FakeFal(midia, polls=1, erros={"r0": "nsfw"}))
+    assert not (proj / "ui" / "costs.jsonl").exists()
+    assert len(_mom(bj, "b01")["candidatos"]) == 1
+
+
+def test_asset(root, midia, tmp_path):
+    proj = root / "edit-fake"; bj = _broll(proj)
+    src = tmp_path / "tela.png"; src.write_bytes(midia["png"])
+    r = ia_video.asset(root, proj, "b01", src, "slow push in on the screen")
+    assert r == {"status": "ok", "candidato": "broll/cand/b01-ia1.png"}
+    assert (proj / r["candidato"]).read_bytes() == midia["png"]
+    c = _mom(bj, "b01")["candidatos"][1]
+    assert c["asset"] is True and c["fonte"] == "ia" and c["prompt"] == "slow push in on the screen"
+    assert c["custo_est"] == 0.35
+    assert not (proj / "ui" / "costs.jsonl").exists()
+    txt = tmp_path / "x.txt"; txt.write_text("x")
+    with pytest.raises(ValueError, match="imagem"):
+        ia_video.asset(root, proj, "b01", txt, "x")
+    with pytest.raises(ValueError, match="não existe"):
+        ia_video.asset(root, proj, "b01", tmp_path / "nada.png", "x")

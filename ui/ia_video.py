@@ -121,3 +121,115 @@ def _esperar(req: dict, key: str, _fetch=None) -> tuple[str, str]:
             return ("falha", str(s["error"])) if s.get("error") else ("ok", "")
         _dormir(POLL_S)
     return "pendente", ""
+
+
+def _ler(bj: Path) -> dict:
+    try:
+        d = stock.ler_broll(bj)
+    except OSError:
+        raise ValueError(f"broll.json não encontrado: {bj}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"broll.json inválido: {e.msg}")
+    if not isinstance(d, dict) or not isinstance(d.get("momentos"), list):
+        raise ValueError("broll.json sem 'momentos'")
+    return d
+
+
+def _momento(d: dict, mid: str) -> dict:
+    for m in d["momentos"]:
+        if isinstance(m, dict) and m.get("id") == mid:
+            return m
+    raise ValueError(f"momento {mid} não existe no broll.json")
+
+
+def _atualizar(bj: Path, mid: str, fn) -> None:
+    """Relê o broll.json do disco, aplica fn só no momento `mid` e grava atômico."""
+    d = _ler(bj)
+    fn(_momento(d, mid))
+    pipeline.atomic_write_json(bj, d)
+
+
+def _proximo_k(proj: Path, mid: str) -> int:
+    cand = Path(proj) / "broll" / "cand"
+    k = 1
+    while any(cand.glob(f"{mid}-ia{k}.*")):
+        k += 1
+    return k
+
+
+def _modelo_key(m: dict) -> str:
+    return "video_top" if m.get("modelo") == "video_top" else "video"
+
+
+def _custo(root: Path, cfg: dict, modelo_key: str):
+    mm = cfg["modelos"][modelo_key]
+    est = budget.estimar(root, mm["provedor"], mm["segundos"])
+    return est["usd"] if est else None
+
+
+def _cand_ia(arq: str, prompt: str, estilo, aspecto: str, custo, licenca: str) -> dict:
+    return {"arq": arq, "fonte": "ia", "tipo": "foto", "prompt": prompt, "estilo": estilo,
+            "aspecto": aspecto, "custo_est": custo, "licenca": licenca, "autor": "", "url": "",
+            "id": Path(arq).stem, "dur": 0.0, "largura": 0}
+
+
+def quadros(root: Path, proj: Path, mid: str, prompt: str, estilo: str | None = None, n: int = 3,
+            aspecto: str = "16:9", aprovacao=None, _fetch=None) -> dict:
+    root, proj = Path(root), Path(proj)
+    if aspecto not in TAMANHO:
+        raise ValueError(f"aspecto inválido: {aspecto} (use 16:9 ou 9:16)")
+    if not 1 <= int(n) <= 4:
+        raise ValueError("n deve ser de 1 a 4")
+    cfg = config(root)
+    bj = proj / "broll.json"
+    m = _momento(_ler(bj), mid)
+    key = chave()
+    if not key:
+        raise ValueError("FAL_KEY ausente em video-use/.env")
+    mq = cfg["modelos"]["quadro"]
+    d = budget.autorizar(root, proj, mq["provedor"], n, aprovacao=aprovacao)
+    if d["status"] != "ok":
+        return d
+    mc = marca(proj, root)
+    estilo = estilo or (mc if mc in cfg["estilos"] else "padrao")
+    req = _enviar(mq["id"], {**mq.get("entrada", {}), "prompt": prompt_final(cfg, prompt, estilo),
+                             "image_size": TAMANHO[aspecto], "num_images": int(n)}, key, _fetch)
+    estado, erro = _esperar(req, key, _fetch)
+    if estado != "ok":
+        # ponytail: quadro em timeout não é retomado (centavos); animar retoma, que é o caro
+        raise RuntimeError(f"fal: quadros {estado}: {erro or 'tempo esgotado'}")
+    budget.registrar(proj, mq["provedor"], n, aprovacao=aprovacao, nota=f"{mid} quadros"[:80], root=root)
+    res = _req("GET", req["response_url"], key, None, _fetch)
+    urls = [i["url"] for i in res.get("images") or [] if isinstance(i, dict) and i.get("url")]
+    if not urls:
+        raise RuntimeError("fal: resultado sem images")
+    custo = _custo(root, cfg, _modelo_key(m))
+    novos, k = [], _proximo_k(proj, mid)
+    for url in urls[:int(n)]:
+        dst = _baixar(url, proj / "broll" / "cand" / f"{mid}-ia{k}.png", _fetch)
+        novos.append(_cand_ia(dst.relative_to(proj).as_posix(), prompt, estilo, aspecto, custo,
+                              f"gerado por IA (fal/{mq['id']})"))
+        k += 1
+    _atualizar(bj, mid, lambda mm: mm.setdefault("candidatos", []).extend(novos))
+    return {"status": "ok", "candidatos": [c["arq"] for c in novos], "estimativa": d["estimativa"]}
+
+
+def asset(root: Path, proj: Path, mid: str, arquivo: Path, movimento: str) -> dict:
+    """Asset da marca (foto/print/mockup) como quadro IA, sem gerar imagem nem gastar."""
+    root, proj, src = Path(root), Path(proj), Path(arquivo)
+    ext = src.suffix.lower()
+    if ext not in MIME:
+        raise ValueError(f"asset precisa ser imagem (png/jpg/webp): {src.name}")
+    if not src.is_file():
+        raise ValueError(f"asset não existe: {src}")
+    cfg = config(root)
+    bj = proj / "broll.json"
+    m = _momento(_ler(bj), mid)
+    dst = proj / "broll" / "cand" / f"{mid}-ia{_proximo_k(proj, mid)}{ext}"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+    c = _cand_ia(dst.relative_to(proj).as_posix(), movimento, None, "", _custo(root, cfg, _modelo_key(m)),
+                 "asset da marca animado por IA")
+    c["asset"] = True
+    _atualizar(bj, mid, lambda mm: mm.setdefault("candidatos", []).append(c))
+    return {"status": "ok", "candidato": c["arq"]}
