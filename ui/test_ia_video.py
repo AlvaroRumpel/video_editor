@@ -463,3 +463,74 @@ def test_cli(root, midia):
     assert code == 2 and out["status"] == "precisa_aprovacao"
     code, out = _cli(root, "animar", str(proj), "--ids", "b07")
     assert code == 0 and out["feitos"] == []
+
+
+def test_post_nao_repete_em_5xx_mas_repete_em_429(root):
+    n = []
+    def f503(*a):
+        n.append(1); return 503, b"", {}
+    with pytest.raises(RuntimeError, match="fal HTTP 503"):
+        ia_video._req("POST", FILA + "x", "k", {"a": 1}, f503)
+    assert len(n) == 1
+    respostas = [(429, b"", {"Retry-After": "1"}), (200, b'{"ok": 1}', {})]
+    assert ia_video._req("POST", FILA + "x", "k", {"a": 1}, lambda *a: respostas.pop(0)) == {"ok": 1}
+
+
+def test_salva_falha_apos_envio_nao_reenvia(root, midia, monkeypatch):
+    proj = root / "edit-fake"; bj = _broll(proj); arq = _quadro(bj, midia)
+    real = ia_video._atualizar
+    def quebra(bj_, mid, fn):
+        raise PermissionError("broll.json aberto")
+    monkeypatch.setattr(ia_video, "_atualizar", quebra)
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["falhas"][0]["id"] == "b01" and len(fake.envios()) == 1
+    assert (proj / (arq + ".fal.json")).exists()
+    monkeypatch.setattr(ia_video, "_atualizar", real)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["feitos"] == ["b01"] and len(fake.envios()) == 1
+    assert len(_custos(proj)) == 1
+    assert not (proj / (arq + ".fal.json")).exists()
+
+
+def test_registro_nao_duplica_se_salvar_pago_falha(root, midia, monkeypatch):
+    proj = root / "edit-fake"; bj = _broll(proj); arq = _quadro(bj, midia)
+    real = ia_video._atualizar
+    estado = {"quebrou": False}
+    def quebra_no_pago(bj_, mid, fn):
+        d = _ler(bj_)
+        fn(next(m for m in d["momentos"] if m["id"] == mid))
+        c = next(c for c in d["momentos"][0]["candidatos"] if c.get("fonte") == "ia")
+        if (c.get("fal_req") or {}).get("pago") and not estado["quebrou"]:
+            estado["quebrou"] = True
+            raise PermissionError("broll.json aberto")
+        real(bj_, mid, fn)
+    monkeypatch.setattr(ia_video, "_atualizar", quebra_no_pago)
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["falhas"] and len(_custos(proj)) == 1
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["feitos"] == ["b01"] and len(fake.envios()) == 1
+    assert len(_custos(proj)) == 1
+
+
+def test_lote_dois_modelos_pede_aprovacao(root, midia):
+    _budget(root, aprovar_acima_usd=2)
+    proj = root / "edit-fake"; bj = _broll(proj, {"id": "b02", "t_in": 40.0, "t_out": 43.0})
+    _quadro(bj, midia, "b01"); _quadro(bj, midia, "b02", modelo="video_top")
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["status"] == "precisa_aprovacao" and r["estimativa"]["usd"] == 1.95 and fake.chamadas == []
+    (proj / "ui").mkdir(exist_ok=True)
+    (proj / "ui" / "queue.json").write_text(json.dumps([{"id": 8, "reply": "ok"}]), encoding="utf-8")
+    r = ia_video.animar(root, proj, aprovacao=8, _fetch=fake)
+    assert sorted(r["feitos"]) == ["b01", "b02"]
+
+
+def test_quadro_ausente_nao_bloqueia_item_pago(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); arq = _quadro(bj, midia)
+    fake = FakeFal(midia, polls=1, falhas_cdn=1)
+    ia_video.animar(root, proj, _fetch=fake)          # pago, download falhou
+    (proj / arq).unlink()
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["feitos"] == ["b01"]

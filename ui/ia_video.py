@@ -77,13 +77,14 @@ def _espera_s(h: dict) -> float:
         return 5.0
 
 def _req(metodo: str, url: str, key: str, corpo=None, _fetch=None) -> dict:
-    """JSON da fila do fal; 429/5xx/rede → espera Retry-After (máx. 60 s) e tenta 1 vez."""
+    """JSON da fila do fal; 429 (e, em GET, 5xx/rede) → espera Retry-After (máx. 60 s) e tenta 1 vez.
+    POST nunca repete em 5xx/rede: pode já ter criado o job pago."""
     fetch = _fetch or _fetch_http
     hdr = {"Authorization": f"Key {key}", "Content-Type": "application/json", "User-Agent": stock.UA}
     dados = None if corpo is None else json.dumps(corpo).encode()
     for tentativa in (1, 2):
         st, b, h = fetch(metodo, url, hdr, dados)
-        if (st == 0 or st == 429 or st >= 500) and tentativa == 1:
+        if tentativa == 1 and (st == 429 or (metodo == "GET" and (st == 0 or st >= 500))):
             _dormir(_espera_s(h))
             continue
         break
@@ -249,12 +250,25 @@ def _alvos(d: dict, ids=None):
             yield m, c
 
 
+def _sidecar(proj: Path, quadro: str) -> Path:
+    return proj / (quadro + ".fal.json")
+
+
+def _req_salvo(proj: Path, c: dict):
+    """fal_req do candidato: broll.json ou diário ao lado do quadro (sobrevive a falha ao salvar o broll.json)."""
+    # o diário é gravado antes do broll.json, então é sempre o mais novo
+    r = pipeline.read_json(_sidecar(proj, c["arq"]), None)
+    if not isinstance(r, dict):
+        r = c.get("fal_req")
+    return r if isinstance(r, dict) else None
+
+
 def estimar(root: Path, proj: Path, ids=None) -> dict:
     root, proj = Path(root), Path(proj)
     cfg = config(root)
     itens = []
     for m, c in _alvos(_ler(proj / "broll.json"), ids):
-        if (c.get("fal_req") or {}).get("pago"):
+        if (_req_salvo(proj, c) or {}).get("pago"):
             continue
         mk = _modelo_key(m)
         itens.append({"id": m["id"], "modelo": mk, "usd": _custo(root, cfg, mk) or 0.0})
@@ -268,7 +282,12 @@ def _animar_um(root: Path, cfg: dict, proj: Path, bj: Path, m: dict, c: dict, ke
     mm = cfg["modelos"][_modelo_key(m)]
     quadro = c["arq"]
 
-    def salva(**campos):   # relê o broll.json e atualiza só este candidato (casado pelo arq do quadro)
+    side = _sidecar(proj, quadro)
+
+    def salva(**campos):   # diário primeiro (fal_req), depois relê o broll.json e atualiza só este candidato (casado pelo arq do quadro)
+        if campos.get("fal_req") is not None:
+            pipeline.atomic_write_json(side, campos["fal_req"])
+
         def f(mom):
             for cc in mom.get("candidatos", []):
                 if isinstance(cc, dict) and cc.get("arq") == quadro:
@@ -280,8 +299,10 @@ def _animar_um(root: Path, cfg: dict, proj: Path, bj: Path, m: dict, c: dict, ke
                     return
             raise ValueError(f"{m['id']}: candidato {quadro} sumiu do broll.json")
         _atualizar(bj, m["id"], f)
+        if "fal_req" in campos and campos["fal_req"] is None:
+            side.unlink(missing_ok=True)       # só depois do broll.json salvo
 
-    req = c.get("fal_req")
+    req = _req_salvo(proj, c)
     if not req:
         img = proj / quadro
         if img.stat().st_size > MAX_IMG:
@@ -322,7 +343,10 @@ def animar(root: Path, proj: Path, ids=None, aprovacao=None, _fetch=None) -> dic
     cfg = config(root)
     bj = proj / "broll.json"
     alvos = list(_alvos(_ler(bj), ids))
-    faltam = [m["id"] for m, c in alvos if not (proj / c["arq"]).is_file()]
+    def _pronto(c):   # pago e com url do resultado: só falta baixar, não precisa do quadro
+        r = _req_salvo(proj, c) or {}
+        return bool(r.get("pago") and r.get("resultado_url"))
+    faltam = [m["id"] for m, c in alvos if not _pronto(c) and not (proj / c["arq"]).is_file()]
     if faltam:
         raise ValueError(f"quadro ausente no disco: {', '.join(faltam)}")
     if not alvos:
@@ -332,13 +356,20 @@ def animar(root: Path, proj: Path, ids=None, aprovacao=None, _fetch=None) -> dic
         raise ValueError("FAL_KEY ausente em video-use/.env")
     seg = {}
     for m, c in alvos:
-        if not c.get("fal_req"):           # já enviados foram autorizados na rodada anterior
+        if not _req_salvo(proj, c):        # já enviados foram autorizados na rodada anterior
             mm = cfg["modelos"][_modelo_key(m)]
             seg[mm["provedor"]] = seg.get(mm["provedor"], 0) + mm["segundos"]
+    total = 0.0
     for prov, s in seg.items():
         d = budget.autorizar(root, proj, prov, s, aprovacao=aprovacao)
         if d["status"] != "ok":
             return d
+        total += d["estimativa"]["usd"]
+    if len(seg) > 1 and aprovacao is None:     # o orçamento olha cada provedor; o lote misto precisa de um ok só
+        total = round(total, 4)
+        return {"status": "precisa_aprovacao",
+                "motivo": f"lote com mais de um modelo: estimativa US${total:.2f} — aprove o lote",
+                "estimativa": {"usd": total, "creditos": 0}}
     out = {"status": "ok", "feitos": [], "falhas": [], "pendentes": [], "usd": 0.0}
     for m, c in alvos:
         try:
