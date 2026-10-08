@@ -28,3 +28,5 @@ ui/cache/
 .superpowers/
 # SFX da marca podem ser versionados (negação depois da regra *.wav)
 !assets/sfx/*.wav
+
+.claude/worktrees/
