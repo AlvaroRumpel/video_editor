@@ -6,5 +6,11 @@
   "elevenlabs_music": {"unidade": "faixa",  "usd": 0.0, "creditos": 0,
                        "nota": "free: creditos/faixa medido na 1a rodada (saldo antes/depois)"},
   "elevenlabs_tts":   {"unidade": "caractere", "usd": 0.0, "creditos": 1,
-                       "nota": "~1 crédito/caractere; confirmar na 1a rodada (saldo antes/depois)"}
+                       "nota": "~1 crédito/caractere; confirmar na 1a rodada (saldo antes/depois)"},
+  "fal_quadro":    {"unidade": "imagem", "usd": 0.006, "creditos": 0,
+                    "nota": "flux schnell ~US$0,003/MP, arredonda p/ cima; conferir no painel do fal na 1a rodada"},
+  "fal_video":     {"unidade": "segundo", "usd": 0.07, "creditos": 0,
+                    "nota": "kling 2.5 turbo pro i2v: US$0,35 por 5 s (set/2026); conferir na 1a rodada"},
+  "fal_video_top": {"unidade": "segundo", "usd": 0.40, "creditos": 0,
+                    "nota": "veo 3.1 i2v 1080p sem áudio: teto conservador; conferir na 1a rodada"}
 }
