@@ -217,17 +217,29 @@
 
   function tela(c, cena) {
     const m = c.layer.querySelector(".k-midia");
-    px(m, MOLDURA[cena.moldura]);
-    const grupo = [m];
+    let raio = "0";
+    if (cena.moldura === "celular") raio = "36px";
+    else if (cena.moldura === "browser") raio = "0 0 24px 24px";
+    let alvo = m;   // elemento que entra/sai; o kenburns escala só a imagem dentro da caixa recortada
+    if (m.tagName === "IMG") {
+      alvo = el("div", "k-midia-caixa");
+      Object.assign(alvo.style, { position: "absolute", overflow: "hidden", borderRadius: raio });
+      m.replaceWith(alvo);
+      alvo.appendChild(m);
+      Object.assign(m.style, { left: "0", top: "0", width: "100%", height: "100%" });
+      px(alvo, MOLDURA[cena.moldura]);
+    } else {
+      px(m, MOLDURA[cena.moldura]);
+      m.style.borderRadius = raio;
+    }
+    if (cena.moldura === "browser") m.style.objectPosition = "top";
+    const grupo = [alvo];
     if (cena.moldura === "celular") {
-      m.style.borderRadius = "36px";
       const b = el("div", "k-moldura k-celular");
       px(b, [92, 170, 896, 1580]);
       c.layer.appendChild(b);
       grupo.push(b);
     } else if (cena.moldura === "browser") {
-      m.style.objectPosition = "top";
-      m.style.borderRadius = "0 0 24px 24px";
       const j = el("div", "k-moldura k-janela");
       px(j, [60, 504, 960, 656]);
       const barra = el("div", "k-barra-janela");
@@ -238,12 +250,13 @@
       }
       barra.appendChild(el("span", "k-url-janela", c.tema.url));
       j.appendChild(barra);
-      c.layer.insertBefore(j, m);
+      c.layer.insertBefore(j, alvo);
       grupo.push(j);
     }
     c.tl.fromTo(grupo, { opacity: 0, scale: 0.96 }, { opacity: 1, scale: 1, duration: F(18), ease: "power3.out" }, c.t0);
     let fim = c.t0 + F(18);
-    if (cena.kenburns) kenBurns(c.tl, m, fim, cena.dur - (fim - c.ini));
+    // ponytail: vídeo não recebe kenburns (não dá para recortar sem mover o nó <video>)
+    if (cena.kenburns && m.tagName === "IMG") kenBurns(c.tl, m, fim, cena.dur - (fim - c.ini));
     if (cena.label) {
       const p = el("div", "k-pill");
       p.append(el("i"), el("span", null, cena.label));
@@ -261,7 +274,7 @@
   };
 
   // brilho da íris: anel em WebGL (shader do bloco sdf-iris, só o anel) desenhado em função do tempo
-  function brilho(t, d, cor) {
+  function brilho(tl, t, d, cor) {
     const cv = document.getElementById("k-brilho");
     if (!cv._k) {
       const gl = cv.getContext("webgl", { preserveDrawingBuffer: true, premultipliedAlpha: true });
@@ -300,6 +313,8 @@
       });
     }
     cv._k.lista.push({ t, d, cor: rgb(cor) });
+    // canvas WebGL só aparece durante a íris: em backend de software ele pinta um véu branco fora dela
+    tl.set(cv, { visibility: "visible" }, t).set(cv, { visibility: "hidden" }, t + d);
   }
 
   function custom(c, cena) {
@@ -321,7 +336,7 @@
     iris: (tl, cam, t, d, tema) => {
       tl.fromTo(cam, { clipPath: "circle(0px at 50% 50%)" },
         { clipPath: "circle(1110px at 50% 50%)", duration: d, ease: "power2.inOut" }, t);
-      brilho(t, d, tema.acento);
+      brilho(tl, t, d, tema.acento);
     },
   };
 
@@ -401,7 +416,9 @@
     if (tema.barra) tl.fromTo(barra, { scaleX: 0 }, { scaleX: 1, duration: total, ease: "none" }, 0);
     tl.to({}, { duration: 0 }, total);
     const pintar = () => { const t = tl.time(); for (const p of pintores) p(t); };
-    tl.eventCallback("onUpdate", pintar);
+    // relógio: escrita de propriedade roda mesmo com seek({suppressEvents}), ao contrário do onUpdate
+    const relogio = { _t: 0, get t() { return this._t; }, set t(v) { this._t = v; for (const p of pintores) p(v); } };
+    tl.fromTo(relogio, { t: 0 }, { t: total, duration: total, ease: "none" }, 0);
     window.__timelines = window.__timelines || {};
     window.__timelines.main = tl;
     window.__kit = {

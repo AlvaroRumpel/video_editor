@@ -260,3 +260,71 @@ def test_custom_sem_registro_vira_erro(tmp_path):
     (p / "c05.html").write_text("<div>nada</div>", encoding="utf-8")
     r = motion.montar(p)
     assert any(e["id"] == "c05" and "KIT.custom" in e["motivo"] for e in r["erros"])
+
+
+def _abrir(index, fn):
+    """Abre o index.html com os args padrão do Chromium e roda fn(pagina)."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(args=["--allow-file-access-from-files"])
+        try:
+            pg = b.new_page(viewport={"width": 1080, "height": 1920})
+            pg.set_default_timeout(15000)
+            pg.goto(index.resolve().as_uri())
+            pg.wait_for_function("window.__kit !== undefined", timeout=20000)
+            return fn(pg)
+        finally:
+            b.close()
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_brilho_so_aparece_durante_a_iris(tmp_path):
+    p = _proj(tmp_path, _todos("campeio"))
+    _midia(p)
+    (p / "c06.html").write_text(CUSTOM.format(id="c06"), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+    ini = r["cenas"][2]["ini"]    # c03 entra por íris (saída da c02, 0,47 s)
+
+    def vis(pg, t):
+        pg.evaluate("t => __kit.ir(t)", t)
+        return pg.evaluate("getComputedStyle(document.getElementById('k-brilho')).visibility")
+    v = _abrir(p / "motion" / "index.html", lambda pg: [vis(pg, 1.0), vis(pg, ini + 0.2), vis(pg, ini + 1.0)])
+    assert v == ["hidden", "visible", "hidden"]
+
+
+@pw
+def test_painters_rodam_com_suppress_events(tmp_path):
+    d = {"marca": "anotus", "cenas": [{"id": "c01", "tipo": "numero", "valor": 1250}]}
+    p = _proj(tmp_path, d)
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+
+    def texto(pg, t):
+        pg.evaluate("t => { __timelines.main.totalTime(t, true); }", t)
+        return pg.evaluate("document.querySelector('#c01 .k-numero').textContent")
+    a, b, fim = _abrir(p / "motion" / "index.html", lambda pg: [texto(pg, 0.2), texto(pg, 0.4), texto(pg, 1.5)])
+    assert a != b and fim == "1.250"
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_kenburns_fica_dentro_da_moldura(tmp_path):
+    d = {"marca": "anotus", "cenas": [{"id": "c01", "tipo": "tela", "arquivo": "tela.png"}]}
+    p = _proj(tmp_path, d)
+    _midia(p)
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+    c = r["cenas"][0]
+
+    def medir(pg):
+        pg.evaluate("t => __kit.ir(t)", c["ini"] + c["dur"] - 0.05)
+        return pg.evaluate("""(() => {
+          const cx = document.querySelector('#c01 .k-midia-caixa'), r = cx.getBoundingClientRect();
+          return {ov: getComputedStyle(cx).overflow, x0: r.left, y0: r.top, x1: r.right, y1: r.bottom,
+                  img: cx.querySelector('img') !== null};
+        })()""")
+    m = _abrir(p / "motion" / "index.html", medir)
+    assert m["ov"] == "hidden" and m["img"]
+    assert m["x0"] >= 92 and m["y0"] >= 170 and m["x1"] <= 988 and m["y1"] <= 1750
