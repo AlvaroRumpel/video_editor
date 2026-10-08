@@ -111,7 +111,8 @@ injetável. Gasto autorizado e registrado por dentro — receita nunca chama
 - Envio: `POST https://queue.fal.run/<endpoint>` com
   `Authorization: Key <FAL_KEY>`, JSON → `request_id`, `status_url`,
   `response_url`.
-- Poll de `status_url` a cada 5 s até `COMPLETED` / `FAILED`; timeout
+- Poll de `status_url` a cada 5 s até `COMPLETED`; falha do fal chega como
+  `COMPLETED` com campo `error` (não existe status `FAILED`); timeout
   10 min → `pendente`.
 - `COMPLETED` → GET `response_url` → URL da mídia → download.
 - Cobrança do fal ocorre no sucesso: `budget.registrar` roda logo após
@@ -128,7 +129,7 @@ injetável. Gasto autorizado e registrado por dentro — receita nunca chama
 | `config(root) -> dict` | lê `ui/ia.json`; valida chaves `modelos.quadro/video/video_top` |
 | `prompt_final(cfg, prompt, estilo) -> str` | `prompt + ", " + estilos[estilo]`; estilo ausente → `padrao` |
 | `quadros(root, proj, mid, prompt, estilo=None, n=3, aspecto="16:9", aprovacao=None, _fetch=None) -> dict` | momento `mid` precisa existir no `broll.json`. `autorizar(fal_quadro, n)` → status ≠ ok devolve a decisão sem gerar. Gera `n` imagens → `broll/cand/<mid>-ia<k>.png` (k continua após os existentes) → `registrar` → anexa candidatos (`custo_est` = estimativa de `animar` desse candidato) com merge atômico |
-| `asset(proj, mid, arquivo, movimento) -> dict` | copia `arquivo` para `broll/cand/<mid>-ia<k>.<ext>` como candidato `fonte: ia`, `prompt = movimento`; sem custo |
+| `asset(root, proj, mid, arquivo, movimento) -> dict` | copia `arquivo` para `broll/cand/<mid>-ia<k>.<ext>` como candidato `fonte: ia`, `prompt = movimento`; sem custo |
 | `estimar(root, proj) -> dict` | momentos `aprovado` cujo `escolhido` é candidato IA `tipo foto` e `modo ≠ foto` → `{"itens": [{"id", "modelo", "usd"}], "usd": total, "texto": "animar 3 clipes ≈ US$1,05"}` |
 | `animar(root, proj, ids=None, aprovacao=None, _fetch=None) -> dict` | mesmo filtro do `estimar` (opcional `ids`). Uma `autorizar` por provedor (`fal_video`, `fal_video_top`) com unidades = segundos somados; qualquer status ≠ ok → devolve a decisão sem gerar nada. Por item: `fal_req` presente → só poll; senão envia (prompt final, imagem, `duracao_s`, aspecto). Concluído → `registrar` → baixa `<mid>-ia<k>.mp4` → candidato vira `video` (`dur` via ffprobe, `quadro`, `modelo_video`) com merge atômico |
 
@@ -165,8 +166,9 @@ pendente e falhas → exit 1.
   `stock.py preparar`.
 - **`Formatos/padrao-ads.md` (etapa `producao`):** cena que pede footage
   real → momento `modo: cena` no `broll.json` (`t_in`/`t_out` do roteiro),
-  `--aspecto 9:16`, mesma folha `broll`. Clipe animado entra como
-  `<video>` no `anim.html` ou concatenado por ffmpeg; sem `preparar`.
+  `--aspecto 9:16`, mesma folha `broll`. Clipe animado entra por ffmpeg
+  (concat ou overlay no encode padrão do ad; `anim.html` continua só
+  motion determinístico por `seek`); sem `preparar`.
   Asset da marca → `ia_video.py asset`.
 - **`Formatos/referencia.md`:** conceito `exige_ia: true` calcula custo com
   `fal_*` de `precos.json`; produção segue o caminho dos ads.
@@ -202,7 +204,7 @@ Miniatura = o png (já é `tipo foto`). Gramática da resposta inalterada
 | Orçamento `precisa_aprovacao`/`bloqueado` | exit 2/3 com motivo + estimativa; nada enviado |
 | HTTP 4xx no envio (moderação, parâmetro) | item em `falhas` com a mensagem do fal; sem registro de gasto; Claude reescreve o prompt ou desiste de IA no momento |
 | 429/5xx | espera `Retry-After` (máx. 60 s), 1 nova tentativa; depois item em `falhas` |
-| `FAILED` no poll | sem registro; limpa `fal_req`; item em `falhas` |
+| `COMPLETED` com `error` | sem registro; limpa `fal_req`; item em `falhas` |
 | Timeout 10 min | mantém `fal_req`; item em `pendentes`; próximo `animar` só faz poll |
 | Download falha após `COMPLETED` | gasto já registrado; mantém `fal_req` + `resultado_url`; próximo `animar` só baixa |
 | `escolhido` IA sem arquivo no disco | exit 1 listando ids |
@@ -219,7 +221,7 @@ com `precos.json`/`budget.json` fixture):
 - `animar` feliz: envio → 2 polls → `COMPLETED` → mp4 (gerado por ffmpeg no
   fake) → candidato `video`; `stock.preparar` aceita o momento.
 - Retomada: `fal_req` presente → nenhum envio, só poll.
-- `FAILED` → sem registro. Download falho após `COMPLETED` → registro feito,
+- `COMPLETED` com `error` → sem registro. Download falho após `COMPLETED` → registro feito,
   `fal_req` + `resultado_url` mantidos; nova chamada só baixa.
 - Filtro: `modo foto` e candidato de stock ignorados; `modelo: video_top`
   usa o endpoint top e o provedor `fal_video_top`.
