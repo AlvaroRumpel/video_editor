@@ -681,3 +681,13 @@ def test_folha_traducao(page, ui_url, fake_root):
     page.wait_for_function("document.body.dataset.tab === 'board'")
     q = json.loads((proj / "ui" / "queue.json").read_text(encoding="utf-8"))
     assert q[0]["reply"].startswith("ok\nf001: hola a todos") and q[0]["status"] == "pending"
+
+
+def test_board_info_dub(page, ui_url, fake_root):
+    (fake_root / "Formatos" / "teste.md").write_text(
+        "---\netapas: transcricao, cortes, dublagem\n---\n", encoding="utf-8")
+    (fake_root / "edit-fake" / "ui" / "state.json").write_text(json.dumps(
+        {"formato": "teste", "dub": {"idiomas": {"es": {"etapa": "pronto"}, "en": {"etapa": "tts"}}}}), encoding="utf-8")
+    page.goto(ui_url + "/#/p/edit-fake/board", wait_until="domcontentloaded")
+    page.wait_for_selector("#card-dublagem")
+    assert "dub: en tts · es pronto" in page.locator("#card-dublagem").inner_text()

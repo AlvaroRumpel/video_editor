@@ -32,7 +32,14 @@ function infoRef(st) {
     (r.produzidos && r.produzidos.length ? ` · produzidos ${r.produzidos.join(', ')}` : '');
 }
 
-const INFO_SLOT = [['audio', infoAudio], ['visual', infoBroll], ['candidatos', infoClips], ['referencia', infoRef]];
+function infoDub(st) {
+  const i = st.dub && st.dub.idiomas;
+  if (!i || typeof i !== 'object') return '';
+  const partes = Object.keys(i).sort().map(l => `${l} ${(i[l] && i[l].etapa) || '?'}`);
+  return partes.length ? 'dub: ' + partes.join(' · ') : '';
+}
+
+const INFO_SLOT = [['audio', infoAudio], ['visual', infoBroll], ['candidatos', infoClips], ['referencia', infoRef], ['dublagem', infoDub]];
 
 function renderStepper() {
   const q = S.quadro;

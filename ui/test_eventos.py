@@ -240,9 +240,9 @@ def test_cli_validacao_exit_1(root):
 
 ESPERADO = {
     "padrao-youtube-longo": ["roteiro", "transcricao", "cortes", "fatos", "visual", "audio", "legenda", "render", "entrega",
-                             "shorts", "thumbnail"],
+                             "shorts", "thumbnail", "dublagem"],
     "padrao-youtube-shorts": ["transcricao", "candidatos", "aprovacao", "render", "draft"],
-    "padrao-ads": ["referencia", "pesquisa", "roteiro", "producao", "audio", "render", "qc"],
+    "padrao-ads": ["referencia", "pesquisa", "roteiro", "producao", "audio", "render", "qc", "dublagem"],
     "pauta": ["pesquisa", "pauta", "aprovacao"],
     "thumbnail": ["frame", "recorte", "composicao", "variacoes"],
 }

@@ -94,6 +94,15 @@ legenda, conceito, clipe, thumbnail, render, outro (fora da lista → `outro`
 e explicar no motivo). `--etapa` precisa estar na receita (ou omitir).
 Respostas do usuário entram sozinhas no log (só da fila do projeto; a fila global não entra — o servidor grava no `/api/reply`).
 
+## Dublagem
+
+Fluxo em `Formatos/dublagem.md` (etapa `dublagem` do projeto). Regras:
+- Tradução sempre com `ui/glossario.json` (termo → tradução, ou "manter"); `python ui/dublagem.py validar` antes de gastar.
+- Aprovação da tradução (fala + tela) pela folha `traducao` (`"folha": "traducao"`, `"lang"`) antes do TTS.
+- Voz por projeto: `state.json.dub.voz` > marca > `padrao` em `ui/vozes.json`; sem `voice_id` → pedir ao usuário.
+- TTS só via `python ui/dublagem.py tts` (autoriza e registra no orçamento; nunca chamar a API por fora).
+- Fato com `[F#]` não muda de sentido na tradução.
+
 ## Orçamento (ações pagas)
 
 Antes de QUALQUER ação que gaste dinheiro ou cota (ElevenLabs, stock pago,

@@ -1,5 +1,5 @@
 ---
-etapas: referencia?=referência, pesquisa, roteiro, producao=produção, audio=áudio, render, qc=QC
+etapas: referencia?=referência, pesquisa, roteiro, producao=produção, audio=áudio, render, qc=QC, dublagem?=dublagem
 ---
 # Padrão Ads (identidade aprovada 2026-08-31; origem: Reels Anotus)
 
@@ -7,7 +7,7 @@ etapas: referencia?=referência, pesquisa, roteiro, producao=produção, audio=�
 > referencia = fluxo `Formatos/referencia.md` (pular quando não veio de referência) ·
 > pesquisa = "Pesquisa e roteiro" 1–5 · roteiro = "Pesquisa e roteiro" 6–7 ·
 > producao = "Técnica de produção" (motion, footage, encode) · audio = SFX + trilha ·
-> render = montagem final · qc = "QC antes de entregar" + "Entrega".
+> render = montagem final · qc = "QC antes de entregar" + "Entrega" · dublagem = Formatos/dublagem.md (textos na tela; voz só se houver narração).
 
 Receita dos 4 vídeos de `Export/shorts/anotus/`. Todo Reel novo do Anotus segue isto.
 

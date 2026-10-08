@@ -339,3 +339,14 @@ def test_cli_tts_exit_codes(tts_root, monkeypatch):
     _set_trad(proj, {"f001": "x" * 6000})
     r = _cli(tts_root, "tts", str(proj), "es")
     assert r.returncode == 2 and json.loads(r.stdout)["status"] == "precisa_aprovacao"
+
+
+def test_protocolo_dublagem_documentado():
+    import pipeline
+    receita = (pipeline.ROOT / "Formatos" / "dublagem.md").read_text(encoding="utf-8")
+    for cmd in ("dublagem.py frases", "dublagem.py validar", "dublagem.py tts", "dublagem.py encaixar",
+                "dublagem.py mixar", "localiza.py extrair", "localiza.py aplicar", "localiza.py checar",
+                "--lang", '"folha": "traducao"', "eventos.py etapa", "eventos.py decisao"):
+        assert cmd in receita, cmd
+    claude = (pipeline.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "## Dublagem" in claude and "glossario.json" in claude and "vozes.json" in claude

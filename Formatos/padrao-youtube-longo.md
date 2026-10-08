@@ -1,5 +1,5 @@
 ---
-etapas: roteiro?=roteiro, transcricao=transcrição, cortes, fatos, visual, audio=áudio, legenda, render, entrega, shorts?=shorts, thumbnail?=thumbnail
+etapas: roteiro?=roteiro, transcricao=transcrição, cortes, fatos, visual, audio=áudio, legenda, render, entrega, shorts?=shorts, thumbnail?=thumbnail, dublagem?=dublagem
 ---
 # Formato: Padrão YouTube — vídeo longo (horizontal)
 
@@ -7,7 +7,7 @@ etapas: roteiro?=roteiro, transcricao=transcrição, cortes, fatos, visual, audi
 > roteiro = §0.0 (pular se não houve pedido `roteiro`) · transcricao = §0.1 + `transcribe.py` do §1 ·
 > cortes = §2 (+ `plan_cuts.py`/`verify_text.py` do §1) · fatos = §1.1 · visual = §3, §4, §5, §5.1, §5.2 ·
 > audio = §0.3 + §8.1 · legenda = §7 · render = `rezoom.py` → `recomposite.py` do §1 + §6/§6.1 + §8 ·
-> entrega = §9 + §0 (export) · shorts = Formatos/padrao-youtube-shorts.md · thumbnail = Formatos/thumbnail.md.
+> entrega = §9 + §0 (export) · shorts = Formatos/padrao-youtube-shorts.md · thumbnail = Formatos/thumbnail.md · dublagem = Formatos/dublagem.md.
 
 Método completo da edição de talking head para YouTube. Derivado do vídeo
 "Eu criei um SaaS" (2026-08-16). Serve como receita reproduzível: seguindo este
