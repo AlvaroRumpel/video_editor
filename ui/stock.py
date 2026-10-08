@@ -474,8 +474,8 @@ def creditos(broll_json: Path, dst_md: Path) -> dict:
         if not c:
             continue
         if c.get("fonte") == "ia":
-            ia += 1
-            linhas.append(f"- {m['id']} · gerado por IA · fal/{c.get('modelo_video') or '?'}")
+            ia += not (c.get("asset") and c.get("tipo") != "video")   # asset da marca parado = foto real
+            linhas.append(f"- {m['id']} · {c.get('licenca') or 'gerado por IA'}")
             continue
         linhas.append(f"- {m['id']} · {c['fonte']} · {c['autor']} · {c['url']} · {c['licenca']}")
         if _exige_credito(c):

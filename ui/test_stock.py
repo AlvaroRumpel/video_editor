@@ -385,9 +385,22 @@ def test_creditos_ia_divulgacao(tmp_path, mp4, jpg):
     r = stock.creditos(bj, proj / "creditos.md")
     md = (proj / "creditos.md").read_text(encoding="utf-8")
     assert r == {"usados": 2, "com_credito": 0}
-    assert "- b01 · gerado por IA · fal/fal-ai/kling" in md
+    assert "- b01 · gerado por IA (fal/fal-ai/kling)" in md
     assert "## Divulgação" in md and "sintético" in md
     assert "fal" not in md.split("## Para a descrição")[1].split("## Divulgação")[0]
+
+
+def test_creditos_asset_still_sem_divulgacao(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0]["candidatos"][0].update(fonte="ia", asset=True, tipo="foto", autor="", url="",
+                                             licenca="asset da marca animado por IA")
+    b["momentos"][0].update(status="aprovado", escolhido="b01-1")
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    stock.creditos(bj, proj / "creditos.md")
+    md = (proj / "creditos.md").read_text(encoding="utf-8")
+    assert "- b01 · asset da marca animado por IA" in md
+    assert "## Divulgação" not in md
 
 
 def test_preparar_releitura_falha_nao_apaga_edl(tmp_path, mp4, jpg, monkeypatch):

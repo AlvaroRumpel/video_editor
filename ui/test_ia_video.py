@@ -326,6 +326,7 @@ def test_animar_feliz(root, midia):
     assert [l["provedor"] for l in _custos(proj)] == ["fal_video"] and _custos(proj)[0]["usd"] == 0.35
     assert fake.cdn() and all("Authorization" not in h for *_, h in fake.cdn())
     assert stock.preparar(bj, proj / "edl.json", proj)["ok"]
+    assert not (proj / "broll" / ".animar.lock").exists()
 
 
 def test_animar_retoma_sem_reenviar(root, midia):
@@ -414,6 +415,23 @@ def test_top_usa_veo_e_aprovacao(root, midia):
     assert l["provedor"] == "fal_video_top" and l["aprovacao"] == 7 and l["usd"] == 1.6
 
 
+def test_animar_lock_impede_sobreposicao(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    lock = proj / "broll" / ".animar.lock"; lock.write_text("1")
+    fake = FakeFal(midia, polls=1)
+    with pytest.raises(ValueError, match="em andamento"):
+        ia_video.animar(root, proj, _fetch=fake)
+    assert fake.chamadas == [] and lock.exists()
+
+
+def test_ids_inexistentes(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    with pytest.raises(ValueError, match="b99"):
+        ia_video.animar(root, proj, ids=["b01", "b99"], _fetch=FakeFal(midia))
+    with pytest.raises(ValueError, match="b99"):
+        ia_video.estimar(root, proj, ids=["b99"])
+
+
 def test_estimar(root, midia):
     proj = root / "edit-fake"; bj = _broll(proj, {"id": "b02", "t_in": 40.0, "t_out": 43.0})
     _quadro(bj, midia, "b01"); _quadro(bj, midia, "b02", modelo="video_top")
@@ -462,7 +480,7 @@ def test_cli(root, midia):
     code, out = _cli(root, "quadros", str(proj), "b01", "x", "--n", "2")
     assert code == 2 and out["status"] == "precisa_aprovacao"
     code, out = _cli(root, "animar", str(proj), "--ids", "b07")
-    assert code == 0 and out["feitos"] == []
+    assert code == 1 and "b07" in out["erro"]
 
 
 def test_post_nao_repete_em_5xx_mas_repete_em_429(root):

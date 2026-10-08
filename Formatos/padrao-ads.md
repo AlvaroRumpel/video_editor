@@ -95,7 +95,10 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
 - Momento `{"id": "c01", "t_in", "t_out", "modo": "cena", "termo", "candidatos": [], "status": "proposto"}` no
   `edit/shorts/<proj>/broll.json` (tempos do roteiro) → `python ui/ia_video.py quadros edit/shorts/<proj> c01 "<prompt>" --aspecto 9:16`.
   Asset da marca (print/mockup) → `python ui/ia_video.py asset edit/shorts/<proj> c01 <arquivo> "<movimento de câmera>"`.
-- Folha `broll` (mesmo fluxo do longo §5.1.1) → `animar --aprovacao <id>`.
+- Folha `broll` (mesmo fluxo do longo §5.1.1) → `python ui/ia_video.py animar edit/shorts/<proj>` **sem** `--aprovacao`;
+  exit 2/3 → `waiting_reply` com o `motivo`/estimativa e, após o reply, repetir com `--aprovacao <id DESSE pedido>`.
+  `animar` leva minutos por clipe: rodar em background (ou um `--ids` por vez); repetir após timeout/kill é seguro (retoma, nunca reenvia).
+  Só montar as cenas com o último `animar` em `pendentes: []` e `falhas: []`.
 - Montagem por ffmpeg (sem `<video>` no `anim.html`, que é só motion por `seek`):
   `ffmpeg -i broll/cand/c01-ia1.mp4 -t <dur> -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" <encode padrão> cenas/c01.mp4`, depois concat.
 - `python ui/stock.py creditos edit/shorts/<proj>/broll.json edit/shorts/<proj>/creditos.md` → bloco "Divulgação" vale na publicação.

@@ -23,7 +23,7 @@ POLL_S = 5.0
 TIMEOUT_S = 600.0
 MAX_IMG = 8 * 1024 * 1024
 TAMANHO = {"16:9": "landscape_16_9", "9:16": "portrait_16_9"}
-MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 EXIT = {"ok": 0, "precisa_aprovacao": 2, "bloqueado": 3}
 _dormir = time.sleep
 
@@ -220,7 +220,7 @@ def asset(root: Path, proj: Path, mid: str, arquivo: Path, movimento: str) -> di
     root, proj, src = Path(root), Path(proj), Path(arquivo)
     ext = src.suffix.lower()
     if ext not in MIME:
-        raise ValueError(f"asset precisa ser imagem (png/jpg/webp): {src.name}")
+        raise ValueError(f"asset precisa ser imagem (png/jpg): {src.name}")
     if not src.is_file():
         raise ValueError(f"asset não existe: {src}")
     cfg = config(root)
@@ -234,6 +234,13 @@ def asset(root: Path, proj: Path, mid: str, arquivo: Path, movimento: str) -> di
     c["asset"] = True
     _atualizar(bj, mid, lambda mm: mm.setdefault("candidatos", []).append(c))
     return {"status": "ok", "candidato": c["arq"]}
+
+
+def _checar_ids(d: dict, ids) -> None:
+    if ids:
+        ex = {m.get("id") for m in d["momentos"] if isinstance(m, dict)}
+        if sobra := [i for i in ids if i not in ex]:
+            raise ValueError(f"momento(s) não existe(m) no broll.json: {', '.join(sobra)}")
 
 
 def _alvos(d: dict, ids=None):
@@ -266,8 +273,9 @@ def _req_salvo(proj: Path, c: dict):
 def estimar(root: Path, proj: Path, ids=None) -> dict:
     root, proj = Path(root), Path(proj)
     cfg = config(root)
-    itens = []
-    for m, c in _alvos(_ler(proj / "broll.json"), ids):
+    itens, d = [], _ler(proj / "broll.json")
+    _checar_ids(d, ids)
+    for m, c in _alvos(d, ids):
         if (_req_salvo(proj, c) or {}).get("pago"):
             continue
         mk = _modelo_key(m)
@@ -342,7 +350,9 @@ def animar(root: Path, proj: Path, ids=None, aprovacao=None, _fetch=None) -> dic
     root, proj = Path(root), Path(proj)
     cfg = config(root)
     bj = proj / "broll.json"
-    alvos = list(_alvos(_ler(bj), ids))
+    d = _ler(bj)
+    _checar_ids(d, ids)
+    alvos = list(_alvos(d, ids))
     def _pronto(c):   # pago e com url do resultado: só falta baixar, não precisa do quadro
         r = _req_salvo(proj, c) or {}
         return bool(r.get("pago") and r.get("resultado_url"))
@@ -371,14 +381,26 @@ def animar(root: Path, proj: Path, ids=None, aprovacao=None, _fetch=None) -> dic
                 "motivo": f"lote com mais de um modelo: estimativa US${total:.2f} — aprove o lote",
                 "estimativa": {"usd": total, "creditos": 0}}
     out = {"status": "ok", "feitos": [], "falhas": [], "pendentes": [], "usd": 0.0}
-    for m, c in alvos:
-        try:
-            estado, usd = _animar_um(root, cfg, proj, bj, m, c, key, aprovacao, _fetch)
-        except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as e:
-            out["falhas"].append({"id": m["id"], "erro": str(e)})
-            continue
-        out["feitos" if estado == "feito" else "pendentes"].append(m["id"])
-        out["usd"] = round(out["usd"] + usd, 4)
+    lock = proj / "broll" / ".animar.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise ValueError("animar já em andamento neste projeto (broll/.animar.lock); "
+                         "se nenhum está rodando, apague o arquivo")
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        for m, c in alvos:
+            try:
+                estado, usd = _animar_um(root, cfg, proj, bj, m, c, key, aprovacao, _fetch)
+            except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as e:
+                out["falhas"].append({"id": m["id"], "erro": str(e)})
+                continue
+            out["feitos" if estado == "feito" else "pendentes"].append(m["id"])
+            out["usd"] = round(out["usd"] + usd, 4)
+    finally:
+        lock.unlink(missing_ok=True)
     return out
 
 
