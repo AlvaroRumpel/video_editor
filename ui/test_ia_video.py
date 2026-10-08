@@ -282,3 +282,184 @@ def test_asset(root, midia, tmp_path):
         ia_video.asset(root, proj, "b01", txt, "x")
     with pytest.raises(ValueError, match="não existe"):
         ia_video.asset(root, proj, "b01", tmp_path / "nada.png", "x")
+
+
+def _quadro(bj, midia, mid="b01", **mom):
+    """Põe um quadro IA aprovado como escolhido do momento `mid`."""
+    proj = bj.parent
+    d = _ler(bj)
+    m = next(x for x in d["momentos"] if x["id"] == mid)
+    arq = f"broll/cand/{mid}-ia1.png"
+    (proj / arq).parent.mkdir(parents=True, exist_ok=True)
+    (proj / arq).write_bytes(midia["png"])
+    m["candidatos"].append({"arq": arq, "fonte": "ia", "tipo": "foto", "prompt": "gavel", "estilo": "padrao",
+                            "custo_est": 0.35, "licenca": "gerado por IA (fal/fal-ai/flux/schnell)",
+                            "autor": "", "url": "", "dur": 0.0, "largura": 0})
+    m.update(status="aprovado", escolhido=f"{mid}-{len(m['candidatos'])}", **mom)
+    bj.write_text(json.dumps(d), encoding="utf-8")
+    return arq
+
+
+def _custos(proj):
+    p = proj / "ui" / "costs.jsonl"
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()] if p.exists() else []
+
+
+def _budget(root, **b):
+    (root / ".ui-runtime").mkdir(exist_ok=True)
+    (root / ".ui-runtime" / "budget.json").write_text(json.dumps(b), encoding="utf-8")
+
+
+def test_animar_feliz(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    fake = FakeFal(midia, polls=2)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r == {"status": "ok", "feitos": ["b01"], "falhas": [], "pendentes": [], "usd": 0.35}
+    (metodo, url, body, _), = fake.envios()
+    assert url == FILA + "fal-ai/kling/i2v"
+    assert body["image_url"].startswith("data:image/png;base64,")
+    assert body["prompt"] == "gavel, neutral tones" and body["duration"] == "5"
+    c = _mom(bj, "b01")["candidatos"][1]
+    assert c["arq"] == "broll/cand/b01-ia1.mp4" and c["tipo"] == "video"
+    assert c["quadro"] == "broll/cand/b01-ia1.png" and c["modelo_video"] == "fal-ai/kling/i2v"
+    assert abs(c["dur"] - 5.0) < 0.2 and "fal_req" not in c
+    assert [l["provedor"] for l in _custos(proj)] == ["fal_video"] and _custos(proj)[0]["usd"] == 0.35
+    assert fake.cdn() and all("Authorization" not in h for *_, h in fake.cdn())
+    assert stock.preparar(bj, proj / "edl.json", proj)["ok"]
+
+
+def test_animar_retoma_sem_reenviar(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    d = _ler(bj)
+    base = FILA + "fal-ai/kling/i2v/requests/r9"
+    d["momentos"][0]["candidatos"][1]["fal_req"] = {"id": "r9", "modelo": "fal-ai/kling/i2v",
+        "status_url": base + "/status", "response_url": base, "provedor": "fal_video", "segundos": 5}
+    bj.write_text(json.dumps(d), encoding="utf-8")
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["feitos"] == ["b01"] and fake.envios() == []
+    assert len(_custos(proj)) == 1
+
+
+def test_timeout_pendente_depois_conclui(root, midia, monkeypatch):
+    monkeypatch.setattr(ia_video, "TIMEOUT_S", 15.0)
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    fake = FakeFal(midia, polls=99)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["pendentes"] == ["b01"] and r["feitos"] == [] and r["usd"] == 0.0
+    assert _mom(bj, "b01")["candidatos"][1]["fal_req"]["id"] == "r0"
+    assert _custos(proj) == []
+    fake.polls = 1
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["feitos"] == ["b01"] and len(fake.envios()) == 1
+    assert len(_custos(proj)) == 1
+
+
+def test_falha_do_fal_nao_registra(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    r = ia_video.animar(root, proj, _fetch=FakeFal(midia, polls=1, erros={"r0": "content policy"}))
+    assert r["feitos"] == [] and r["falhas"][0]["id"] == "b01" and "content policy" in r["falhas"][0]["erro"]
+    c = _mom(bj, "b01")["candidatos"][1]
+    assert "fal_req" not in c and c["tipo"] == "foto"
+    assert _custos(proj) == []
+
+
+def test_download_falha_depois_de_pago(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    fake = FakeFal(midia, polls=1, falhas_cdn=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["falhas"][0]["id"] == "b01" and "download" in r["falhas"][0]["erro"]
+    req = _mom(bj, "b01")["candidatos"][1]["fal_req"]
+    assert req["pago"] is True and req["resultado_url"] == "https://cdn/v.mp4"
+    assert len(_custos(proj)) == 1
+    polls_antes = len(fake.status())
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["feitos"] == ["b01"] and r["usd"] == 0.0
+    assert len(fake.envios()) == 1 and len(fake.status()) == polls_antes
+    assert len(_custos(proj)) == 1
+
+
+def test_lote_uma_falha_outra_ok(root, midia):
+    _budget(root, aprovar_acima_usd=5)
+    proj = root / "edit-fake"; bj = _broll(proj, {"id": "b02", "t_in": 40.0, "t_out": 43.0})
+    _quadro(bj, midia, "b01"); _quadro(bj, midia, "b02")
+    r = ia_video.animar(root, proj, _fetch=FakeFal(midia, polls=1, erros={"r0": "nsfw"}))
+    assert r["feitos"] == ["b02"] and [f["id"] for f in r["falhas"]] == ["b01"]
+    assert len(_custos(proj)) == 1
+
+
+def test_filtro_foto_e_stock(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj, {"id": "b02", "t_in": 40.0, "t_out": 43.0})
+    _quadro(bj, midia, "b01", modo="foto")
+    d = _ler(bj); d["momentos"][1].update(status="aprovado", escolhido="b02-1")
+    bj.write_text(json.dumps(d), encoding="utf-8")
+    fake = FakeFal(midia)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r == {"status": "ok", "feitos": [], "falhas": [], "pendentes": [], "usd": 0.0}
+    assert fake.chamadas == []
+
+
+def test_top_usa_veo_e_aprovacao(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia, modelo="video_top")
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert r["status"] == "precisa_aprovacao" and fake.chamadas == []      # 4 s × 0.40 = 1.60 > 0.5
+    (proj / "ui").mkdir(exist_ok=True)
+    (proj / "ui" / "queue.json").write_text(json.dumps([{"id": 7, "status": "pending", "reply": "ok"}]),
+                                            encoding="utf-8")
+    r = ia_video.animar(root, proj, aprovacao=7, _fetch=fake)
+    assert r["feitos"] == ["b01"]
+    assert fake.envios()[0][1] == FILA + "fal-ai/veo/i2v" and fake.envios()[0][2]["duration"] == "4s"
+    (l,) = _custos(proj)
+    assert l["provedor"] == "fal_video_top" and l["aprovacao"] == 7 and l["usd"] == 1.6
+
+
+def test_estimar(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj, {"id": "b02", "t_in": 40.0, "t_out": 43.0})
+    _quadro(bj, midia, "b01"); _quadro(bj, midia, "b02", modelo="video_top")
+    e = ia_video.estimar(root, proj)
+    assert e["usd"] == 1.95 and e["texto"] == "animar 2 clipe(s) ≈ US$1,95"
+    assert e["itens"] == [{"id": "b01", "modelo": "video", "usd": 0.35},
+                          {"id": "b02", "modelo": "video_top", "usd": 1.6}]
+    assert ia_video.estimar(root, proj, ids=["b01"])["usd"] == 0.35
+
+
+def test_merge_preserva_candidato_novo(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    def ao_enviar(url, body):      # alguém grava no broll.json enquanto o fal trabalha
+        d = _ler(bj)
+        d["momentos"][0]["candidatos"].append({"arq": "broll/cand/extra.jpg", "fonte": "pexels", "tipo": "foto"})
+        bj.write_text(json.dumps(d), encoding="utf-8")
+    ia_video.animar(root, proj, _fetch=FakeFal(midia, polls=1, ao_enviar=ao_enviar))
+    arqs = [c["arq"] for c in _mom(bj, "b01")["candidatos"]]
+    assert arqs == ["broll/cand/st-1.mp4", "broll/cand/b01-ia1.mp4", "broll/cand/extra.jpg"]
+
+
+def test_quadro_ausente_e_grande(root, midia, monkeypatch):
+    proj = root / "edit-fake"; bj = _broll(proj); arq = _quadro(bj, midia)
+    monkeypatch.setattr(ia_video, "MAX_IMG", 10)
+    fake = FakeFal(midia, polls=1)
+    r = ia_video.animar(root, proj, _fetch=fake)
+    assert "8 MB" in r["falhas"][0]["erro"] and fake.envios() == []
+    (proj / arq).unlink()
+    with pytest.raises(ValueError, match="b01"):
+        ia_video.animar(root, proj, _fetch=fake)
+
+
+def _cli(root, *args):
+    r = subprocess.run([sys.executable, str(Path(ia_video.__file__)), "--root", str(root), *args],
+                       capture_output=True, text=True, encoding="utf-8")
+    return r.returncode, json.loads(r.stdout)
+
+
+def test_cli(root, midia):
+    proj = root / "edit-fake"; bj = _broll(proj); _quadro(bj, midia)
+    code, out = _cli(root, "estimar", str(proj))
+    assert code == 0 and out["usd"] == 0.35
+    code, out = _cli(root, "quadros", str(proj), "b09", "x")
+    assert code == 1 and "b09" in out["erro"]
+    _budget(root, aprovar_acima_usd=0.001)
+    code, out = _cli(root, "quadros", str(proj), "b01", "x", "--n", "2")
+    assert code == 2 and out["status"] == "precisa_aprovacao"
+    code, out = _cli(root, "animar", str(proj), "--ids", "b07")
+    assert code == 0 and out["feitos"] == []

@@ -233,3 +233,158 @@ def asset(root: Path, proj: Path, mid: str, arquivo: Path, movimento: str) -> di
     c["asset"] = True
     _atualizar(bj, mid, lambda mm: mm.setdefault("candidatos", []).append(c))
     return {"status": "ok", "candidato": c["arq"]}
+
+
+def _alvos(d: dict, ids=None):
+    """Aprovados cujo escolhido é quadro IA ainda não animado (modo foto nunca anima)."""
+    for m in d.get("momentos", []):
+        if not isinstance(m, dict) or m.get("status") != "aprovado" or m.get("modo") == "foto":
+            continue
+        if ids and m.get("id") not in ids:
+            continue
+        c = stock._cand_por_rotulo(m, m.get("escolhido"))
+        if c is None and not m.get("escolhido") and m.get("candidatos"):
+            c = m["candidatos"][0]          # mesma regra do stock.preparar
+        if c and c.get("fonte") == "ia" and c.get("tipo") == "foto":
+            yield m, c
+
+
+def estimar(root: Path, proj: Path, ids=None) -> dict:
+    root, proj = Path(root), Path(proj)
+    cfg = config(root)
+    itens = []
+    for m, c in _alvos(_ler(proj / "broll.json"), ids):
+        if (c.get("fal_req") or {}).get("pago"):
+            continue
+        mk = _modelo_key(m)
+        itens.append({"id": m["id"], "modelo": mk, "usd": _custo(root, cfg, mk) or 0.0})
+    tot = round(sum(i["usd"] for i in itens), 4)
+    return {"itens": itens, "usd": tot,
+            "texto": f"animar {len(itens)} clipe(s) ≈ US${tot:.2f}".replace(".", ",")}
+
+
+def _animar_um(root: Path, cfg: dict, proj: Path, bj: Path, m: dict, c: dict, key: str,
+               aprovacao, _fetch) -> tuple[str, float]:
+    mm = cfg["modelos"][_modelo_key(m)]
+    quadro = c["arq"]
+
+    def salva(**campos):   # relê o broll.json e atualiza só este candidato (casado pelo arq do quadro)
+        def f(mom):
+            for cc in mom.get("candidatos", []):
+                if isinstance(cc, dict) and cc.get("arq") == quadro:
+                    for k, v in campos.items():
+                        if v is None:
+                            cc.pop(k, None)
+                        else:
+                            cc[k] = v
+                    return
+            raise ValueError(f"{m['id']}: candidato {quadro} sumiu do broll.json")
+        _atualizar(bj, m["id"], f)
+
+    req = c.get("fal_req")
+    if not req:
+        img = proj / quadro
+        if img.stat().st_size > MAX_IMG:
+            raise ValueError(f"{m['id']}: quadro > 8 MB, reduza a imagem")
+        uri = f"data:{MIME.get(img.suffix.lower(), 'image/png')};base64," + base64.b64encode(img.read_bytes()).decode()
+        prompt = (c.get("prompt") or "") if c.get("asset") else prompt_final(cfg, c.get("prompt") or "", c.get("estilo"))
+        req = _enviar(mm["id"], {**mm.get("entrada", {}), "prompt": prompt, "image_url": uri}, key, _fetch)
+        req.update(provedor=mm["provedor"], segundos=mm["segundos"])
+        salva(fal_req=req)                  # antes do poll: queda aqui → próximo animar só faz poll
+    usd = 0.0
+    if not req.get("pago"):
+        estado, erro = _esperar(req, key, _fetch)
+        if estado == "pendente":
+            return "pendente", 0.0
+        if estado == "falha":
+            salva(fal_req=None)
+            raise RuntimeError(f"fal: {erro}")
+        usd = budget.registrar(proj, req["provedor"], req["segundos"], aprovacao=aprovacao,
+                               nota=f"{m['id']} {req['modelo']}"[:80], root=root)["usd"]
+        req = {**req, "pago": True}
+        salva(fal_req=req)                  # pago: nunca registrar de novo
+    if not req.get("resultado_url"):
+        res = _req("GET", req["response_url"], key, None, _fetch)
+        url = res["video"].get("url") if isinstance(res.get("video"), dict) else None
+        if not url:
+            raise RuntimeError("fal: resultado sem video.url")
+        req = {**req, "resultado_url": url}
+        salva(fal_req=req)
+    mp4 = Path(quadro).with_suffix(".mp4")
+    _baixar(req["resultado_url"], proj / mp4, _fetch)
+    salva(arq=mp4.as_posix(), tipo="video", dur=round(stock.duracao(proj / mp4), 3), quadro=quadro,
+          modelo_video=req["modelo"], licenca=f"gerado por IA (fal/{req['modelo']})", fal_req=None)
+    return "feito", usd
+
+
+def animar(root: Path, proj: Path, ids=None, aprovacao=None, _fetch=None) -> dict:
+    root, proj = Path(root), Path(proj)
+    cfg = config(root)
+    bj = proj / "broll.json"
+    alvos = list(_alvos(_ler(bj), ids))
+    faltam = [m["id"] for m, c in alvos if not (proj / c["arq"]).is_file()]
+    if faltam:
+        raise ValueError(f"quadro ausente no disco: {', '.join(faltam)}")
+    if not alvos:
+        return {"status": "ok", "feitos": [], "falhas": [], "pendentes": [], "usd": 0.0}
+    key = chave()
+    if not key:
+        raise ValueError("FAL_KEY ausente em video-use/.env")
+    seg = {}
+    for m, c in alvos:
+        if not c.get("fal_req"):           # já enviados foram autorizados na rodada anterior
+            mm = cfg["modelos"][_modelo_key(m)]
+            seg[mm["provedor"]] = seg.get(mm["provedor"], 0) + mm["segundos"]
+    for prov, s in seg.items():
+        d = budget.autorizar(root, proj, prov, s, aprovacao=aprovacao)
+        if d["status"] != "ok":
+            return d
+    out = {"status": "ok", "feitos": [], "falhas": [], "pendentes": [], "usd": 0.0}
+    for m, c in alvos:
+        try:
+            estado, usd = _animar_um(root, cfg, proj, bj, m, c, key, aprovacao, _fetch)
+        except (RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as e:
+            out["falhas"].append({"id": m["id"], "erro": str(e)})
+            continue
+        out["feitos" if estado == "feito" else "pendentes"].append(m["id"])
+        out["usd"] = round(out["usd"] + usd, 4)
+    return out
+
+
+def _cli(ns, root: Path):
+    if ns.cmd == "quadros":
+        d = quadros(root, Path(ns.proj), ns.mid, ns.prompt, estilo=ns.estilo, n=ns.n,
+                    aspecto=ns.aspecto, aprovacao=ns.aprovacao)
+        return d, EXIT[d["status"]]
+    if ns.cmd == "asset":
+        return asset(root, Path(ns.proj), ns.mid, Path(ns.arquivo), ns.movimento), 0
+    if ns.cmd == "estimar":
+        return estimar(root, Path(ns.proj)), 0
+    ids = [i.strip() for i in ns.ids.split(",") if i.strip()] if ns.ids else None
+    d = animar(root, Path(ns.proj), ids=ids, aprovacao=ns.aprovacao)
+    if d["status"] == "ok" and d["falhas"] and not d["feitos"] and not d["pendentes"]:
+        return d, 1
+    return d, EXIT[d["status"]]
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="vídeo por IA (fal) do video_editor")
+    ap.add_argument("--root", default=str(ROOT))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("quadros"); p.add_argument("proj"); p.add_argument("mid"); p.add_argument("prompt")
+    p.add_argument("--estilo"); p.add_argument("--n", type=int, default=3)
+    p.add_argument("--aspecto", default="16:9"); p.add_argument("--aprovacao", type=int)
+    p = sub.add_parser("asset"); p.add_argument("proj"); p.add_argument("mid")
+    p.add_argument("arquivo"); p.add_argument("movimento")
+    p = sub.add_parser("estimar"); p.add_argument("proj")
+    p = sub.add_parser("animar"); p.add_argument("proj"); p.add_argument("--ids")
+    p.add_argument("--aprovacao", type=int)
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns, Path(ns.root))
+    except (ValueError, RuntimeError, OSError, KeyError, subprocess.CalledProcessError) as e:
+        print(json.dumps({"erro": str(e)}, ensure_ascii=False)); sys.exit(1)
+    print(json.dumps(out, ensure_ascii=False)); sys.exit(code)
