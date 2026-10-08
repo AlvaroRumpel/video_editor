@@ -91,6 +91,15 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
 - Gravar com `recordVideo` 1080x1920: o Playwright NÃO escala — página fica 540x960 no canto. Corrigir com `crop=540:960:0:0,scale=1080:1920:flags=lanczos` (full-frame) ou `scale=880:1564` + `pad` (dentro do bezel).
 - Conta de teste `teste@jusmind.app`; conteúdo sempre fictício/lei pública (regra de sigilo). Takes prontos em `edit/shorts/anotus-r8/take1..4.mp4` (fluxo completo, nota+busca, referências, flashcards+revisão+exportar).
 
+**Cenas por IA** (footage realista que motion não resolve; ação paga via `ui/ia_video.py`):
+- Momento `{"id": "c01", "t_in", "t_out", "modo": "cena", "termo", "candidatos": [], "status": "proposto"}` no
+  `edit/shorts/<proj>/broll.json` (tempos do roteiro) → `python ui/ia_video.py quadros edit/shorts/<proj> c01 "<prompt>" --aspecto 9:16`.
+  Asset da marca (print/mockup) → `python ui/ia_video.py asset edit/shorts/<proj> c01 <arquivo> "<movimento de câmera>"`.
+- Folha `broll` (mesmo fluxo do longo §5.1.1) → `animar --aprovacao <id>`.
+- Montagem por ffmpeg (sem `<video>` no `anim.html`, que é só motion por `seek`):
+  `ffmpeg -i broll/cand/c01-ia1.mp4 -t <dur> -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" <encode padrão> cenas/c01.mp4`, depois concat.
+- `python ui/stock.py creditos edit/shorts/<proj>/broll.json edit/shorts/<proj>/creditos.md` → bloco "Divulgação" vale na publicação.
+
 **Encode padrão** (tudo igual → concat `-c copy`):
 `-r 30 -c:v libx264 -crf 18 -preset medium -pix_fmt yuv420p -profile:v high -an`, 1080x1920.
 
@@ -104,6 +113,7 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
 1. Contact sheet + frames nas bordas de cena (atenção: `fps=0.5` em vídeo de concat amostra torto o início; conferir cenas iniciais com `-ss` direto).
 2. Checar: legibilidade, safe areas, fontes carregadas (Fraunces serif de verdade, não fallback genérico), ponto dourado presente, wordmark, end card padrão.
 3. `ffprobe`: duração esperada, 1080x1920@30, faixa de áudio presente.
+4. Com cena IA: `creditos.md` tem o bloco "Divulgação" e o post leva o rótulo de IA.
 
 ## Entrega
 - Preview em `edit/shorts/anotus/<tema>/preview.mp4`; só copiar pra `Export/shorts/anotus/NN-<tema-kebab>.mp4` após aprovação.

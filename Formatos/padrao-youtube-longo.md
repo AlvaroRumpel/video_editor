@@ -311,6 +311,27 @@ vídeo bom. Termo de busca em inglês, concreto ("gavel on desk", não "justice"
 
 Instrução pontual ("b-roll de tribunal no corte 12"): mesmo fluxo com um momento só.
 
+## 5.1.1 B-roll por IA (quando stock não resolve)
+
+Ação paga, via `ui/ia_video.py` (já autoriza e registra no orçamento — NÃO chamar
+`budget.py` por fora). Stock vem primeiro; IA só em momento sem candidato bom no sheet.
+
+1. No passo 2 do §5.1, momento sem candidato bom → `python ui/ia_video.py quadros edit/<proj> <bNN> "<prompt em inglês, concreto, da frase>" --n 3`
+   (centavos; até 4 momentos IA por vídeo sem perguntar antes — acima disso a pergunta da folha pede).
+   Exit 2/3 → `waiting_reply` com o motivo, repetir com `--aprovacao <id>`.
+2. Refazer o sheet (§5.1 passo 4). Na pergunta da folha `broll`, citar os momentos com quadro IA e
+   que escolher um quadro IA anima ao custo marcado no rótulo (`~US$`). Momento herói/pedido explícito
+   ("b03 no top") → `"modelo": "video_top"` no momento antes da folha, com o custo na pergunta.
+3. Resposta aplicada (`escolhido` = quadro IA) → `python ui/ia_video.py animar edit/<proj> --aprovacao <id da folha>`.
+   `pendentes` (timeout) → rodar `animar` de novo (retoma sem pagar de novo). `falhas` com moderação →
+   reescrever o prompt (`quadros` de novo) ou voltar pro stock.
+4. Decisão: `python ui/eventos.py decisao <proj> broll "IA <bNN>" --etapa visual --alt "stock <bNN-k>" --custo <usd> --motivo "<por quê>"`;
+   `video_top` → `decisao <proj> provedor "veo top <bNN>" ...`.
+5. Seguir no §5.1 passo 6 (`preparar`) — o clipe IA é um candidato de vídeo comum. Momento `modo: foto`
+   com quadro IA não é animado: vira foto com Ken Burns sem custo extra.
+6. 1ª rodada real: 1 quadro + 1 clipe econômico; conferir o débito no painel do fal e corrigir `usd`
+   de `fal_quadro`/`fal_video` em `ui/precos.json`.
+
 ## 5.2 Aprovação dos overlays (folha)
 
 Antes do render final, com overlays Remotion e b-roll já no `edl.json`:
@@ -420,7 +441,7 @@ Entra **depois** do `final.mp4` pronto e da conferência 6.1 (voz já reconstru�
 5. SRT: último cue fecha junto com a última fala
 6. Grade consistente entre início, meio e fim
 7. Loudness integrada −14 LUFS (ffmpeg loudnorm print_format=json) e correlação cruzada da voz em 3 pontos após a trilha
-8. Overlays de b-roll: um frame no meio de cada um (nada cortado; modo janela não cobre o rosto); creditos.md colado na descrição.
+8. Overlays de b-roll: um frame no meio de cada um (nada cortado; modo janela não cobre o rosto); creditos.md colado na descrição; com clipe IA, cumprir o bloco "Divulgação" do creditos.md no upload.
 
 ---
 

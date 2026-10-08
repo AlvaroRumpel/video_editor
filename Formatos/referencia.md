@@ -23,7 +23,7 @@ de texto, visual ou música. `conceitos.md` registra URL e autor.
 3. `python ui/referencia.py analisar bruto/ref/<slug>.mp4 edit/shorts/<proj> --transcript edit/shorts/<proj>/transcripts/<slug>.json`.
 4. Ler `ref/sheet.png` (texto na tela, enquadramento, cor), `ref/analise.json`, o briefing e
    `edit/shorts/<marca>/PAUTA.md` → `conceitos.md` no formato do spec (tabela A/B/C: ideia ·
-   mantém · muda · custo créditos/R$ via `ui/precos.json` · horas · exige IA · roteiro · animatic).
+   mantém · muda · custo créditos/R$ via `ui/precos.json` · horas · exige IA (custo IA = quadros `fal_quadro` + segundos × `fal_video`/`fal_video_top` de `ui/precos.json`; produção pelo bloco "Cenas por IA" de padrao-ads.md) · roteiro · animatic).
    Três ângulos fixos: **A** mesmo mecanismo, outro tema; **B** mesmo tema, outro mecanismo;
    **C** o contrário do original. Cada conceito → `roteiro-X.md` no formato de ads
    (`## Hook`, `## Cenas` numeradas com `sfx:` opcional, `## CTA`, `## Cues`). Fato citado →

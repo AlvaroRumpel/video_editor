@@ -135,6 +135,10 @@ Footage/foto de terceiros (b-roll) só via `python ui/stock.py` — licença e
 crédito ficam em `broll.json`/`creditos.md`; nunca baixar à mão. Sem custo,
 sem orçamento. Fluxo: `padrao-youtube-longo.md` §5.1.
 
+Footage gerado por IA só via `python ui/ia_video.py` (quadros → folha `broll` →
+`animar`; autoriza e registra no orçamento sozinho). Clipe IA aprovado → bloco
+"Divulgação" do `creditos.md` vale na publicação. Fluxo: `padrao-youtube-longo.md` §5.1.1.
+
 Shorts: `Formatos/padrao-youtube-shorts.md` (Clip Factory, `ui/clips.py`). Publora
 só como **draft** (`create_post` + upload + `complete_media`); nunca agendar sem
 pedido explícito — Starter limita 3 agendados / 7 dias.
