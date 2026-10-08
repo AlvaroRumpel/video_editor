@@ -1,4 +1,6 @@
+import importlib.util
 import json
+import shutil
 
 import pytest
 
@@ -102,3 +104,98 @@ def test_css_vars_e_tema_js():
     assert "--k-fundo-marca:linear-gradient" in css and '--k-mono-familia:"K Plex Mono"' in css
     tj = motion._tema_js(motion.carregar_tema("campeio"))
     assert tj["assinatura"] == {"tipo": "icone", "src": "kit/tema/icone.png"} and tj["barra"] is True
+
+
+pw = pytest.mark.skipif(importlib.util.find_spec("playwright") is None, reason="sem playwright")
+
+
+def _proj(tmp_path, dados, nome="proj"):
+    p = tmp_path / nome
+    p.mkdir(exist_ok=True)
+    (p / "cenas.json").write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+@pw
+def test_montar_gera_composicao_tempos_e_cues(tmp_path):
+    p = _proj(tmp_path, _cenas())
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+    html = (p / "motion" / "index.html").read_text(encoding="utf-8")
+    assert html.count('class="clip cena"') == 2 and "cdn." not in html
+    c1, c2 = r["cenas"]
+    assert c1["ini"] == 0 and abs(c2["ini"] - (c1["dur"] - 0.3)) < 1e-3   # sobreposição do fade
+    assert abs(r["duracao"] - (c2["ini"] + c2["dur"])) < 0.04
+    assert f'data-duration="{r["duracao"]:.3f}"' in html
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert {"rise", "whoosh-reveal", "sting-endcard", "pop-dourado", "click-pill"} <= sons
+    assert (p / "motion" / ".motion").is_file() and (p / "motion" / "kit" / "vendor" / "gsap.min.js").is_file()
+
+
+@pw
+def test_montar_campeio_mesmo_json(tmp_path):
+    d = _cenas(marca="campeio")
+    r = motion.montar(_proj(tmp_path, d))
+    assert r["ok"], r["erros"]
+
+
+@pw
+def test_montar_dur_abaixo_do_minimo(tmp_path):
+    d = _cenas()
+    d["cenas"][0]["dur"] = 0.5
+    r = motion.montar(_proj(tmp_path, d))
+    assert not r["ok"] and any(e["id"] == "c01" and "abaixo do mínimo" in e["motivo"] for e in r["erros"])
+
+
+@pw
+def test_montar_linha_longa_estoura(tmp_path):
+    d = _cenas()
+    d["cenas"][0]["linhas"][1]["t"] = "inconstitucionalissimamente"
+    r = motion.montar(_proj(tmp_path, d))
+    assert not r["ok"]
+    assert any(e["id"] == "c01" and ("estoura" in e["motivo"] or "safe area" in e["motivo"]) for e in r["erros"])
+
+
+@pw
+def test_montar_fonte_fallback(tmp_path):
+    md = tmp_path / "m"
+    shutil.copytree(motion.MOTION / "kit", md / "kit")
+    (md / "temas").mkdir()
+    t = json.loads((motion.MOTION / "temas" / "anotus.json").read_text(encoding="utf-8"))
+    t["fontes"]["display"]["familia"] = "K Inexistente"
+    (md / "temas" / "anotus.json").write_text(json.dumps(t), encoding="utf-8")
+    r = motion.montar(_proj(tmp_path, _cenas()), motion_dir=md)
+    assert any("fonte em fallback (K Inexistente)" in e["motivo"] for e in r["erros"]), r
+
+
+def test_montar_nao_apaga_pasta_alheia(tmp_path):
+    p = _proj(tmp_path, _cenas())
+    (p / "motion").mkdir()
+    (p / "motion" / "meu.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="não foi criado"):
+        motion.montar(p)
+    assert (p / "motion" / "meu.txt").exists()
+
+
+def test_montar_erro_de_schema_nao_gera_nada(tmp_path):
+    d = _cenas()
+    d["cenas"][0]["tipo"] = "xpto"
+    p = _proj(tmp_path, d)
+    r = motion.montar(p)
+    assert not r["ok"] and r["erros"][0]["id"] == "c01" and not (p / "motion").exists()
+
+
+def test_montar_lang_invalido(tmp_path):
+    with pytest.raises(ValueError, match="lang inválido"):
+        motion.montar(_proj(tmp_path, _cenas()), "../x")
+
+
+@pw
+def test_montar_lang_usa_pastas_proprias(tmp_path):
+    p = _proj(tmp_path, _cenas())
+    d = _cenas()
+    d["cenas"][0]["linhas"][0]["t"] = "Stop"
+    (p / "cenas.en.json").write_text(json.dumps(d), encoding="utf-8")
+    assert motion.montar(p)["ok"] and motion.montar(p, "en")["ok"]
+    assert (p / "motion.en" / "index.html").exists() and (p / "cues.en.json").exists() and (p / "cues.json").exists()
+    assert '"Stop"' in (p / "motion.en" / "index.html").read_text(encoding="utf-8")

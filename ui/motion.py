@@ -7,6 +7,7 @@ folha: contact sheet de QC a partir do vídeo."""
 import copy
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -271,3 +272,155 @@ def _tema_js(tema: dict) -> dict:
             "wordmark": tema["fixos"]["wordmark"], "wordmark_fonte": tema["fixos"]["wordmark_fonte"],
             "barra": bool(tema["fixos"]["barra"]), "grao": float(tema["fixos"]["grao"]),
             "endcard_marca": tema["endcard"]["marca"], "url": tema["endcard"]["url"]}
+
+
+MARCADOR_DIR = ".motion"   # só pasta com este arquivo pode ser apagada pelo montar
+LANG_RE = re.compile(r"[a-z]{2,3}(-[A-Za-z]{2})?")
+
+HTML = """<!doctype html>
+<html lang="pt-BR" data-resolution="portrait">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080, height=1920">
+<link rel="stylesheet" href="kit/kit.css">
+<style>{css}</style>
+<script src="kit/vendor/gsap.min.js"></script>
+<script src="kit/kit.js"></script>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="{dur}" data-width="1080" data-height="1920" data-fps="30">
+{cenas}
+<canvas id="k-brilho" class="clip" width="1080" height="1920" data-start="0" data-duration="{dur}" data-track-index="900"></canvas>
+<div id="k-fixos" class="clip" data-start="0" data-duration="{dur}" data-track-index="901"><div id="k-grao"></div><div id="k-wm-claro" class="k-wordmark"></div><div id="k-wm-escuro" class="k-wordmark"></div><div id="k-barra"></div></div>
+</div>
+<script>window.__KIT_DADOS = {dados};</script>
+<script>KIT.montar();</script>
+</body>
+</html>
+"""
+
+JS_MEDIR = """([id, safe]) => {
+  const [x0, y0, x1, y1] = safe, out = [];
+  for (const e of document.querySelectorAll(`#${id} [data-k-texto]`)) {
+    const r = e.getBoundingClientRect();
+    const txt = e.textContent.trim().slice(0, 40);
+    const tx = e.querySelector(".k-txt") || e;   // decoração (marca-texto/risco) sai um pouco da caixa: não conta
+    if (Math.max(tx.scrollWidth, tx.getBoundingClientRect().width) > e.clientWidth + 1) out.push(`linha estoura a largura: "${txt}"`);
+    else if (r.left < x0 - 1 || r.right > x1 + 1 || r.top < y0 - 1 || r.bottom > y1 + 1)
+      out.push(`texto fora da safe area: "${txt}"`);
+    const fam = getComputedStyle(e).fontFamily.split(",")[0].trim().replace(/["']/g, "");
+    const ok = [...document.fonts].some((f) => f.family.replace(/["']/g, "") === fam && f.status === "loaded");
+    if (!ok) out.push(`fonte em fallback (${fam}): "${txt}"`);
+  }
+  return out;
+}"""
+
+
+def _lang(lang) -> str:
+    if lang is None:
+        return ""
+    if not isinstance(lang, str) or not LANG_RE.fullmatch(lang):
+        raise ValueError(f"lang inválido: {lang!r}")
+    return f".{lang}"
+
+
+def _attrs(t: dict, track: int) -> str:
+    return f'data-start="{t["ini"]:.3f}" data-duration="{t["dur"]:.3f}" data-track-index="{track}"'
+
+
+def _html(d: dict, tema: dict, customs: dict, tempos: dict | None) -> str:
+    por_id = {c["id"]: c for c in (tempos or {}).get("cenas", [])}
+    total = (tempos or {}).get("duracao", 1)
+    partes = []
+    for i, c in enumerate(d["cenas"]):
+        t = por_id.get(c["id"], {"ini": 0, "dur": 1})
+        inner = '<div class="k-conteudo"></div>'
+        if c["tipo"] == "tela":
+            src = f'midia/{c["id"]}{c["_ext"]}'
+            if c["video"]:
+                inner += f'<video class="k-midia clip" src="{src}" muted playsinline {_attrs(t, 100 + i)}></video>'
+            else:
+                inner += f'<img class="k-midia" src="{src}" alt="">'
+        elif c["tipo"] == "custom":
+            inner += customs[c["id"]]
+        partes.append(f'<div id="{c["id"]}" class="clip cena" {_attrs(t, i)}>{inner}</div>')
+    cenas_js = [{k: v for k, v in c.items() if not k.startswith("_")} for c in d["cenas"]]
+    dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js}, ensure_ascii=False).replace("</", "<\\/")
+    return HTML.format(css=_css_vars(tema), dur=f"{total:.3f}", cenas="\n".join(partes), dados=dados)
+
+
+def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> None:
+    if comp.exists():
+        if not (comp / MARCADOR_DIR).is_file():
+            raise ValueError(f"{comp} existe e não foi criado pelo motion.py (renomeie ou apague à mão)")
+        shutil.rmtree(comp)
+    shutil.copytree(motion_dir / "kit", comp / "kit")
+    (comp / MARCADOR_DIR).write_text("gerado por ui/motion.py montar\n", encoding="utf-8")
+    if tema["assinatura"]["tipo"] == "icone":
+        a = motion_dir / "temas" / tema["assinatura"]["arquivo"]
+        (comp / "kit" / "tema").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(a, comp / "kit" / "tema" / a.name)
+    for c in d["cenas"]:
+        if c["tipo"] == "tela":
+            src = _dentro(proj, c["arquivo"])
+            c["_ext"] = src.suffix.lower()
+            (comp / "midia").mkdir(exist_ok=True)
+            shutil.copy2(src, comp / "midia" / f"{c['id']}{c['_ext']}")
+
+
+def _medir(index: Path) -> dict:
+    from playwright.sync_api import TimeoutError as PwTimeout
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(args=["--allow-file-access-from-files"])
+        try:
+            pg = b.new_page(viewport={"width": W, "height": H})
+            js = []
+            pg.on("pageerror", lambda ex: js.append(str(ex)))
+            pg.goto(index.resolve().as_uri())
+            try:
+                pg.wait_for_function("window.__kit !== undefined", timeout=20000)
+            except PwTimeout:
+                raise RuntimeError("kit não montou: " + ("; ".join(js) or "sem erro de JS (timeout)")) from None
+            pg.evaluate("document.fonts.ready.then(() => true)")
+            kit = pg.evaluate("({duracao: __kit.duracao, cenas: __kit.cenas, cues: __kit.cues, erros: __kit.erros})")
+            layout = []
+            for c in kit["cenas"]:
+                pg.evaluate("t => __kit.ir(t)", max(c["ini"], c["ini"] + c["dur"] - c["saida"] - 0.02))
+                layout += [{"id": c["id"], "motivo": m} for m in pg.evaluate(JS_MEDIR, [c["id"], list(SAFE)])]
+            return {**kit, "layout": layout, "js": js}
+        finally:
+            b.close()
+
+
+def montar(proj: Path, lang: str | None = None, motion_dir: Path = MOTION) -> dict:
+    proj = Path(proj)
+    suf = _lang(lang)
+    cj = proj / f"cenas{suf}.json"
+    if not cj.is_file():
+        raise ValueError(f"não existe: {cj}")
+    try:
+        dados = json.loads(cj.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as ex:
+        raise ValueError(f"{cj.name} inválido: {ex}") from None
+    erros = validar(dados, proj)
+    if erros:
+        return {"ok": False, "erros": erros}
+    tema = carregar_tema(dados.get("marca"), motion_dir)
+    d = resolver(dados, tema, proj)
+    comp = proj / f"motion{suf}"
+    _preparar(comp, proj, d, tema, motion_dir)
+    customs = {c["id"]: _dentro(proj, c["html"]).read_text(encoding="utf-8")
+               for c in d["cenas"] if c["tipo"] == "custom"}
+    index = comp / "index.html"
+    index.write_text(_html(d, tema, customs, None), encoding="utf-8")
+    m = _medir(index)
+    erros = [{"id": "kit", "motivo": j} for j in m["js"]] + m["erros"] + m["layout"]
+    if erros:
+        return {"ok": False, "erros": erros}
+    index.write_text(_html(d, tema, customs, m), encoding="utf-8")
+    pipeline.atomic_write_json(comp / "tempos.json", {"duracao": m["duracao"], "cenas": m["cenas"]})
+    cues = proj / f"cues{suf}.json"
+    pipeline.atomic_write_json(cues, m["cues"])
+    return {"ok": True, "duracao": m["duracao"], "erros": [], "index": str(index), "cues": str(cues),
+            "cenas": [{"id": c["id"], "ini": c["ini"], "dur": c["dur"]} for c in m["cenas"]]}
