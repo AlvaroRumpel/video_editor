@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -199,3 +201,62 @@ def test_montar_lang_usa_pastas_proprias(tmp_path):
     assert motion.montar(p)["ok"] and motion.montar(p, "en")["ok"]
     assert (p / "motion.en" / "index.html").exists() and (p / "cues.en.json").exists() and (p / "cues.json").exists()
     assert '"Stop"' in (p / "motion.en" / "index.html").read_text(encoding="utf-8")
+
+
+CUSTOM = """<div class="k-linha k-display k-cor-tinta" data-k-texto><span class="k-txt" id="{id}-t">custom</span></div>
+<script>
+KIT.custom((c) => {{
+  const alvo = c.layer.querySelector("#{id}-t");
+  c.el.appendChild(alvo.parentElement);
+  return c.C.mascara(c.tl, alvo, c.t0);
+}});
+</script>
+"""
+
+
+def _ff(*args):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
+
+
+def _midia(p: Path):
+    _ff("-f", "lavfi", "-i", "testsrc2=s=1080x1920:d=1", "-frames:v", "1", str(p / "tela.png"))
+    _ff("-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=3", "-pix_fmt", "yuv420p", str(p / "clip.mp4"))
+
+
+def _todos(marca):
+    return {"marca": marca, "cenas": [
+        {"id": "c01", "tipo": "numero", "valor": 1250, "legenda": "usuários", "saida": {"transicao": "wipe", "dur": 0.4}},
+        {"id": "c02", "tipo": "lista", "titulo": "Três passos", "itens": ["Grifar", "Revisar", "Lembrar"],
+         "saida": {"transicao": "iris", "dur": 0.47}},
+        {"id": "c03", "tipo": "tela", "arquivo": "tela.png", "label": "Busca"},
+        {"id": "c04", "tipo": "tela", "arquivo": "clip.mp4", "moldura": "browser"},
+        {"id": "c05", "tipo": "lista", "itens": ["um", "dois"], "marcador": "assinatura"},
+        {"id": "c06", "tipo": "custom", "html": "c06.html", "dur": 2.5},
+        {"id": "c07", "tipo": "endcard"}]}
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+@pytest.mark.parametrize("marca", ["anotus", "campeio"])
+def test_todos_os_tipos_montam(tmp_path, marca):
+    p = _proj(tmp_path, _todos(marca))
+    _midia(p)
+    (p / "c06.html").write_text(CUSTOM.format(id="c06"), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+    assert abs(r["cenas"][3]["dur"] - 3.0) < 0.04          # tela com vídeo: dur = duração do arquivo
+    assert abs(r["cenas"][2]["dur"] - 3.0) < 0.04          # tela com imagem: 3 s
+    html = (p / "motion" / "index.html").read_text(encoding="utf-8")
+    assert '<video class="k-midia clip" src="midia/c04.mp4"' in html and (p / "motion" / "midia" / "c03.png").is_file()
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert {"tick", "click-pill", "rise", "sting-endcard"} <= sons
+
+
+@pw
+def test_custom_sem_registro_vira_erro(tmp_path):
+    d = _cenas()
+    d["cenas"].insert(1, {"id": "c05", "tipo": "custom", "html": "c05.html", "dur": 2})
+    p = _proj(tmp_path, d)
+    (p / "c05.html").write_text("<div>nada</div>", encoding="utf-8")
+    r = motion.montar(p)
+    assert any(e["id"] == "c05" and "KIT.custom" in e["motivo"] for e in r["erros"])

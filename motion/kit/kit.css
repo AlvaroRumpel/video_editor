@@ -43,6 +43,8 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; 
 .k-lista-titulo { text-align: center; margin-bottom: 18px; }
 .k-item { display: flex; align-items: baseline; gap: 28px; white-space: normal; line-height: 1.2; }
 .k-marcador { flex: none; min-width: 1.6em; color: var(--k-acento); }
+.k-marcador .k-ponto { width: .4em; height: .4em; margin: 0; }
+.k-marcador .k-icone { height: 1em; margin: 0; }
 
 .k-midia { position: absolute; object-fit: cover; }
 .k-moldura { position: absolute; pointer-events: none; }

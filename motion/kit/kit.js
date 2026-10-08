@@ -60,6 +60,25 @@
     return t + F(18);
   }
 
+  function contador(tl, alvo, t, o) {
+    const fmt = new Intl.NumberFormat(o.formato);
+    const ease = gsap.parseEase("power3.out");
+    const d = F(45);
+    const pinta = (tempo) => {
+      const p = Math.min(1, Math.max(0, (tempo - t) / d));
+      alvo.textContent = `${o.prefixo}${fmt.format(Math.round(o.de + (o.valor - o.de) * ease(p)))}${o.sufixo}`;
+    };
+    pintores.push(pinta);
+    pinta(t + d);   // texto final no DOM para a medida de layout
+    cue(t, "tick");
+    return t + d;
+  }
+
+  function kenBurns(tl, alvo, t, d) {
+    tl.fromTo(alvo, { scale: 1 }, { scale: 1.06, duration: Math.max(d, F(1)), ease: "sine.inOut", immediateRender: false }, t);
+    return t;
+  }
+
   // ---------- destaques: (tl, bloco, t, tema) -> instante em que terminam
   function marcaTexto(tl, bloco, t) {
     bloco.classList.add("k-com-marca");
@@ -150,6 +169,139 @@
     return fade(c.tl, url, t - F(4));
   }
 
+  function numero(c, cena) {
+    const n = el("div", `k-linha k-numero k-${cena.estilo} k-cor-${cena.cor}`);
+    n.dataset.kTexto = "";
+    c.el.appendChild(n);
+    fade(c.tl, n, c.t0);
+    let fim = contador(c.tl, n, c.t0, cena);
+    if (cena.legenda) {
+      const l = el("div", `k-linha k-corpo k-legenda k-cor-${cena.cor}`, cena.legenda);
+      l.dataset.kTexto = "";
+      c.el.appendChild(l);
+      fim = fade(c.tl, l, fim - F(20));
+    }
+    return fim;
+  }
+
+  function lista(c, cena) {
+    c.el.classList.add("k-lista");
+    let t = c.t0;
+    if (cena.titulo) {
+      const h = el("div", `k-linha k-punch k-lista-titulo k-cor-${cena.cor}`);
+      h.dataset.kTexto = "";
+      const tx = el("span", "k-txt", cena.titulo);
+      h.appendChild(tx);
+      c.el.appendChild(h);
+      cue(t, "rise");
+      t = palavras(c.tl, tx, t) - F(4);
+    }
+    cena.itens.forEach((item, i) => {
+      const row = el("div", `k-item k-corpo k-cor-${cena.cor}`);
+      row.dataset.kTexto = "";
+      const m = el("span", "k-marcador k-mono");
+      if (cena.marcador === "numero") m.textContent = String(i + 1).padStart(2, "0");
+      else if (cena.marcador === "check") m.textContent = "✓";
+      else m.appendChild(assinaturaEl(c.tema));
+      row.append(m, el("span", null, item));
+      c.el.appendChild(row);
+      c.tl.fromTo(row, { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: F(14), ease: "power3.out" }, t);
+      if (i === 0 && !cena.titulo) cue(t, "rise");
+      t += F(10);
+    });
+    return t + F(4);
+  }
+
+  const MOLDURA = { celular: [100, 178, 880, 1564], browser: [60, 560, 960, 600], nenhuma: [0, 0, 1080, 1920] };
+  const px = (e, [x, y, w, h]) => Object.assign(e.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
+
+  function tela(c, cena) {
+    const m = c.layer.querySelector(".k-midia");
+    px(m, MOLDURA[cena.moldura]);
+    const grupo = [m];
+    if (cena.moldura === "celular") {
+      m.style.borderRadius = "36px";
+      const b = el("div", "k-moldura k-celular");
+      px(b, [92, 170, 896, 1580]);
+      c.layer.appendChild(b);
+      grupo.push(b);
+    } else if (cena.moldura === "browser") {
+      m.style.objectPosition = "top";
+      m.style.borderRadius = "0 0 24px 24px";
+      const j = el("div", "k-moldura k-janela");
+      px(j, [60, 504, 960, 656]);
+      const barra = el("div", "k-barra-janela");
+      for (const cor of ["#A32D14", "#E8CE9A", "#6D8B5C"]) {
+        const b = el("i", "k-bolinha");
+        b.style.background = cor;
+        barra.appendChild(b);
+      }
+      barra.appendChild(el("span", "k-url-janela", c.tema.url));
+      j.appendChild(barra);
+      c.layer.insertBefore(j, m);
+      grupo.push(j);
+    }
+    c.tl.fromTo(grupo, { opacity: 0, scale: 0.96 }, { opacity: 1, scale: 1, duration: F(18), ease: "power3.out" }, c.t0);
+    let fim = c.t0 + F(18);
+    if (cena.kenburns) kenBurns(c.tl, m, fim, cena.dur - (fim - c.ini));
+    if (cena.label) {
+      const p = el("div", "k-pill");
+      p.append(el("i"), el("span", null, cena.label));
+      c.layer.appendChild(p);
+      c.tl.fromTo(p, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: F(14), ease: "back.out(2)" }, c.t0 + F(8));
+      cue(c.t0 + F(8), "click-pill");
+      fim = Math.max(fim, c.t0 + F(22));
+    }
+    return fim;
+  }
+
+  const rgb = (hex) => {
+    const n = parseInt(hex.replace("#", "").slice(0, 6), 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  };
+
+  // brilho da íris: anel em WebGL (shader do bloco sdf-iris, só o anel) desenhado em função do tempo
+  function brilho(t, d, cor) {
+    const cv = document.getElementById("k-brilho");
+    if (!cv._k) {
+      const gl = cv.getContext("webgl", { preserveDrawingBuffer: true, premultipliedAlpha: true });
+      const sh = (src, tipo) => { const s = gl.createShader(tipo); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+      const prog = gl.createProgram();
+      gl.attachShader(prog, sh("attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}", gl.VERTEX_SHADER));
+      gl.attachShader(prog, sh(
+        "precision highp float;uniform float r;uniform float env;uniform vec3 cor;" +
+        "void main(){float d=distance(gl_FragCoord.xy,vec2(540.,960.));" +
+        "float a=(exp(-abs(d-r)/14.)+.45*exp(-abs(d-r-28.)/26.))*env*.85;a=clamp(a,0.,1.);" +
+        "gl_FragColor=vec4(cor*a,a);}", gl.FRAGMENT_SHADER));
+      gl.linkProgram(prog);
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, "a");
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const ease = gsap.parseEase("power2.inOut");
+      const uR = gl.getUniformLocation(prog, "r");
+      const uE = gl.getUniformLocation(prog, "env");
+      const uC = gl.getUniformLocation(prog, "cor");
+      const k = { lista: [] };
+      cv._k = k;
+      pintores.push((tempo) => {
+        gl.viewport(0, 0, 1080, 1920);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        const b = k.lista.find((x) => tempo > x.t && tempo < x.t + x.d);
+        if (!b) return;
+        const q = (tempo - b.t) / b.d;
+        gl.uniform1f(uR, ease(q) * 1110);
+        gl.uniform1f(uE, 4 * q * (1 - q));
+        gl.uniform3fv(uC, b.cor);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      });
+    }
+    cv._k.lista.push({ t, d, cor: rgb(cor) });
+  }
+
   function custom(c, cena) {
     const fn = customs[cena.id];
     if (!fn) throw new Error("cena custom não chamou KIT.custom(...)");
@@ -158,12 +310,19 @@
     return fim;
   }
 
-  const TIPOS = { frase, endcard };
-  const COMP = { palavras, letras, mascara, fade, marcaTexto, risco, assinatura };
+  const TIPOS = { frase, endcard, numero, lista, tela };
+  const COMP = { palavras, letras, mascara, fade, marcaTexto, risco, assinatura, contador, kenBurns };
 
   // ---------- transições: entrada da cena nova sobre a anterior
   const TRANS = {
     fade: (tl, cam, t, d) => tl.fromTo(cam, { opacity: 0 }, { opacity: 1, duration: d, ease: "power1.inOut" }, t),
+    wipe: (tl, cam, t, d) => tl.fromTo(cam, { clipPath: "inset(0% 100% 0% 0%)" },
+      { clipPath: "inset(0% 0% 0% 0%)", duration: d, ease: "power3.inOut" }, t),
+    iris: (tl, cam, t, d, tema) => {
+      tl.fromTo(cam, { clipPath: "circle(0px at 50% 50%)" },
+        { clipPath: "circle(1110px at 50% 50%)", duration: d, ease: "power2.inOut" }, t);
+      brilho(t, d, tema.acento);
+    },
   };
 
   // ---------- fundo, manchas, grão
