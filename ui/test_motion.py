@@ -104,6 +104,8 @@ def test_resolver_numero_mono_por_tema(tmp_path):
 def test_css_vars_e_tema_js():
     css = motion._css_vars(motion.carregar_tema("campeio"))
     assert "--k-fundo-marca:linear-gradient" in css and '--k-mono-familia:"K Plex Mono"' in css
+    assert "--k-display-tamanho:160px" in css
+    assert "--k-display-tamanho:210px" in motion._css_vars(motion.carregar_tema("anotus"))
     tj = motion._tema_js(motion.carregar_tema("campeio"))
     assert tj["assinatura"] == {"tipo": "icone", "src": "kit/tema/icone.png"} and tj["barra"] is True
 
@@ -260,6 +262,31 @@ def test_custom_sem_registro_vira_erro(tmp_path):
     (p / "c05.html").write_text("<div>nada</div>", encoding="utf-8")
     r = motion.montar(p)
     assert any(e["id"] == "c05" and "KIT.custom" in e["motivo"] for e in r["erros"])
+
+
+@pw
+def test_custom_erro_cai_na_cena_certa(tmp_path):
+    # 1ª custom não registra nada, 2ª registra: o erro vai só para a 1ª (mapa por id, não por ordem)
+    d = _cenas()
+    d["cenas"].insert(1, {"id": "c05", "tipo": "custom", "html": "c05.html", "dur": 2})
+    d["cenas"].insert(2, {"id": "c06", "tipo": "custom", "html": "c06.html", "dur": 3})
+    p = _proj(tmp_path, d)
+    (p / "c05.html").write_text("<div>nada</div>", encoding="utf-8")
+    (p / "c06.html").write_text(CUSTOM.format(id="c06"), encoding="utf-8")
+    r = motion.montar(p)
+    assert [e["id"] for e in r["erros"] if "KIT.custom" in e["motivo"]] == ["c05"]
+    assert not any(e["id"] == "c06" for e in r["erros"]), r["erros"]
+
+
+@pw
+def test_custom_registrado_duas_vezes_vira_erro(tmp_path):
+    d = _cenas()
+    d["cenas"].insert(1, {"id": "c05", "tipo": "custom", "html": "c05.html", "dur": 2})
+    p = _proj(tmp_path, d)
+    html = CUSTOM.format(id="c05")
+    (p / "c05.html").write_text(html + html.split("</div>", 1)[1], encoding="utf-8")
+    r = motion.montar(p)
+    assert any(e["id"] == "c05" and "2x" in e["motivo"] for e in r["erros"])
 
 
 def _abrir(index, fn):

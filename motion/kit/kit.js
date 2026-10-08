@@ -8,7 +8,10 @@
   const F = (n) => n / FPS;
   const quadro = (s) => Math.ceil(s * FPS - 1e-6) / FPS;
   const r3 = (s) => Math.round(s * 1000) / 1000;
-  const customs = [];   // fns de KIT.custom, na ordem do documento (= ordem das cenas custom)
+  // KIT.custom(fn): contrato = UM por fragmento custom. O _html emite <script>KIT._cena="cNN"</script>
+  // antes de cada fragmento; o id vem dali porque document.currentScript era null no render do HyperFrames.
+  const customs = {};
+  const customsVezes = {};
   const cues = [];
   const pintores = [];   // (tempo) => void, chamados a cada seek: estado em função do tempo, nunca acumulado
 
@@ -318,7 +321,8 @@
   }
 
   function custom(c, cena) {
-    const fn = customs[window.__KIT_DADOS.cenas.filter((x) => x.tipo === "custom").indexOf(cena)];
+    if (customsVezes[cena.id] > 1) throw new Error(`KIT.custom chamado ${customsVezes[cena.id]}x (use uma vez por fragmento)`);
+    const fn = customs[cena.id];
     if (!fn) throw new Error("cena custom não chamou KIT.custom(...)");
     const fim = fn(c);
     if (typeof fim !== "number" || !isFinite(fim)) throw new Error("KIT.custom precisa devolver o instante de fim (número)");
@@ -431,7 +435,12 @@
   }
 
   window.KIT = {
-    custom: (fn) => { customs.push(fn); },   // ordem, não currentScript: o HyperFrames pode reposicionar scripts
+    _cena: null,
+    custom: (fn) => {
+      const id = window.KIT._cena;
+      customs[id] = fn;
+      customsVezes[id] = (customsVezes[id] || 0) + 1;
+    },
     montar, F, FPS,
   };
 })();

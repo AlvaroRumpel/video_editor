@@ -5,7 +5,7 @@
     "fundo": {"claro": "#F3F2FA", "escuro": "#2B215C", "marca": "#4A3D8F"}
   },
   "fontes": {
-    "display": {"familia": "K Fraunces", "peso": 700, "estilo": "italic"},
+    "display": {"familia": "K Fraunces", "peso": 700, "estilo": "italic", "tamanho": 210},
     "punch": {"familia": "K Inter", "peso": 800},
     "corpo": {"familia": "K Inter", "peso": 500},
     "mono": {"familia": "K Inter", "peso": 700}

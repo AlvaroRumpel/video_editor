@@ -264,6 +264,7 @@ def _css_vars(tema: dict) -> str:
         v[f"{est}-familia"] = f'"{f[est]["familia"]}"'
         v[f"{est}-peso"] = str(f[est]["peso"])
         v[f"{est}-estilo"] = f[est].get("estilo", "normal")
+    v["display-tamanho"] = f'{f["display"].get("tamanho", 190)}px'
     return ":root{" + "".join(f"--k-{k}:{val};" for k, val in v.items()) + "}"
 
 def _tema_js(tema: dict) -> dict:
@@ -344,7 +345,7 @@ def _html(d: dict, tema: dict, customs: dict, tempos: dict | None) -> str:
             else:
                 inner += f'<img class="k-midia" src="{src}" alt="">'
         elif c["tipo"] == "custom":
-            inner += customs[c["id"]]
+            inner += f'<script>KIT._cena="{c["id"]}"</script>' + customs[c["id"]]
         partes.append(f'<div id="{c["id"]}" class="clip cena" {_attrs(t, i)}>{inner}</div>')
     cenas_js = [{k: v for k, v in c.items() if not k.startswith("_")} for c in d["cenas"]]
     dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js}, ensure_ascii=False).replace("</", "<\\/")

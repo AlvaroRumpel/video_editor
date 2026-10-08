@@ -6,7 +6,7 @@
               "marca": "linear-gradient(168deg, #243420 0%, #2F4429 46%, #3D5435 100%)"}
   },
   "fontes": {
-    "display": {"familia": "K Archivo", "peso": 900},
+    "display": {"familia": "K Archivo", "peso": 900, "tamanho": 160},
     "punch": {"familia": "K Archivo", "peso": 800},
     "corpo": {"familia": "K Archivo", "peso": 500},
     "mono": {"familia": "K Plex Mono", "peso": 600}

@@ -40,8 +40,12 @@ def _luma_faixa(png: Path, crop: str) -> float:
     return hi - lo
 
 
-def _frame(video: Path, t: float, dst: Path) -> Path:
-    _ff("-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", str(dst))
+NUMERO = "crop=920:360:80:760"   # w:h:x:y, contém os dígitos do número da cena c03 (y~780-990)
+MARGEM_DB = 5                    # contador em movimento tem de ficar >= 5 dB abaixo do piso de "só grão"
+
+
+def _frame(video: Path, t: float, dst: Path, crop: str | None = None) -> Path:
+    _ff("-ss", f"{t:.3f}", "-i", str(video), *(["-vf", crop] if crop else []), "-frames:v", "1", str(dst))
     return dst
 
 
@@ -60,11 +64,21 @@ def test_golden(tmp_path, marca):
     tempos = json.loads((p / "motion" / "tempos.json").read_text(encoding="utf-8"))
     cenas = {c["id"]: c for c in tempos["cenas"]}
 
-    # Review Focus 1: contador e grão mudam com o tempo (pintores rodam no seek do HyperFrames)
+    # Review Focus 1: contador e grão mudam com o tempo (pintores rodam no seek do HyperFrames).
+    # Compara só a região do número (grão sozinho não basta: PSNR de grão vs grão fica alto).
     c3 = cenas["c03"]
-    a = _frame(video, c3["ini"] + 0.7, tmp_path / "cont-a.png")
-    b = _frame(video, c3["ini"] + 1.1, tmp_path / "cont-b.png")
-    assert _psnr(a, b) < 40, "contador/grão parados entre dois instantes"
+    fim = c3["ini"] + c3["dur"] - c3["saida"] - 0.05
+    a = _frame(video, c3["ini"] + 0.7, tmp_path / "cont-a.png", NUMERO)
+    b = _frame(video, c3["ini"] + 1.1, tmp_path / "cont-b.png", NUMERO)
+    f = _frame(video, fim, tmp_path / "cont-f.png", NUMERO)
+    # piso: dois quadros de uma cena já assentada (c04, lista) na mesma região, só o grão varia
+    c4 = cenas["c04"]
+    fim4 = c4["ini"] + c4["dur"] - c4["saida"] - 0.05
+    s1 = _frame(video, fim4 - 0.3, tmp_path / "piso-1.png", NUMERO)
+    s2 = _frame(video, fim4, tmp_path / "piso-2.png", NUMERO)
+    lim = _psnr(s1, s2) - MARGEM_DB
+    assert _psnr(a, b) < lim, f"contador parado entre +0,7 s e +1,1 s ({_psnr(a, b):.1f} dB, piso {lim:.1f})"
+    assert _psnr(a, f) < lim, f"contador em +0,7 s já igual ao valor final ({_psnr(a, f):.1f} dB, piso {lim:.1f})"
     # Review Focus 2: vídeo dentro da moldura browser aparece (não fica preto)
     c6 = cenas["c06"]
     v = _frame(video, c6["ini"] + c6["dur"] - c6["saida"] - 0.1, tmp_path / "video.png")

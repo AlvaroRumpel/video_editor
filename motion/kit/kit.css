@@ -18,7 +18,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; 
 .k-conteudo { position: absolute; left: 80px; top: 180px; width: 920px; height: 1480px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
 
-.k-display { font-family: var(--k-display-familia); font-weight: var(--k-display-peso); font-style: var(--k-display-estilo); font-size: 160px; }
+.k-display { font-family: var(--k-display-familia); font-weight: var(--k-display-peso); font-style: var(--k-display-estilo); font-size: var(--k-display-tamanho, 190px); }
 .k-punch { font-family: var(--k-punch-familia); font-weight: var(--k-punch-peso); font-style: var(--k-punch-estilo); font-size: 96px; letter-spacing: -0.02em; }
 .k-corpo { font-family: var(--k-corpo-familia); font-weight: var(--k-corpo-peso); font-style: var(--k-corpo-estilo); font-size: 56px; }
 .k-mono { font-family: var(--k-mono-familia); font-weight: var(--k-mono-peso); font-style: var(--k-mono-estilo); font-size: 48px; }
