@@ -18,6 +18,45 @@ TOKEN_CSS = re.compile(r"^[a-z0-9:\-\[\]./#]+$")
 CODIGO = re.compile(r"&&|\|\||=>|==|;")
 EXT_TEXTO = {".html", ".htm", ".tsx", ".jsx", ".ts", ".js"}
 EXT_EXTRAIR = {".html", ".htm", ".tsx", ".jsx"}
+CAMPOS_CENAS = ("titulo", "legenda", "label", "cta", "tagline", "url", "prefixo", "sufixo")
+
+
+def _textos_cenas(dados):
+    """(container, chave) de cada texto visível de um cenas.json do kit de motion."""
+    cenas = dados.get("cenas") if isinstance(dados, dict) else None
+    for c in cenas if isinstance(cenas, list) else []:
+        if not isinstance(c, dict):
+            continue
+        for ln in c.get("linhas") if isinstance(c.get("linhas"), list) else []:
+            if isinstance(ln, dict) and isinstance(ln.get("t"), str):
+                yield ln, "t"
+        itens = c.get("itens")
+        if isinstance(itens, list):
+            for k, v in enumerate(itens):
+                if isinstance(v, str):
+                    yield itens, k
+        for k in CAMPOS_CENAS:
+            if isinstance(c.get(k), str):
+                yield c, k
+
+
+def _de_cenas(txt: str) -> list:
+    return [(o[k], "cenas") for o, k in _textos_cenas(json.loads(txt)) if LETRA.search(o[k])]
+
+
+def _aplicar_cenas(origem: Path, destino: Path, ativos: dict) -> dict:
+    if destino.is_dir():
+        raise ValueError(f"destino é uma pasta (origem é arquivo): {destino}")
+    dados = json.loads(origem.read_text(encoding="utf-8"))
+    contagem = {k: 0 for k in ativos}
+    for o, k in list(_textos_cenas(dados)):
+        n = _norm(o[k])
+        if n in ativos:
+            o[k] = str(ativos[n]["trad"]).strip()
+            contagem[n] += 1
+    pipeline.atomic_write_json(destino, dados)
+    return {"substituicoes": sum(contagem.values()), "arquivos": [str(destino)],
+            "nao_encontrados": [ativos[k].get("id", k) for k, n in contagem.items() if n == 0]}
 NBSP = re.compile(r"&nbsp;|&#160;")
 ESP = r"(?:\s|&nbsp;|&#160;)"      # espaço no fonte: tolera &nbsp; entre/ao redor das palavras
 MARCA = ".localiza"                 # pasta-destino criada pelo aplicar (só essa pode ser substituída)
@@ -93,7 +132,8 @@ def extrair(arquivos, saida) -> dict:
         lista += sorted(p for p in a.rglob("*") if p.suffix.lower() in EXT_EXTRAIR) if a.is_dir() else [a]
     for arq in lista:
         txt = arq.read_text(encoding="utf-8")
-        brutos = _de_html(txt) if arq.suffix.lower() in (".html", ".htm") else _de_tsx(txt)
+        suf = arq.suffix.lower()
+        brutos = _de_html(txt) if suf in (".html", ".htm") else _de_cenas(txt) if suf == ".json" else _de_tsx(txt)
         for b, ctx in brutos:
             k = _norm(b)
             if not k:
@@ -191,6 +231,11 @@ def aplicar(textos_json, origem, destino) -> dict:
         raise ValueError(f"origem não existe: {origem}")
     if destino.is_relative_to(origem) or origem.is_relative_to(destino):
         raise ValueError("destino não pode ser a origem, ficar dentro dela nem contê-la")
+    # chave normalizada: chave editada à mão com espaço extra/&nbsp; ainda casa
+    # (chave vazia após normalizar viraria alternativa "" no regex e casaria em todo lugar)
+    ativos = {_norm(k): v for k, v in tx.items() if _norm(k) and str(v["trad"]).strip() != "="}
+    if origem.is_file() and origem.suffix.lower() == ".json":
+        return _aplicar_cenas(origem, destino, ativos)
     if origem.is_dir():
         if destino.exists():
             if not (destino / MARCA).is_file():
@@ -205,9 +250,6 @@ def aplicar(textos_json, origem, destino) -> dict:
         destino.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(origem, destino)
         arquivos = [destino]
-    # chave normalizada: chave editada à mão com espaço extra/&nbsp; ainda casa
-    # (chave vazia após normalizar viraria alternativa "" no regex e casaria em todo lugar)
-    ativos = {_norm(k): v for k, v in tx.items() if _norm(k) and str(v["trad"]).strip() != "="}
     contagem = {k: 0 for k in ativos}
     for arq in arquivos:
         ctxs = CTX_HTML if arq.suffix.lower() in (".html", ".htm") else CTX_TSX

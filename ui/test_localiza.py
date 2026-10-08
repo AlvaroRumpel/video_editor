@@ -309,3 +309,34 @@ def test_aplicar_preserva_fim_de_linha(tmp_path):
     _traduz(saida, {"tá bom": "vale"})
     localiza.aplicar(saida, h, tmp_path / "b.html")
     assert (tmp_path / "b.html").read_bytes() == "<p>vale</p>\n<p>ok</p>\n".encode()
+
+
+CENAS = {"marca": "anotus", "cenas": [
+    {"id": "c01", "tipo": "frase", "linhas": [{"t": "Pare de", "estilo": "punch"}, {"t": "decorar.", "estilo": "display"}]},
+    {"id": "c02", "tipo": "lista", "titulo": "Três passos", "itens": ["Grifar", "Revisar"]},
+    {"id": "c03", "tipo": "endcard", "cta": "Teste grátis", "url": "anotus.app"}]}
+
+
+def test_extrair_cenas_json(tmp_path):
+    c = _arq(tmp_path, "cenas.json", json.dumps(CENAS, ensure_ascii=False))
+    t = localiza.extrair([c], tmp_path / "dub" / "textos.json")["textos"]
+    assert set(t) == {"Pare de", "decorar.", "Três passos", "Grifar", "Revisar", "Teste grátis", "anotus.app"}
+    assert t["Grifar"]["contextos"] == ["cenas"] and t["Grifar"]["arquivos"] == ["cenas.json"]
+    assert "punch" not in t and "anotus" not in t      # só campos de texto, nunca enums/marca
+
+
+def test_aplicar_cenas_json(tmp_path):
+    c = _arq(tmp_path, "cenas.json", json.dumps(CENAS, ensure_ascii=False))
+    tx = tmp_path / "textos.json"
+    localiza.extrair([c], tx)
+    d = json.loads(tx.read_text(encoding="utf-8"))
+    trad = {"Pare de": "Stop", "decorar.": "memorizing.", "Três passos": "Three steps", "Grifar": "Highlight",
+            "Revisar": "Review", "Teste grátis": "Free trial", "anotus.app": "="}
+    for k, v in d["textos"].items():
+        v["trad"] = trad[k]
+    tx.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = localiza.aplicar(tx, c, tmp_path / "cenas.en.json")
+    out = json.loads((tmp_path / "cenas.en.json").read_text(encoding="utf-8"))
+    assert out["cenas"][0]["linhas"][0] == {"t": "Stop", "estilo": "punch"}
+    assert out["cenas"][1]["itens"] == ["Highlight", "Review"] and out["cenas"][2]["url"] == "anotus.app"
+    assert r["nao_encontrados"] == [] and r["substituicoes"] == 6
