@@ -474,9 +474,14 @@ def _progresso(proj: Path, fase: str, pct=None, eta=None) -> None:
     st = proj / "ui" / "state.json"
     if not st.parent.is_dir():
         return
-    atual = pipeline.read_json(st, {})       # merge: preserva chaves alheias (ex.: aprovacoes)
-    if not isinstance(atual, dict):
-        atual = {}
+    atual = {}                               # merge: preserva chaves alheias (ex.: aprovacoes)
+    if st.is_file():
+        try:
+            atual = json.loads(st.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return                           # ilegível agora (escrita concorrente): pula o tick, nunca sobrescreve
+        if not isinstance(atual, dict):
+            return
     atual["render"] = {"fase": fase, "pct": pct, "eta": eta}
     pipeline.atomic_write_json(st, atual)
 
@@ -506,12 +511,16 @@ def _finalizar(tmp: Path, dst: Path, duracao: float) -> dict:
     pr = _probe(tmp)
     if pr["pix_fmt"] == "yuvj420p" or pr["range"] == "pc":
         conv = tmp.with_name(tmp.stem + ".tv.mp4")
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(tmp),
-                        "-vf", "scale=in_range=pc:out_range=tv,format=yuv420p", "-c:v", "libx264", "-crf", "18",
-                        "-preset", "medium", "-profile:v", "high", "-color_range", "tv", "-colorspace", "bt709",
-                        "-color_primaries", "bt709", "-color_trc", "bt709", "-an",
-                        "-movflags", "+faststart", str(conv)], check=True)
-        os.replace(conv, tmp)
+        try:
+            # bt709 rotula a saída da conversão pc→tv: sem descrição de cor o ffprobe reporta range "unknown", não "tv"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(tmp),
+                            "-vf", "scale=in_range=pc:out_range=tv,format=yuv420p", "-c:v", "libx264", "-crf", "18",
+                            "-preset", "medium", "-profile:v", "high", "-color_range", "tv", "-colorspace", "bt709",
+                            "-color_primaries", "bt709", "-color_trc", "bt709", "-an",
+                            "-movflags", "+faststart", str(conv)], check=True)
+            os.replace(conv, tmp)
+        finally:
+            conv.unlink(missing_ok=True)
         pr = _probe(tmp)
     esperado = round(duracao * FPS)
     problemas = []
@@ -557,15 +566,18 @@ def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_d
             eta = round((time.time() - inicio) * (100 - pct) / pct) if pct > 0 else None
             _progresso(proj, "render", round(pct, 1), eta)
 
+    tmp.unlink(missing_ok=True)   # nunca aceitar sobra de execução anterior
     _progresso(proj, "render", 0, None)
     rc, ultimas = _executar(cmd, motion_dir, {**os.environ, **ENV_HF}, linha)
     if rc != 0 or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
         _progresso(proj, "falha")
         raise RuntimeError("hyperframes render falhou:\n" + "\n".join(ultimas))
     _progresso(proj, "conferindo", 100, 0)
     try:
         _finalizar(tmp, dst, tempos["duracao"])
-    except RuntimeError:
+    except (RuntimeError, subprocess.CalledProcessError):
+        tmp.unlink(missing_ok=True)
         _progresso(proj, "falha")
         raise
     _progresso(proj, "pronto", 100, 0)

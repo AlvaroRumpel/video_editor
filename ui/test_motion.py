@@ -435,3 +435,39 @@ def test_folha(tmp_path):
     r = motion.folha(p)
     assert Path(r["png"]).is_file()
     assert [f["rotulo"] for f in r["frames"]] == ["entrada", "final", "saida", "entrada", "final"]
+
+
+def test_progresso_estado_ilegivel_nao_sobrescreve(tmp_path):
+    p = _montado(tmp_path)
+    st = p / "ui" / "state.json"
+    st.write_bytes(b'{"aprovacoes": {"x": 1}, ')
+    antes = st.read_bytes()
+    motion._progresso(p, "render", 10)
+    assert st.read_bytes() == antes
+
+
+def test_render_tmp_velho_nao_vira_video(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+    (p / ".video.mp4.hf.mp4").write_bytes(b"sobra")
+    monkeypatch.setattr(motion, "_executar", lambda cmd, cwd, env, linha: (0, ["ok"]))
+    with pytest.raises(RuntimeError, match="falhou"):
+        motion.render(p)
+    assert not (p / "video.mp4").exists() and not (p / ".video.mp4.hf.mp4").exists()
+
+
+def test_render_erro_ffmpeg_na_conferencia_marca_falha(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+
+    def run(cmd, cwd, env, linha):
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"x")
+        return 0, []
+
+    def probe(_):
+        raise subprocess.CalledProcessError(1, "ffprobe")
+
+    monkeypatch.setattr(motion, "_executar", run)
+    monkeypatch.setattr(motion, "_probe", probe)
+    with pytest.raises(subprocess.CalledProcessError):
+        motion.render(p)
+    assert json.loads((p / "ui" / "state.json").read_text(encoding="utf-8"))["render"]["fase"] == "falha"
+    assert not (p / ".video.mp4.hf.mp4").exists()
