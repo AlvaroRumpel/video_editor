@@ -6,10 +6,12 @@ render: hyperframes de motion/node_modules → video[.<lang>].mp4 conferido no f
 folha: contact sheet de QC a partir do vídeo."""
 import copy
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -424,3 +426,211 @@ def montar(proj: Path, lang: str | None = None, motion_dir: Path = MOTION) -> di
     pipeline.atomic_write_json(cues, m["cues"])
     return {"ok": True, "duracao": m["duracao"], "erros": [], "index": str(index), "cues": str(cues),
             "cenas": [{"id": c["id"], "ini": c["ini"], "dur": c["dur"]} for c in m["cenas"]]}
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+PCT_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*%")
+FRAMES_RE = re.compile(r"(\d+)\s*/\s*(\d+)")
+ENV_HF = {"HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1", "HF_CLI_TELEMETRY_DISABLED": "1",
+          "HYPERFRAMES_SKIP_SKILLS": "1"}
+
+
+def _hf_bin(motion_dir: Path) -> None:
+    if not (motion_dir / "node_modules" / "hyperframes").is_dir():
+        raise RuntimeError(f"hyperframes não instalado: rodar `npm ci` em {motion_dir}")
+
+
+def _fontes(proj: Path, cj: Path, motion_dir: Path) -> list[Path]:
+    fs = [cj, *(motion_dir / "kit").rglob("*")]
+    d = pipeline.read_json(cj, {})
+    if isinstance(d, dict):
+        if isinstance(d.get("marca"), str):
+            fs.append(motion_dir / "temas" / f"{d['marca']}.json")
+        for c in d.get("cenas") if isinstance(d.get("cenas"), list) else []:
+            if isinstance(c, dict):
+                fs += [proj / c[k] for k in ("arquivo", "html") if isinstance(c.get(k), str)]
+    return fs
+
+
+def _velho(index: Path, fontes: list[Path]) -> bool:
+    if not index.is_file():
+        return True
+    m = index.stat().st_mtime
+    return any(f.is_file() and f.stat().st_mtime > m for f in fontes)
+
+
+def _pct(linha: str) -> float | None:
+    linha = ANSI.sub("", linha)
+    m = PCT_RE.search(linha)
+    if m:
+        return min(100.0, float(m.group(1)))
+    m = FRAMES_RE.search(linha)
+    if m and int(m.group(2)) > 0:
+        return min(100.0, 100 * int(m.group(1)) / int(m.group(2)))
+    return None
+
+
+def _progresso(proj: Path, fase: str, pct=None, eta=None) -> None:
+    st = proj / "ui" / "state.json"
+    if not st.parent.is_dir():
+        return
+    atual = pipeline.read_json(st, {})       # merge: preserva chaves alheias (ex.: aprovacoes)
+    if not isinstance(atual, dict):
+        atual = {}
+    atual["render"] = {"fase": fase, "pct": pct, "eta": eta}
+    pipeline.atomic_write_json(st, atual)
+
+
+def _executar(cmd: list[str], cwd: Path, env: dict, linha) -> tuple[int, list[str]]:
+    p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, encoding="utf-8", errors="replace")
+    ultimas: list[str] = []
+    for ln in p.stdout:
+        ln = ln.rstrip()
+        ultimas = (ultimas + [ANSI.sub("", ln)])[-20:]
+        linha(ln)
+    return p.wait(), ultimas
+
+
+def _probe(p: Path) -> dict:
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=width,height,r_frame_rate,pix_fmt,color_range,nb_frames", "-of", "json", str(p)],
+                         capture_output=True, text=True, check=True).stdout
+    s = json.loads(out)["streams"][0]
+    num, den = s["r_frame_rate"].split("/")
+    return {"w": s["width"], "h": s["height"], "fps": float(num) / float(den), "pix_fmt": s.get("pix_fmt"),
+            "range": s.get("color_range", "unknown"), "frames": int(s.get("nb_frames") or 0)}
+
+
+def _finalizar(tmp: Path, dst: Path, duracao: float) -> dict:
+    pr = _probe(tmp)
+    if pr["pix_fmt"] == "yuvj420p" or pr["range"] == "pc":
+        conv = tmp.with_name(tmp.stem + ".tv.mp4")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(tmp),
+                        "-vf", "scale=in_range=pc:out_range=tv,format=yuv420p", "-c:v", "libx264", "-crf", "18",
+                        "-preset", "medium", "-profile:v", "high", "-color_range", "tv", "-colorspace", "bt709",
+                        "-color_primaries", "bt709", "-color_trc", "bt709", "-an",
+                        "-movflags", "+faststart", str(conv)], check=True)
+        os.replace(conv, tmp)
+        pr = _probe(tmp)
+    esperado = round(duracao * FPS)
+    problemas = []
+    if (pr["w"], pr["h"]) != (W, H):
+        problemas.append(f"dimensão {pr['w']}x{pr['h']}")
+    if abs(pr["fps"] - FPS) > 0.01:
+        problemas.append(f"fps {pr['fps']:.3f}")
+    if pr["pix_fmt"] != "yuv420p":
+        problemas.append(f"pix_fmt {pr['pix_fmt']}")
+    if pr["frames"] and abs(pr["frames"] - esperado) > 1:
+        problemas.append(f"{pr['frames']} frames (esperado {esperado})")
+    if problemas:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("vídeo fora do esperado: " + ", ".join(problemas))
+    os.replace(tmp, dst)
+    return pr
+
+
+def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_dir: Path = MOTION) -> dict:
+    proj = Path(proj)
+    suf = _lang(lang)
+    _hf_bin(motion_dir)
+    comp = proj / f"motion{suf}"
+    if _velho(comp / "index.html", _fontes(proj, proj / f"cenas{suf}.json", motion_dir)):
+        r = montar(proj, lang, motion_dir)
+        if not r["ok"]:
+            return r
+    tempos = pipeline.read_json(comp / "tempos.json", None)
+    if not tempos:
+        raise RuntimeError(f"{comp / 'tempos.json'} ausente: rodar montar")
+    nome = f"video_rascunho{suf}.mp4" if rascunho else f"video{suf}.mp4"
+    dst = proj / nome
+    tmp = proj / f".{nome}.hf.mp4"
+    cmd = [shutil.which("npx") or "npx", "--no-install", "hyperframes", "render", str(comp.resolve()),
+           "-o", str(tmp.resolve()), "--format", "mp4", "--fps", str(FPS),
+           "-q", "draft" if rascunho else "looks", "--crf", "28" if rascunho else "18"]
+    inicio, ultimo = time.time(), [-1]
+
+    def linha(ln):
+        pct = _pct(ln)
+        if pct is not None and int(pct) != ultimo[0]:
+            ultimo[0] = int(pct)
+            eta = round((time.time() - inicio) * (100 - pct) / pct) if pct > 0 else None
+            _progresso(proj, "render", round(pct, 1), eta)
+
+    _progresso(proj, "render", 0, None)
+    rc, ultimas = _executar(cmd, motion_dir, {**os.environ, **ENV_HF}, linha)
+    if rc != 0 or not tmp.is_file():
+        _progresso(proj, "falha")
+        raise RuntimeError("hyperframes render falhou:\n" + "\n".join(ultimas))
+    _progresso(proj, "conferindo", 100, 0)
+    try:
+        _finalizar(tmp, dst, tempos["duracao"])
+    except RuntimeError:
+        _progresso(proj, "falha")
+        raise
+    _progresso(proj, "pronto", 100, 0)
+    return {"ok": True, "video": str(dst), "duracao": tempos["duracao"]}
+
+
+def folha(proj: Path, lang: str | None = None) -> dict:
+    proj = Path(proj)
+    suf = _lang(lang)
+    video = next((v for v in (proj / f"video{suf}.mp4", proj / f"video_rascunho{suf}.mp4") if v.is_file()), None)
+    if video is None:
+        raise ValueError("sem video.mp4 nem video_rascunho.mp4: rodar render")
+    tempos = pipeline.read_json(proj / f"motion{suf}" / "tempos.json", None)
+    if not tempos:
+        raise ValueError("tempos.json ausente: rodar montar")
+    fim = tempos["duracao"] - 1 / FPS
+    pontos = []
+    for c in tempos["cenas"]:
+        pontos.append((c["id"], "entrada", c["ini"] + min(0.6, c["dur"] / 3)))
+        pontos.append((c["id"], "final", c["ini"] + c["dur"] - c["saida"] - 0.1))
+        if c["saida"]:
+            pontos.append((c["id"], "saida", c["ini"] + c["dur"] - c["saida"] / 2))
+    pontos = [(i, r, max(0.0, min(t, fim))) for i, r, t in pontos]
+    tmpd = proj / "qc" / f".folha{suf}"
+    shutil.rmtree(tmpd, ignore_errors=True)
+    tmpd.mkdir(parents=True)
+    cols = 6
+    linhas = -(-len(pontos) // cols)
+    for k in range(cols * linhas):
+        dst = str(tmpd / f"f_{k:03d}.png")
+        if k < len(pontos):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{pontos[k][2]:.3f}", "-i", str(video),
+                            "-frames:v", "1", "-vf", "scale=270:480", dst], check=True)
+        else:
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=270x480",
+                            "-frames:v", "1", dst], check=True)
+    png = proj / "qc" / f"folha{suf}.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", "1", "-i", str(tmpd / "f_%03d.png"),
+                    "-vf", f"tile={cols}x{linhas}:padding=6:color=white", "-frames:v", "1", str(png)], check=True)
+    shutil.rmtree(tmpd)
+    return {"png": str(png), "frames": [{"id": i, "rotulo": r, "t": round(t, 3)} for i, r, t in pontos]}
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="kit de motion (HyperFrames)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for nome in ("montar", "render", "folha"):
+        p = sub.add_parser(nome)
+        p.add_argument("proj")
+        p.add_argument("--lang")
+        if nome == "render":
+            p.add_argument("--rascunho", action="store_true")
+    ns = ap.parse_args()
+    try:
+        if ns.cmd == "montar":
+            out = montar(Path(ns.proj), ns.lang)
+        elif ns.cmd == "render":
+            out = render(Path(ns.proj), ns.rascunho, ns.lang)
+        else:
+            out = folha(Path(ns.proj), ns.lang)
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
+        print(json.dumps({"erro": str(e)}, ensure_ascii=False))
+        sys.exit(1)
+    print(json.dumps(out, ensure_ascii=False))
+    sys.exit(0 if out.get("ok", True) else 1)

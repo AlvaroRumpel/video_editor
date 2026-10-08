@@ -328,3 +328,110 @@ def test_kenburns_fica_dentro_da_moldura(tmp_path):
     m = _abrir(p / "motion" / "index.html", medir)
     assert m["ov"] == "hidden" and m["img"]
     assert m["x0"] >= 92 and m["y0"] >= 170 and m["x1"] <= 988 and m["y1"] <= 1750
+
+
+ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+
+
+def _montado(tmp_path, dur=2.0, suf=""):
+    p = tmp_path / "proj"
+    (p / f"motion{suf}").mkdir(parents=True, exist_ok=True)
+    (p / "ui").mkdir(exist_ok=True)
+    (p / "ui" / "state.json").write_text(json.dumps({"aprovacoes": {"x": 1}}), encoding="utf-8")
+    (p / f"motion{suf}" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (p / f"motion{suf}" / "tempos.json").write_text(json.dumps(
+        {"duracao": dur, "cenas": [{"id": "c01", "ini": 0, "dur": dur / 2, "min": 1, "saida": 0.3},
+                                   {"id": "c02", "ini": dur / 2 - 0.3, "dur": dur / 2 + 0.3, "min": 1, "saida": 0}]}),
+        encoding="utf-8")
+    return p
+
+
+def _fake_hf(dur, pix="yuv420p", rng="tv", rc=0, cmds=None):
+    def run(cmd, cwd, env, linha):
+        if cmds is not None:
+            cmds.append((cmd, env))
+        if rc:
+            return rc, ["boom: chrome caiu"]
+        for i in (10, 50, 100):
+            linha(f"\x1b[32mRendering\x1b[0m {i}%")
+        _ff("-f", "lavfi", "-i", f"color=c=gray:s=1080x1920:r=30:d={dur}", "-pix_fmt", pix,
+            "-color_range", rng, str(cmd[cmd.index("-o") + 1]))
+        return 0, ["ok"]
+    return run
+
+
+@pytest.fixture
+def sem_hf(monkeypatch):
+    monkeypatch.setattr(motion, "_hf_bin", lambda md: None)
+    monkeypatch.setattr(motion, "_velho", lambda idx, fontes: False)
+
+
+def test_pct():
+    assert motion._pct("Rendering 42%") == 42.0
+    assert motion._pct("frame 15/150") == 10.0
+    assert motion._pct("nada aqui") is None
+
+
+def test_render_sem_node_modules(tmp_path):
+    with pytest.raises(RuntimeError, match="npm ci"):
+        motion.render(_montado(tmp_path), motion_dir=tmp_path / "m")
+
+
+@ffmpeg
+def test_render_confere_e_preserva_state(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+    cmds = []
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0, cmds=cmds))
+    r = motion.render(p)
+    assert r["ok"] and (p / "video.mp4").is_file()
+    cmd, env = cmds[0]
+    assert cmd[cmd.index("--fps") + 1] == "30" and cmd[cmd.index("-q") + 1] == "looks"
+    assert cmd[cmd.index("--crf") + 1] == "18" and env["HYPERFRAMES_NO_TELEMETRY"] == "1"
+    st = json.loads((p / "ui" / "state.json").read_text(encoding="utf-8"))
+    assert st["aprovacoes"] == {"x": 1} and st["render"]["fase"] == "pronto" and st["render"]["pct"] == 100
+
+
+@ffmpeg
+def test_render_corrige_range_pc(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0, pix="yuvj420p", rng="pc"))
+    motion.render(p)
+    pr = motion._probe(p / "video.mp4")
+    assert pr["pix_fmt"] == "yuv420p" and pr["range"] == "tv"
+
+
+@ffmpeg
+def test_render_frames_errados_falha(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path, dur=3.0)
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0))
+    with pytest.raises(RuntimeError, match="frames"):
+        motion.render(p)
+    assert not (p / "video.mp4").exists()
+
+
+@ffmpeg
+def test_render_rascunho_e_lang(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path, suf=".en")
+    cmds = []
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0, cmds=cmds))
+    motion.render(p, rascunho=True, lang="en")
+    cmd = cmds[0][0]
+    assert cmd[cmd.index("-q") + 1] == "draft" and cmd[cmd.index("render") + 1].endswith("motion.en")
+    assert (p / "video_rascunho.en.mp4").is_file()
+
+
+def test_render_falha_mostra_saida(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0, rc=1))
+    with pytest.raises(RuntimeError, match="chrome caiu"):
+        motion.render(p)
+    assert json.loads((p / "ui" / "state.json").read_text(encoding="utf-8"))["render"]["fase"] == "falha"
+
+
+@ffmpeg
+def test_folha(tmp_path):
+    p = _montado(tmp_path, dur=4.0)
+    _ff("-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=4", "-pix_fmt", "yuv420p", str(p / "video.mp4"))
+    r = motion.folha(p)
+    assert Path(r["png"]).is_file()
+    assert [f["rotulo"] for f in r["frames"]] == ["entrada", "final", "saida", "entrada", "final"]
