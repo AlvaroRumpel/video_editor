@@ -129,11 +129,11 @@ FOLHA_TIPOS.broll = {
   html: d => d.momentos.map(m => `<div class="fl-row" data-m="${escapeHtml(m.id)}">
       <div class="fl-lab"><b>${escapeHtml(m.id)}</b><span class="mono">${fmtMSS(m.t_in)}</span>
         <span>${escapeHtml(m.termo)}</span><span class="dim">${escapeHtml(m.modo)}</span></div>
-      <div class="fl-cands">${m.candidatos.map(c => `<div class="fl-cand" data-k="${kDe(c.rotulo)}">
+      <div class="fl-cands">${m.candidatos.map(c => `<div class="fl-cand" data-k="${kDe(c.rotulo)}"${c.prompt ? ` title="${escapeHtml(c.prompt)}"` : ''}>
         ${c.tipo === 'video'
           ? `<video muted loop preload="metadata" src="${midia(c.arq)}" onerror="${falta}"></video>`
           : `<img alt="" src="${midia(c.arq)}" onerror="${falta}">`}
-        <span class="fl-leg">${kDe(c.rotulo)} · ${escapeHtml(c.fonte)} · ${c.tipo === 'video' ? Math.round(c.dur) + 's' : 'foto'}${c.licenca ? ' · ' + escapeHtml(c.licenca) : ''}</span>
+        <span class="fl-leg">${kDe(c.rotulo)} · ${escapeHtml(c.fonte)} · ${c.tipo === 'video' ? Math.round(c.dur) + 's' : 'foto'}${c.custo_est != null ? ' · ~US$' + Number(c.custo_est).toFixed(2).replace('.', ',') : ''}${c.licenca ? ' · ' + escapeHtml(c.licenca) : ''}</span>
       </div>`).join('')}</div>
       <button class="fl-veto">vetar</button>
     </div>`).join('') || '<div class="dim">nenhum momento proposto</div>',

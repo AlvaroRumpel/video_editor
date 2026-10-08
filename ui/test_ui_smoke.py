@@ -267,6 +267,25 @@ def test_folha_broll(page, ui_url, fake_root):
     assert not page.locator("#tabs a[data-tab=aprovacao]").is_visible()
 
 
+def test_folha_broll_candidato_ia(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    _broll_fixture(proj)
+    (proj / "broll" / "cand" / "b01-ia1.png").write_bytes(b"x")
+    b = json.loads((proj / "broll.json").read_text(encoding="utf-8"))
+    b["momentos"][0]["candidatos"].append({"fonte": "ia", "tipo": "foto", "arq": "broll/cand/b01-ia1.png",
+                                           "prompt": "gavel on desk", "custo_est": 0.35})
+    (proj / "broll.json").write_text(json.dumps(b), encoding="utf-8")
+    _pedido_folha(proj, "broll")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-row")
+    cand = page.locator(".fl-row[data-m=b01] .fl-cand[data-k='3']")
+    assert "ia · foto · ~US$0,35" in cand.inner_text()
+    assert cand.get_attribute("title") == "gavel on desk"
+    assert page.locator(".fl-row[data-m=b01] .fl-cand[data-k='1']").get_attribute("title") is None
+    cand.click()
+    assert page.locator("#fl-resp").inner_text() == "ok b01:3"
+
+
 def test_folha_ausente_esconde_aba(page, ui_url):
     page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
     page.wait_for_function("location.hash === '#/p/edit-fake/board'")

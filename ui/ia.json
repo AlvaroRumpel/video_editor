@@ -1,0 +1,14 @@
+{
+ "modelos": {
+  "quadro": {"id": "fal-ai/flux/schnell", "provedor": "fal_quadro",
+             "entrada": {"num_inference_steps": 4, "output_format": "png"}},
+  "video": {"id": "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", "provedor": "fal_video",
+            "segundos": 5, "entrada": {"duration": "5"}},
+  "video_top": {"id": "fal-ai/veo3.1/image-to-video", "provedor": "fal_video_top",
+                "segundos": 4, "entrada": {"duration": "4s", "resolution": "1080p", "generate_audio": false}}
+ },
+ "estilos": {
+  "padrao": "documentary stock footage, natural light, neutral tones, no text",
+  "anotus": "photoreal, soft diffused light, subtle purple and lilac accents, clean modern look, no text"
+ }
+}

@@ -50,6 +50,21 @@ def test_ler_broll_escolhido_invalido_vira_primeiro(proj):
     assert folha.ler(proj, "broll")["momentos"][0]["escolhido"] == "b01-1"
 
 
+def test_ler_broll_candidato_ia(proj):
+    b = json.loads(json.dumps(BROLL))
+    b["momentos"][0]["candidatos"].append({"fonte": "ia", "tipo": "foto", "arq": "broll/cand/b01-ia1.png",
+                                           "prompt": "gavel on desk", "custo_est": 0.35,
+                                           "licenca": "gerado por IA (fal/x)"})
+    b["momentos"][1]["candidatos"].append({"fonte": "ia", "tipo": "foto", "arq": "broll/cand/b02-ia1.png"})
+    _w(proj / "broll.json", b)
+    m1, m2 = folha.ler(proj, "broll")["momentos"]
+    c = m1["candidatos"][2]
+    assert c["rotulo"] == "b01-3" and c["fonte"] == "ia"
+    assert c["custo_est"] == 0.35 and c["prompt"] == "gavel on desk"
+    assert "custo_est" not in m1["candidatos"][0] and "prompt" not in m1["candidatos"][0]
+    assert m2["candidatos"][1]["custo_est"] is None and m2["candidatos"][1]["prompt"] == ""
+
+
 CLIPS = {"x_padrao": 640, "clipes": [
     {"id": "c01", "slug": "zero", "status": "proposto", "nota": 4, "gancho": "Zero inscritos",
      "ranges": [{"t_in": 10.0, "t_out": 20.0, "beat": "hook"}, {"t_in": 30.0, "t_out": 35.5}], "x": 700,
