@@ -1,0 +1,9 @@
+{
+  "name": "video-editor-motion",
+  "private": true,
+  "description": "Kit de motion dos reels/ads (HyperFrames). Rodar `npm ci` uma vez.",
+  "dependencies": {
+    "gsap": "3.14.2",
+    "hyperframes": "0.8.141"
+  }
+}
