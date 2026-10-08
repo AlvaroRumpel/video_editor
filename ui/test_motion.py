@@ -199,6 +199,7 @@ def test_montar_lang_usa_pastas_proprias(tmp_path):
     p = _proj(tmp_path, _cenas())
     d = _cenas()
     d["cenas"][0]["linhas"][0]["t"] = "Stop"
+    d["cenas"][1].update(cta="Try it", tagline="Study smarter", url="anotus.app/en")
     (p / "cenas.en.json").write_text(json.dumps(d), encoding="utf-8")
     assert motion.montar(p)["ok"] and motion.montar(p, "en")["ok"]
     assert (p / "motion.en" / "index.html").exists() and (p / "cues.en.json").exists() and (p / "cues.json").exists()
@@ -498,3 +499,83 @@ def test_render_erro_ffmpeg_na_conferencia_marca_falha(tmp_path, sem_hf, monkeyp
         motion.render(p)
     assert json.loads((p / "ui" / "state.json").read_text(encoding="utf-8"))["render"]["fase"] == "falha"
     assert not (p / ".video.mp4.hf.mp4").exists()
+
+
+def test_validar_endcard_em_lang_exige_textos(tmp_path):
+    d = _cenas()
+    erros = motion.validar(d, tmp_path, lang="en")
+    assert any(e["id"] == "c02" and "cta, tagline e url" in e["motivo"] for e in erros), erros
+    d["cenas"][1].update(cta="Try it", tagline="Study smarter", url="anotus.app/en")
+    assert motion.validar(d, tmp_path, lang="en") == []
+    assert motion.validar(_cenas(), tmp_path) == []          # sem lang: herda do tema
+
+
+def test_resolver_numero_formato_segue_lang(tmp_path):
+    d = _cenas()
+    d["cenas"].insert(1, {"id": "c09", "tipo": "numero", "valor": 1250})
+    t = motion.carregar_tema("anotus")
+    assert motion.resolver(d, t, tmp_path, lang="en")["cenas"][1]["formato"] == "en"
+    assert motion.resolver(d, t, tmp_path)["cenas"][1]["formato"] == "pt-BR"
+
+
+def test_validar_rejeita_infinito_e_id_nao_ascii(tmp_path):
+    d = _cenas()
+    d["cenas"][0]["dur"] = float("inf")
+    assert any(e["id"] == "c01" and "dur" in e["motivo"] for e in motion.validar(d, tmp_path))
+    d = _cenas()
+    d["cenas"][0]["id"] = "c٠١"
+    assert any("id inválido" in e["motivo"] for e in motion.validar(d, tmp_path))
+
+
+def test_preparar_remove_marcador_por_ultimo(tmp_path, monkeypatch):
+    comp = tmp_path / "motion"
+    comp.mkdir()
+    (comp / ".motion").write_text("x", encoding="utf-8")
+    (comp / "a").mkdir()
+    (comp / "a" / "f.txt").write_text("x", encoding="utf-8")
+    real, vistos = shutil.rmtree, []
+
+    def rm(p, *a, **k):
+        vistos.append((Path(p).name, (comp / ".motion").is_file()))
+        raise OSError("travado")
+    monkeypatch.setattr(shutil, "rmtree", rm)
+    with pytest.raises(OSError):
+        motion._preparar(comp, tmp_path, {"cenas": []}, motion.carregar_tema("anotus"), motion.MOTION)
+    assert vistos == [("a", True)] and (comp / ".motion").is_file()   # marcador sobrevive ao travamento
+    monkeypatch.setattr(shutil, "rmtree", real)
+
+
+def test_render_erro_de_os_marca_falha(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+
+    def run(cmd, cwd, env, linha):
+        raise FileNotFoundError("npx")
+    monkeypatch.setattr(motion, "_executar", run)
+    with pytest.raises(OSError):
+        motion.render(p)
+    r = json.loads((p / "ui" / "state.json").read_text(encoding="utf-8"))["render"]
+    assert r["fase"] == "falha" and r["pct"] == 0
+
+
+def test_render_sem_tempos_remonta(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+    (p / "motion" / "tempos.json").unlink()
+    chamado = []
+    monkeypatch.setattr(motion, "montar", lambda *a, **k: chamado.append(a) or {"ok": False, "erros": ["x"]})
+    assert motion.render(p)["ok"] is False and chamado
+
+
+@ffmpeg
+def test_folha_usa_o_mais_novo_e_recusa_velho(tmp_path):
+    import os
+    p = _montado(tmp_path, dur=4.0)
+    idx = p / "motion" / "index.html"
+    os.utime(idx, (1000, 1000))
+    _ff("-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=4", "-pix_fmt", "yuv420p", str(p / "video_rascunho.mp4"))
+    (p / "video.mp4").write_bytes(b"lixo")                    # video.mp4 inválido, mas o rascunho é mais novo
+    os.utime(p / "video.mp4", (2000, 2000))
+    os.utime(p / "video_rascunho.mp4", (3000, 3000))
+    assert Path(motion.folha(p)["png"]).is_file()
+    os.utime(idx, (4000, 4000))                               # montar depois dos vídeos
+    with pytest.raises(ValueError, match="mais velho"):
+        motion.folha(p)

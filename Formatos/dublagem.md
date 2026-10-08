@@ -91,7 +91,11 @@ Escopo por formato:
 10. `python ui/dublagem.py mixar edit/<proj> <lang> --export "Export/<nome> - horizontal.mp4" --nome "<nome>" [--video edit/<proj>/dub/<lang>/video.mp4]`
     → `Export/<nome> - <lang>.mp4`, `.m4a` (faixa extra do YouTube, upload manual) e `.srt`.
 11. Ads (kit): `python ui/localiza.py aplicar edit/shorts/<marca>/<tema>/dub/<lang>/textos.json edit/shorts/<marca>/<tema>/cenas.json edit/shorts/<marca>/<tema>/cenas.<lang>.json`
-    (`nao_encontrados` não vazio → como no passo 9); `python ui/motion.py montar <proj> --lang <lang>` (estouro de texto
+    (`nao_encontrados` não vazio → como no passo 9). O end card precisa de `cta`, `tagline` e `url` escritos em
+    `cenas.<lang>.json` (o `montar --lang` recusa sem eles; os padrões do tema são pt-BR) e `numero` formata pelo
+    `<lang>` sozinho (`1.250` vs `1,250`). Cenas custom: `python ui/localiza.py aplicar <textos> edit/shorts/<marca>/<tema>/cenas
+    edit/shorts/<marca>/<tema>/cenas.<lang>` (pasta → cópia com marca `.localiza`) e apontar cada `html` custom de
+    `cenas.<lang>.json` para `cenas.<lang>/cNN.html`. Depois `python ui/motion.py montar <proj> --lang <lang>` (estouro de texto
     traduzido vira erro com o id da cena → encurtar a tradução); `python ui/motion.py render <proj> --lang <lang>` →
     `video.<lang>.mp4` + `cues.<lang>.json`; SFX/trilha como em `padrao-ads.md` → `…-<lang>.mp4`.
     Ads legados (`anim.html`): `aplicar` para `anim.<lang>.html` + `localiza.py checar` (comparar com o original) + captura antiga.

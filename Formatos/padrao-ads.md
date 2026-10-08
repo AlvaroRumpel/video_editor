@@ -73,15 +73,16 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
    tipos `frase | numero | lista | tela | endcard | custom`. Só papéis: `fundo` claro/escuro/marca, `estilo`
    display/punch/corpo/mono (o tamanho do display vem do tema, `fontes.display.tamanho`), `cor` tinta/acento/sobre,
    `destaque` marca-texto/risco/assinatura, `saida`
-   `{transicao: fade|wipe|iris, dur}` (padrão: fade 0,3 s). Tempo é automático; `dur`/`em` só para casar com fala ou trilha.
+   `{transicao: fade|wipe|iris, dur}` (padrão: fade 0,3 s). Tempo é automático; `dur`/`em` só para casar com fala ou trilha
+   (`em` conta a partir do início do conteúdo da cena — depois da transição de entrada + 4 quadros —, não do corte).
    Exemplo completo: `motion/amostras/projeto/cenas.json`.
 2. `python ui/motion.py montar edit/shorts/<marca>/<tema>` → corrigir até `ok` (erros vêm com o id da cena: safe area,
    linha que estoura, fonte em fallback, `dur` abaixo do mínimo). Grava `cues.json` e a pasta gerada `motion/` (não editar à mão).
 3. `python ui/motion.py render <proj> --rascunho` → `python ui/motion.py folha <proj>` (QC rápido) → ajustar `cenas.json` →
    `python ui/motion.py render <proj>` → `video.mp4` mudo 1080x1920@30.
 4. Fora do catálogo: `{"id": "cNN", "tipo": "custom", "html": "cenas/cNN.html", "dur": s}` — fragmento HTML com
-   **exatamente um** `<script>KIT.custom((c) => { ...; return fim; })</script>` (zero ou dois = erro "não chamou
-   KIT.custom"; o `montar` registra a cena pelo id, pois `document.currentScript` é nulo no render) usando `c.C`
+   **exatamente um** `<script>KIT.custom((c) => { ...; return fim; })</script>` (zero = erro "não chamou
+   KIT.custom", dois = "chamado 2x"; o `montar` registra a cena pelo id, pois `document.currentScript` é nulo no render) com `data-k-texto` nos elementos de texto (sem ele não há checagem de layout/fonte) usando `c.C`
    (palavras, letras, mascara, fade, marcaTexto, risco, assinatura, contador, kenBurns), `c.tl`, `c.t0`, `c.cue`.
    Custom repetido em 2+ vídeos vira tipo no kit (`motion/kit/kit.js`) e decisão `motion` no log.
 5. Primeira vez na máquina: `cd motion && npm ci`.
@@ -89,7 +90,8 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
 **SFX** (biblioteca da marca em `assets/sfx/`, gerada uma vez — ver `assets/sfx/CREDITS.md`):
 - `motion.py montar` grava `cues.json` ao lado: `[{"t": 1.23, "som": "pop-dourado", "ganho_db": -6}]`, a partir dos eventos
   do kit (assinatura = `pop-dourado`, letras/máscara = `whoosh-reveal`, pill/CTA = `click-pill`, end card = `sting-endcard`,
-  contador = `tick`, palavras subindo = `rise`). Ajuste fino: editar o `cues.json` depois do `montar` final.
+  contador = `tick`, palavras subindo = `rise`). Ajuste fino: editar o `cues.json` depois do `montar` final — `montar` e `render` (que remonta se algo ficou velho) regravam o
+  `cues.json`, então cue ajustado à mão se refaz depois do último deles.
 - Após montar o vídeo mudo: `python ui/audio.py mix-sfx <mudo.mp4> cues.json assets/sfx <com_sfx.mp4>`;
   só então a trilha (linha **Áudio** abaixo):
   `python ui/audio.py mix-trilha <com_sfx.mp4> assets/music/<trilha>.mp3 <final.mp4> --nivel -18 --duck -8`

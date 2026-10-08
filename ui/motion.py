@@ -6,6 +6,7 @@ render: hyperframes de motion/node_modules → video[.<lang>].mp4 conferido no f
 folha: contact sheet de QC a partir do vídeo."""
 import copy
 import json
+import math
 import os
 import re
 import shutil
@@ -34,7 +35,7 @@ MOLDURAS = ("celular", "browser", "nenhuma")
 MARCADORES = ("numero", "assinatura", "check")
 EXT_IMG = (".png", ".jpg", ".jpeg")
 EXT_VID = (".mp4",)
-ID_RE = re.compile(r"c\d{2,}")
+ID_RE = re.compile(r"c[0-9]{2,}")
 MARCA_RE = re.compile(r"[a-z0-9-]+")
 FUNDO_PADRAO = {"frase": "claro", "numero": "claro", "lista": "claro", "tela": "claro",
                 "endcard": "marca", "custom": "claro"}
@@ -79,7 +80,7 @@ def _dentro(proj: Path, rel) -> Path | None:
     return p if p.is_relative_to(Path(proj).resolve()) and p.is_file() else None
 
 def _num(v, minimo=0.0) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= minimo
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= minimo
 
 def _str(v) -> bool:
     return isinstance(v, str) and v.strip() != ""
@@ -143,10 +144,12 @@ def _v_tela(c, proj, e):
     if "kenburns" in c and not isinstance(c["kenburns"], bool):
         e("kenburns precisa ser true/false")
 
-def _v_endcard(c, proj, e):
+def _v_endcard(c, proj, e, lang=None):
     for k in ("cta", "tagline", "url"):
         if k in c and not _str(c[k]):
             e(f"{k} precisa ser texto")
+    if lang and not all(_str(c.get(k)) for k in ("cta", "tagline", "url")):
+        e(f"endcard em {lang} precisa de cta, tagline e url traduzidos no cenas.{lang}.json")
     _cor(c, e)
 
 def _v_custom(c, proj, e):
@@ -159,7 +162,7 @@ def _v_custom(c, proj, e):
 VALIDA_TIPO = {"frase": _v_frase, "numero": _v_numero, "lista": _v_lista, "tela": _v_tela,
                "endcard": _v_endcard, "custom": _v_custom}
 
-def validar(dados, proj: Path) -> list[dict]:
+def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
     if not isinstance(dados, dict):
         return [{"id": "raiz", "motivo": "cenas.json não é um objeto"}]
     erros = []
@@ -202,7 +205,11 @@ def validar(dados, proj: Path) -> list[dict]:
             elif not isinstance(s, dict) or s.get("transicao") not in TRANSICOES \
                     or not (_num(s.get("dur")) and 0 < s["dur"] <= 2):
                 e(i, "saida precisa de transicao (fade|wipe|iris) e dur em (0, 2]")
-        VALIDA_TIPO[tipo](c, proj, lambda m, i=i: e(i, m))
+        err = lambda m, i=i: e(i, m)
+        if tipo == "endcard":
+            _v_endcard(c, proj, err, lang)
+        else:
+            VALIDA_TIPO[tipo](c, proj, err)
     return erros
 
 def _duracao(p: Path) -> float:
@@ -213,7 +220,7 @@ def _duracao(p: Path) -> float:
 def _quadro(s: float) -> float:
     return round(round(s * FPS) / FPS, 6)
 
-def resolver(dados: dict, tema: dict, proj: Path) -> dict:
+def resolver(dados: dict, tema: dict, proj: Path, lang: str | None = None) -> dict:
     d = copy.deepcopy(dados)
     cenas = d["cenas"]
     for n, c in enumerate(cenas):
@@ -234,7 +241,7 @@ def resolver(dados: dict, tema: dict, proj: Path) -> dict:
                 ln.setdefault("destaque", [])
                 ln.setdefault("em", None)
         elif t == "numero":
-            for k, v in (("de", 0), ("formato", "pt-BR"), ("prefixo", ""), ("sufixo", ""), ("legenda", ""), ("cor", cor)):
+            for k, v in (("de", 0), ("formato", lang or "pt-BR"), ("prefixo", ""), ("sufixo", ""), ("legenda", ""), ("cor", cor)):
                 c.setdefault(k, v)
             c["estilo"] = "mono" if tema["regras"]["numero_mono"] else "display"
         elif t == "lista":
@@ -356,7 +363,11 @@ def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> 
     if comp.exists():
         if not (comp / MARCADOR_DIR).is_file():
             raise ValueError(f"{comp} existe e não foi criado pelo motion.py (renomeie ou apague à mão)")
-        shutil.rmtree(comp)
+        for f in comp.iterdir():             # marcador por último: trava no meio não deixa a pasta "alheia"
+            if f.name != MARCADOR_DIR:
+                shutil.rmtree(f) if f.is_dir() else f.unlink()
+        (comp / MARCADOR_DIR).unlink()
+        comp.rmdir()
     shutil.copytree(motion_dir / "kit", comp / "kit")
     (comp / MARCADOR_DIR).write_text("gerado por ui/motion.py montar\n", encoding="utf-8")
     if tema["assinatura"]["tipo"] == "icone":
@@ -406,11 +417,11 @@ def montar(proj: Path, lang: str | None = None, motion_dir: Path = MOTION) -> di
         dados = json.loads(cj.read_text(encoding="utf-8"))
     except json.JSONDecodeError as ex:
         raise ValueError(f"{cj.name} inválido: {ex}") from None
-    erros = validar(dados, proj)
+    erros = validar(dados, proj, lang)
     if erros:
         return {"ok": False, "erros": erros}
     tema = carregar_tema(dados.get("marca"), motion_dir)
-    d = resolver(dados, tema, proj)
+    d = resolver(dados, tema, proj, lang)
     comp = proj / f"motion{suf}"
     _preparar(comp, proj, d, tema, motion_dir)
     customs = {c["id"]: _dentro(proj, c["html"]).read_text(encoding="utf-8")
@@ -483,7 +494,7 @@ def _progresso(proj: Path, fase: str, pct=None, eta=None) -> None:
             return                           # ilegível agora (escrita concorrente): pula o tick, nunca sobrescreve
         if not isinstance(atual, dict):
             return
-    atual["render"] = {"fase": fase, "pct": pct, "eta": eta}
+    atual["render"] = {"fase": fase, "pct": 0 if fase == "falha" and pct is None else pct, "eta": eta}
     pipeline.atomic_write_json(st, atual)
 
 
@@ -549,9 +560,13 @@ def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_d
         r = montar(proj, lang, motion_dir)
         if not r["ok"]:
             return r
+    if not (comp / "tempos.json").is_file():       # montar interrompido: tratar como velho
+        r = montar(proj, lang, motion_dir)
+        if not r["ok"]:
+            return r
     tempos = pipeline.read_json(comp / "tempos.json", None)
     if not tempos:
-        raise RuntimeError(f"{comp / 'tempos.json'} ausente: rodar montar")
+        raise RuntimeError(f"{comp / 'tempos.json'} ilegível: rodar montar")
     nome = f"video_rascunho{suf}.mp4" if rascunho else f"video{suf}.mp4"
     dst = proj / nome
     tmp = proj / f".{nome}.hf.mp4"
@@ -569,7 +584,12 @@ def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_d
 
     tmp.unlink(missing_ok=True)   # nunca aceitar sobra de execução anterior
     _progresso(proj, "render", 0, None)
-    rc, ultimas = _executar(cmd, motion_dir, {**os.environ, **ENV_HF}, linha)
+    try:
+        rc, ultimas = _executar(cmd, motion_dir, {**os.environ, **ENV_HF}, linha)
+    except (RuntimeError, subprocess.CalledProcessError, OSError):
+        tmp.unlink(missing_ok=True)
+        _progresso(proj, "falha")
+        raise
     if rc != 0 or not tmp.is_file():
         tmp.unlink(missing_ok=True)
         _progresso(proj, "falha")
@@ -577,7 +597,7 @@ def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_d
     _progresso(proj, "conferindo", 100, 0)
     try:
         _finalizar(tmp, dst, tempos["duracao"])
-    except (RuntimeError, subprocess.CalledProcessError):
+    except (RuntimeError, subprocess.CalledProcessError, OSError):
         tmp.unlink(missing_ok=True)
         _progresso(proj, "falha")
         raise
@@ -588,9 +608,13 @@ def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_d
 def folha(proj: Path, lang: str | None = None) -> dict:
     proj = Path(proj)
     suf = _lang(lang)
-    video = next((v for v in (proj / f"video{suf}.mp4", proj / f"video_rascunho{suf}.mp4") if v.is_file()), None)
-    if video is None:
+    videos = [v for v in (proj / f"video{suf}.mp4", proj / f"video_rascunho{suf}.mp4") if v.is_file()]
+    if not videos:
         raise ValueError("sem video.mp4 nem video_rascunho.mp4: rodar render")
+    video = max(videos, key=lambda v: v.stat().st_mtime)
+    index = proj / f"motion{suf}" / "index.html"
+    if index.is_file() and video.stat().st_mtime < index.stat().st_mtime:
+        raise ValueError("vídeo mais velho que o montar: rodar render")
     tempos = pipeline.read_json(proj / f"motion{suf}" / "tempos.json", None)
     if not tempos:
         raise ValueError("tempos.json ausente: rodar montar")

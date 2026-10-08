@@ -91,7 +91,7 @@ polêmico). Escolha óbvia sem alternativa não entra. Teto ~30 por projeto.
 `python ui/eventos.py decisao <proj> <assunto> "<escolha>" --etapa <id> --alt "<alternativa>" ... --motivo "<por quê>" [--custo <usd estimado>] [--confianca alta|media|baixa]`
 
 `assunto` ∈ provedor, trilha, sfx, broll, corte, grade, zoom, overlay,
-legenda, conceito, clipe, thumbnail, render, outro (fora da lista → `outro`
+legenda, conceito, clipe, thumbnail, render, motion, outro (fora da lista → `outro`
 e explicar no motivo). `--etapa` precisa estar na receita (ou omitir).
 Respostas do usuário entram sozinhas no log (só da fila do projeto; a fila global não entra — o servidor grava no `/api/reply`).
 
