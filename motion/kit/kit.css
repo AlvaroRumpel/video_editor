@@ -18,7 +18,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; 
 .k-conteudo { position: absolute; left: 80px; top: 180px; width: 920px; height: 1480px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
 
-.k-display { font-family: var(--k-display-familia); font-weight: var(--k-display-peso); font-style: var(--k-display-estilo); font-size: 190px; }
+.k-display { font-family: var(--k-display-familia); font-weight: var(--k-display-peso); font-style: var(--k-display-estilo); font-size: 160px; }
 .k-punch { font-family: var(--k-punch-familia); font-weight: var(--k-punch-peso); font-style: var(--k-punch-estilo); font-size: 96px; letter-spacing: -0.02em; }
 .k-corpo { font-family: var(--k-corpo-familia); font-weight: var(--k-corpo-peso); font-style: var(--k-corpo-estilo); font-size: 56px; }
 .k-mono { font-family: var(--k-mono-familia); font-weight: var(--k-mono-peso); font-style: var(--k-mono-estilo); font-size: 48px; }
@@ -36,7 +36,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; 
 .k-risco { position: absolute; left: -0.02em; right: -0.02em; top: 56%; height: 0.05em; min-height: 8px;
   border-radius: 99px; background: var(--k-risco); transform: scaleX(0); transform-origin: left center; }
 .k-ponto { display: inline-block; width: .15em; height: .15em; border-radius: 50%; background: var(--k-acento); margin-left: .04em; }
-.k-icone { display: inline-block; height: .55em; width: auto; margin-left: .08em; border-radius: 22%; vertical-align: baseline; }
+.k-icone { display: inline-block; height: .55em; width: auto; margin-left: .16em; border-radius: 22%; vertical-align: baseline; }
 
 .k-numero { font-size: 260px; line-height: 1; font-variant-numeric: tabular-nums; }
 .k-lista { align-items: stretch; text-align: left; gap: 28px; }

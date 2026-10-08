@@ -8,7 +8,7 @@
   const F = (n) => n / FPS;
   const quadro = (s) => Math.ceil(s * FPS - 1e-6) / FPS;
   const r3 = (s) => Math.round(s * 1000) / 1000;
-  const customs = {};
+  const customs = [];   // fns de KIT.custom, na ordem do documento (= ordem das cenas custom)
   const cues = [];
   const pintores = [];   // (tempo) => void, chamados a cada seek: estado em função do tempo, nunca acumulado
 
@@ -318,7 +318,7 @@
   }
 
   function custom(c, cena) {
-    const fn = customs[cena.id];
+    const fn = customs[window.__KIT_DADOS.cenas.filter((x) => x.tipo === "custom").indexOf(cena)];
     if (!fn) throw new Error("cena custom não chamou KIT.custom(...)");
     const fim = fn(c);
     if (typeof fim !== "number" || !isFinite(fim)) throw new Error("KIT.custom precisa devolver o instante de fim (número)");
@@ -431,7 +431,7 @@
   }
 
   window.KIT = {
-    custom: (fn) => { customs[document.currentScript.closest(".cena").id] = fn; },
+    custom: (fn) => { customs.push(fn); },   // ordem, não currentScript: o HyperFrames pode reposicionar scripts
     montar, F, FPS,
   };
 })();

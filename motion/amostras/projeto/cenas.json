@@ -1,0 +1,20 @@
+{
+  "marca": "anotus",
+  "aspecto": "9:16",
+  "cenas": [
+    {"id": "c01", "tipo": "frase", "linhas": [
+      {"t": "Pare de decorar", "estilo": "punch"},
+      {"t": "ação.", "estilo": "display", "anim": "letras", "destaque": ["marca-texto", "risco"]}],
+     "saida": {"transicao": "iris", "dur": 0.47}},
+    {"id": "c02", "tipo": "frase", "fundo": "marca", "linhas": [
+      {"t": "Comece a", "estilo": "punch"},
+      {"t": "entender", "estilo": "display", "anim": "mascara", "cor": "acento", "destaque": ["assinatura"]}],
+     "saida": {"transicao": "wipe", "dur": 0.4}},
+    {"id": "c03", "tipo": "numero", "valor": 1250, "legenda": "alunos aprovados"},
+    {"id": "c04", "tipo": "lista", "titulo": "Três passos", "itens": ["Grifar o essencial", "Revisar no dia certo", "Lembrar na prova"]},
+    {"id": "c05", "tipo": "tela", "arquivo": "tela.png", "label": "Busca"},
+    {"id": "c06", "tipo": "tela", "arquivo": "clip.mp4", "moldura": "browser"},
+    {"id": "c07", "tipo": "custom", "html": "c07.html", "dur": 2.5},
+    {"id": "c08", "tipo": "endcard"}
+  ]
+}
