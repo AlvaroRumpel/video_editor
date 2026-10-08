@@ -460,19 +460,28 @@ def _exige_credito(c: dict) -> bool:
             or "creativecommons.org/licenses/by" in lic)
 
 
+DIVULGACAO = ("\n## Divulgação\n\nEste vídeo usa clipes gerados por IA com aparência realista: no YouTube Studio "
+              "marcar \"Conteúdo alterado ou sintético\" = Sim; no Instagram ativar o rótulo de IA.\n")
+
+
 def creditos(broll_json: Path, dst_md: Path) -> dict:
     b = ler_broll(broll_json)
-    linhas, desc = [], []
+    linhas, desc, ia = [], [], 0
     for m in b.get("momentos", []):
         if m.get("status") != "aprovado":
             continue
         c = _cand_por_rotulo(m, m.get("escolhido")) or (m.get("candidatos") or [None])[0]
         if not c:
             continue
+        if c.get("fonte") == "ia":
+            ia += 1
+            linhas.append(f"- {m['id']} · gerado por IA · fal/{c.get('modelo_video') or '?'}")
+            continue
         linhas.append(f"- {m['id']} · {c['fonte']} · {c['autor']} · {c['url']} · {c['licenca']}")
         if _exige_credito(c):
             desc.append(f"{c['autor']} — {c['url']} ({c['licenca']})")
-    md = "# Créditos de b-roll\n\n" + "\n".join(linhas) + "\n\n## Para a descrição\n\n" + ("\n".join(desc) if desc else "(nenhum crédito obrigatório)") + "\n"
+    md = ("# Créditos de b-roll\n\n" + "\n".join(linhas) + "\n\n## Para a descrição\n\n"
+          + ("\n".join(desc) if desc else "(nenhum crédito obrigatório)") + "\n" + (DIVULGACAO if ia else ""))
     Path(dst_md).write_text(md, encoding="utf-8")
     return {"usados": len(linhas), "com_credito": len(desc)}
 

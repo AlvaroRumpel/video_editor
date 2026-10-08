@@ -55,10 +55,17 @@ def _broll(proj: Path) -> dict:
         cands = m.get("candidatos")
         if not isinstance(cands, list):
             raise ValueError(f"broll.json: {m['id']} sem candidatos")
-        cs = [{"rotulo": f"{m['id']}-{k + 1}", "fonte": c.get("fonte") or "", "tipo": c.get("tipo") or "video",
-               "arq": c.get("arq") or "", "dur": _f(c.get("dur")), "licenca": c.get("licenca") or "",
-               "autor": c.get("autor") or ""}
-              for k, c in enumerate(cands) if isinstance(c, dict)]
+        cs = []
+        for k, c in enumerate(cands):
+            if not isinstance(c, dict):
+                continue
+            item = {"rotulo": f"{m['id']}-{k + 1}", "fonte": c.get("fonte") or "", "tipo": c.get("tipo") or "video",
+                    "arq": c.get("arq") or "", "dur": _f(c.get("dur")), "licenca": c.get("licenca") or "",
+                    "autor": c.get("autor") or ""}
+            if c.get("fonte") == "ia":
+                item["custo_est"] = None if c.get("custo_est") is None else _f(c["custo_est"])
+                item["prompt"] = c.get("prompt") or ""
+            cs.append(item)
         rotulos = [c["rotulo"] for c in cs]
         esc = m.get("escolhido") if m.get("escolhido") in rotulos else (rotulos[0] if rotulos else None)
         out.append({"id": m["id"], "t_in": _f(m.get("t_in")), "t_out": _f(m.get("t_out")),

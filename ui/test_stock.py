@@ -371,6 +371,23 @@ def test_creditos(tmp_path, mp4, jpg):
     assert r == {"usados": 2, "com_credito": 1}
     assert "b01 · unsplash · Hal · https://unsplash.com/photos/u1" in md
     assert "## Para a descrição" in md and "Hal" in md.split("## Para a descrição")[1]
+    assert "## Divulgação" not in md
+
+
+def test_creditos_ia_divulgacao(tmp_path, mp4, jpg):
+    proj = tmp_path / "proj"; bj = _broll(proj, mp4, jpg)
+    b = json.loads(bj.read_text(encoding="utf-8"))
+    b["momentos"][0]["candidatos"][0].update(fonte="ia", autor="", url="", modelo_video="fal-ai/kling",
+                                             licenca="gerado por IA (fal/fal-ai/kling)")
+    b["momentos"][0].update(status="aprovado", escolhido="b01-1")
+    b["momentos"][1].update(status="aprovado", escolhido="b02-1")
+    bj.write_text(json.dumps(b), encoding="utf-8")
+    r = stock.creditos(bj, proj / "creditos.md")
+    md = (proj / "creditos.md").read_text(encoding="utf-8")
+    assert r == {"usados": 2, "com_credito": 0}
+    assert "- b01 · gerado por IA · fal/fal-ai/kling" in md
+    assert "## Divulgação" in md and "sintético" in md
+    assert "fal" not in md.split("## Para a descrição")[1].split("## Divulgação")[0]
 
 
 def test_preparar_releitura_falha_nao_apaga_edl(tmp_path, mp4, jpg, monkeypatch):
