@@ -48,14 +48,16 @@ motion/                         versionado (node_modules ignorado)
     vendor/gsap.min.js          sem CDN: render roda offline
     fonts/                      Fraunces, Inter, Archivo, IBM Plex Mono (.ttf locais + OFL.txt)
     kit.css                     @font-face com famílias próprias ("K Fraunces"…), reset, safe area
-    componentes.js              letras, palavras, mascara, marcaTexto, risco, contador,
-                                grao, manchas, kenBurns, assinatura, fixos, cue
-    transicoes/                 fade (padrão), iris (shader SDF), wipe
+    kit.js                      componentes (letras, palavras, mascara, marcaTexto, risco,
+                                contador, grao, manchas, kenBurns, assinatura, fixos, cue),
+                                transições (fade, wipe, iris SDF) e os tipos de cena
   temas/
     anotus.json
     campeio.json  campeio/icone.png
-  cenas/                        templates por tipo: frase, numero, lista, tela, endcard
-  amostras/cenas.json           todos os tipos, nas duas marcas (golden test)
+  amostras/
+    projeto/                    cenas.json com todos os tipos + c07.html (custom); roda
+                                nas duas marcas (golden test)
+    ref/                        PNGs de referência do golden
 ui/motion.py                    CLI: montar | render | folha
 ```
 
@@ -65,11 +67,15 @@ ui/motion.py                    CLI: montar | render | folha
 - `.gitignore`: acrescentar `motion/node_modules/`.
 - Blocos do catálogo HyperFrames que deram certo no spike (`grain-overlay`,
   `bottom-up-letters`, `inline-highlight`, `sdf-iris`) são a base de
-  `componentes.js`/`transicoes/`, adaptados a 9:16 e ao tema. Apache 2.0:
+  `kit.js`, adaptados a 9:16 e ao tema. Apache 2.0:
   crédito no cabeçalho do arquivo. O catálogo **não** entra no fluxo por
   vídeo (`hyperframes add` fica para quem evolui o kit).
 - GSAP vendorizado na versão que o template do hyperframes 0.8.141 usa
-  (licença padrão do GSAP permite uso comercial).
+  (3.14.2; licença padrão do GSAP permite uso comercial).
+- Os pintores (contador, grão, anel da íris) são movidos por um tween proxy
+  (setter de propriedade), não por `onUpdate`, porque o HyperFrames faz `seek`
+  com `suppressEvents`. O canvas da íris (`#k-brilho`) só fica visível durante
+  as janelas de íris.
 
 ## `cenas.json`
 
@@ -84,14 +90,14 @@ do `roteiro.md` aprovado.
     { "id": "c01", "tipo": "frase", "fundo": "claro",
       "linhas": [
         { "t": "Pare de", "estilo": "punch", "anim": "palavras" },
-        { "t": "decorar.", "estilo": "serif", "anim": "letras",
+        { "t": "decorar.", "estilo": "display", "anim": "letras",
           "destaque": ["marca-texto", "risco"] }
       ],
       "saida": { "transicao": "iris", "dur": 0.47 } },
     { "id": "c02", "tipo": "frase", "fundo": "marca",
       "linhas": [
         { "t": "Comece a", "estilo": "punch", "anim": "palavras" },
-        { "t": "entender", "estilo": "serif", "anim": "mascara",
+        { "t": "entender", "estilo": "display", "anim": "mascara",
           "cor": "acento", "destaque": ["assinatura"] }
       ] },
     { "id": "c03", "tipo": "endcard", "cta": "Teste grátis" }
@@ -105,19 +111,22 @@ do `roteiro.md` aprovado.
   `"9:16"` na v1 → 1080x1920 @ 30 fps), `cenas` (lista ordenada).
 - Toda cena: `id` (`cNN`, único), `tipo`, `fundo` ∈ `claro|escuro|marca`
   (default do tema por tipo), `dur` opcional (s), `fixos` (default `true`),
-  `saida` opcional `{transicao: fade|iris|wipe, dur}` (default = transição
-  padrão do tema).
-- `frase`: `linhas[]` com `t` (texto), `estilo` ∈ `serif|punch|corpo|mono`,
-  `anim` ∈ `palavras|letras|mascara|fade`, `cor` ∈ `tinta|acento|destaque`
-  (default por estilo/fundo), `destaque[]` ⊂ `marca-texto|risco|assinatura`,
+  `saida` opcional `{transicao: fade|iris|wipe, dur}` (default = `transicao_padrao`
+  do tema, também `{transicao, dur}`).
+- `frase`: `linhas[]` com `t` (texto), `estilo` ∈ `display|punch|corpo|mono`
+  (`display` = a fonte de título do tema: Fraunces no Anotus, Archivo na Campeio),
+  `anim` ∈ `palavras|letras|mascara|fade`, `cor` ∈ `tinta|acento|sobre`
+  (default por estilo/fundo; `destaque` é fundo de marca-texto, não cor de texto), `destaque[]` ⊂ `marca-texto|risco|assinatura`,
   `em` opcional (s desde o início da cena).
 - `numero`: `valor` (número), `formato` (`"pt-BR"` default), `prefixo`/
   `sufixo`, `legenda`, `de` (default 0).
 - `lista`: `titulo` opcional, `itens[]` (texto), `marcador` ∈
   `numero|assinatura|check`.
 - `tela`: `arquivo` (png/jpg/mp4 relativo ao projeto), `moldura` ∈
-  `celular|browser|nenhuma`, `label` (pill), `kenburns` (default `true` para
-  imagem).
+  `celular|browser|nenhuma`, `label` (a pill da cena; o tema não tem pill fixa),
+  `kenburns` (default `true` para imagem). `dur` padrão: 3 s para imagem; para
+  vídeo, a duração do arquivo. Imagem entra embrulhada em `div.k-midia-caixa`
+  (`overflow: hidden`) para o Ken Burns; vídeo nunca recebe Ken Burns.
 - `endcard`: `cta` (default do tema), `tagline`/`url` (default do tema).
 - `custom`: `html` (caminho relativo ao projeto), `dur` (obrigatório).
 
@@ -136,45 +145,54 @@ trocando `marca`.
 
 ```json
 {
-  "cores": { "tinta": "#2B215C", "acento": "#D4A017", "destaque": "rgba(255,214,90,.55)",
-             "fundo": { "claro": "#F3F2FA", "escuro": "#2B215C", "marca": "#4A3D8F" },
-             "texto_sobre": { "escuro": "#FFFFFF", "marca": "#FFFFFF" } },
-  "fontes": { "serif": ["K Fraunces", 700, "italic"], "punch": ["K Inter", 800],
-              "corpo": ["K Inter", 500], "mono": ["K Inter", 500] },
-  "assinatura": { "tipo": "ponto", "cor": "#D4A017" },
-  "fixos": { "wordmark": "Anotus.", "pill": true, "barra": false, "grao": 0.12 },
-  "endcard": { "tagline": "Seu segundo cérebro jurídico", "cta": "Teste grátis / link na bio" },
-  "transicao_padrao": { "tipo": "fade", "dur": 0.3 },
+  "cores": { "tinta": "#2B215C", "acento": "#D4A017", "sobre": "#FFFFFF",
+             "marca_texto": "rgba(255,214,90,.55)", "risco": "#4A3D8F", "manchas": "#B9B3E6",
+             "fundo": { "claro": "#F3F2FA", "escuro": "#2B215C", "marca": "#4A3D8F" } },
+  "fontes": { "display": { "familia": "K Fraunces", "peso": 700, "estilo": "italic", "tamanho": 210 },
+              "punch": { "familia": "K Inter", "peso": 800 },
+              "corpo": { "familia": "K Inter", "peso": 500 },
+              "mono": { "familia": "K Inter", "peso": 700 } },
+  "assinatura": { "tipo": "ponto" },
+  "fixos": { "wordmark": "Anotus.", "wordmark_fonte": "display", "barra": false, "grao": 0.1 },
+  "endcard": { "marca": "Anotus", "tagline": "Seu segundo cérebro jurídico",
+               "cta": "Teste grátis", "url": "link na bio" },
+  "transicao_padrao": { "transicao": "fade", "dur": 0.3 },
   "regras": { "numero_mono": false }
 }
 ```
 
-Campeio: `fundo.marca` = gradiente hero do `BRAND.md`, `assinatura` =
+O tamanho do `display` é por tema (`fontes.display.tamanho`: Anotus 210, Campeio
+160), exposto como `--k-display-tamanho` (fallback 190px). Campeio: `fundo.marca` = gradiente hero do `BRAND.md`, `assinatura` =
 `{"tipo": "icone", "arquivo": "campeio/icone.png"}`, `barra: true`,
-`numero_mono: true` (IBM Plex Mono), Archivo 800–900 nos títulos. Valores
+`numero_mono: true` (IBM Plex Mono), Archivo 800–900 nos títulos (`display`). Valores
 saem de `padrao-ads.md` e `BRAND.md` (fonte da verdade continua lá; o tema é
 a tradução para o kit).
 
 ### Custom
 
 `{"id": "c04", "tipo": "custom", "html": "cenas/c04.html", "dur": 3}`. O
-arquivo é um fragmento HTML com um `<script>` que exporta
-`montar(tl, el, tema, kit)`: `tl` = timeline GSAP da cena, `el` = container,
-`tema` = tema resolvido (também como variáveis CSS `--k-tinta`, `--k-acento`…),
-`kit` = componentes. Eventos de som via `kit.cue("tick")`. Custom que aparece
-em ≥ 2 vídeos vira tipo em `motion/cenas/` (decisão registrada).
+arquivo é um fragmento HTML com **exatamente um** `<script>KIT.custom((c) => {
+...; return fim; })</script>`: `c.C` = componentes, `c.tl` = timeline GSAP da
+cena, `c.t0` = início da cena, `c.cue(...)` = eventos de som; o tema também
+chega como variáveis CSS (`--k-tinta`, `--k-acento`…). Contrato: `montar` emite
+`<script>KIT._cena="cNN"</script>` antes de cada fragmento e `KIT.custom(fn)`
+registra por id de cena (`document.currentScript` é nulo dentro do render do
+HyperFrames, por isso não dá para usá-lo). Zero chamadas a `KIT.custom` →
+erro "não chamou KIT.custom"; duas ou mais → erro. Custom que aparece em ≥ 2
+vídeos vira tipo em `motion/kit/kit.js` (decisão `motion` registrada).
 
 ## Módulo `ui/motion.py`
 
-### `montar <proj> [--cenas cenas.<lang>.json]`
+### `montar <proj> [--lang xx]`
 
 1. Valida schema (tipos, enums, ids únicos, `destaque` coerente, arquivos de
    `tela`/`custom` existentes, tema existente).
-2. Gera `<proj>/motion/` (pasta gerada, sobrescrita a cada `montar`): uma
-   subcomposição HyperFrames por cena (`cenas/cNN.html`, a partir do template
-   do tipo + tema) e a raiz `index.html` encadeando-as. `motion/kit/` e o
-   asset do tema são copiados para `<proj>/motion/kit/` (o HyperFrames só
-   serve arquivos de dentro da pasta da composição).
+2. Gera `<proj>/motion/` (pasta gerada, sobrescrita a cada `montar`; só é
+   apagada se tiver o marcador `.motion`; com `--lang xx` vira `motion.<xx>/`,
+   a partir de `cenas.<xx>.json`): uma composição única, `index.html`, em que
+   cada cena é um `.clip` da raiz (sem subcomposições em arquivos separados).
+   `motion/kit/` e o asset do tema são copiados para dentro da pasta (o
+   HyperFrames só serve arquivos de dentro da pasta da composição).
 3. Abre cada cena no Chromium (Playwright Python, já usado em
    `referencia.py`/`localiza.py`) e lê `window.__kit`: duração calculada,
    eventos de som, medidas de texto no estado final.
@@ -200,8 +218,12 @@ Mapa de som padrão: assinatura → `pop-dourado`; `letras`/`mascara` →
 - `npx hyperframes render` a partir de `motion/` (binário do `motion/node_modules`,
   nunca versão solta) → `<proj>/video.mp4` (mudo, encode padrão dos ads:
   1080x1920 @ 30, H.264 yuv420p `-crf 18`, range tv). `--rascunho` →
-  540x960, `video_rascunho.mp4`. `--lang xx` → `video.<xx>.mp4` a partir de
-  `cenas.<xx>.json`.
+  qualidade `draft` do HyperFrames, ainda em 1080x1920 (`--resolution` só
+  aumenta), `video_rascunho.mp4`. `--lang xx` → `motion.<xx>/`,
+  `cues.<xx>.json` e `video.<xx>.mp4`, a partir de `cenas.<xx>.json`.
+- Env do render: `HYPERFRAMES_NO_TELEMETRY=1`, `DO_NOT_TRACK=1`,
+  `HF_CLI_TELEMETRY_DISABLED=1`, `HYPERFRAMES_SKIP_SKILLS=1` (telemetria
+  desligada).
 - Progresso em `state.json` → `{"render": {"fase", "pct", "eta"}}` lendo a
   saída do HyperFrames (merge preservando chaves alheias, como o resto da UI).
 - Depois: `ffprobe` confere dimensão, fps, frames = duração × 30, `yuv420p`
@@ -228,7 +250,7 @@ passo 1 do QC do `padrao-ads.md`.
 - Dublagem (`dublagem.md` passo 11, ads novos): `localiza.py extrair` e
   `aplicar` aceitam `cenas.json` (campos de texto: `t`, `itens[]`, `titulo`,
   `legenda`, `label`, `cta`, `tagline`) → `cenas.<lang>.json`;
-  `motion.py montar --cenas cenas.<lang>.json` substitui o `checar` (estouro
+  `motion.py montar --lang <lang>` substitui o `checar` (estouro
   vira erro de validação); `render --lang <lang>`. Custom HTML segue pelo
   caminho atual de `.html` do `localiza.py`.
 - `eventos.py`: assunto novo `motion` (transição fora do padrão, custom no
@@ -248,8 +270,9 @@ passo 1 do QC do `padrao-ads.md`.
 - Render falhou → exit ≠ 0 com as últimas 20 linhas do stderr; na UI, etapa
   `producao` `falha --nota "<motivo>"`.
 - `ffprobe` fora do esperado → erro com o valor encontrado.
-- Lint do HyperFrames: só erros contam; avisos de subcomposição ignorados
-  (ruído visto no spike).
+- Lint do HyperFrames não é imposto: seu único erro,
+  `missing_timeline_registry`, é falso positivo (o kit registra
+  `window.__timelines.main` em runtime).
 
 ## Testes
 
@@ -258,17 +281,18 @@ passo 1 do QC do `padrao-ads.md`.
   duplicado, custom sem `dur` falham com `id` certo;
 - tema: o mesmo `cenas.json` resolve cores/fontes diferentes em `anotus` e
   `campeio`; papel ausente no tema é erro;
-- `montar` gera uma subcomposição por cena e `data-start` somando durações
-  com sobreposição de transição;
+- `montar` gera um `.clip` por cena na composição única, com `data-start`
+  somando durações com sobreposição de transição;
 - `cues.json` sai com os eventos esperados de uma cena `frase` com
   `assinatura` (usa Chromium; pula se Playwright ausente);
 - layout: linha longa de propósito vira erro de estouro; fonte inexistente
   vira erro de fallback.
 
 `ui/test_motion_golden.py` (lento, marcado; pula sem Node/`motion/node_modules`):
-renderiza `motion/amostras/cenas.json` nas duas marcas e compara frames-chave
-com PNGs de referência por PSNR ≥ 35 dB. Atualizar referências só de
-propósito (`--atualizar`). Upgrade do hyperframes só com esse teste passando.
+renderiza `motion/amostras/projeto/cenas.json` nas duas marcas e compara
+frames-chave com os PNGs de `motion/amostras/ref/` por PSNR ≥ 35 dB. Opt-in:
+`MOTION_GOLDEN=1`; atualizar referências só de propósito
+(`MOTION_GOLDEN=atualizar`). Upgrade do hyperframes só com esse teste passando.
 
 ## Critério de sucesso (piloto)
 

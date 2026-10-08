@@ -143,6 +143,9 @@ Shorts: `Formatos/padrao-youtube-shorts.md` (Clip Factory, `ui/clips.py`). Publo
 só como **draft** (`create_post` + upload + `complete_media`); nunca agendar sem
 pedido explícito — Starter limita 3 agendados / 7 dias.
 
+Motion de reel/ad: só via `python ui/motion.py` (kit HyperFrames em `motion/`, `cenas.json` por vídeo); cena
+`custom` repetida em 2+ vídeos vira tipo no kit. Upgrade do hyperframes só com `MOTION_GOLDEN=1` passando.
+
 Vídeo de referência (Reel/Short) = inspiração de mecanismo, nunca cópia; URL e autor ficam em conceitos.md. Download só via ui/referencia.py (yt-dlp ou arquivo em bruto/ref/).
 
 ## Regras
