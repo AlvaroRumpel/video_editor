@@ -18,7 +18,7 @@ const escapeHtml = s => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const TABS = ['board', 'edicao', 'aprovacao', 'docs', 'custos', 'linha'];
-const FOLHAS = ['broll', 'clips', 'conceitos', 'overlays'];   // campo `folha` do pedido waiting_reply
+const FOLHAS = ['broll', 'clips', 'conceitos', 'overlays', 'traducao'];   // campo `folha` do pedido waiting_reply
 const STATUS_LABEL = { pendente: 'pendente', andamento: 'em andamento', fim: 'ok',
   espera: 'esperando você', pulada: 'pulada', falha: 'falha' };
 const hashFor = (pid, tab) => `#/p/${encodeURIComponent(pid)}/${tab}`;

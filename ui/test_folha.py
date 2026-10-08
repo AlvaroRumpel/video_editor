@@ -297,3 +297,38 @@ def test_protocolo_folhas_documentado():
     assert "conceitos.json" in ref and '"folha": "conceitos"' in ref
     assert "ui/queue.json" in ref and "aguardando escolha" in ref
     assert "fila do projeto" in claude
+
+
+def _dub_fixture(proj, lang="es", textos=True):
+    d = proj / "dub" / lang
+    d.mkdir(parents=True)
+    (d / "dublagem.json").write_text(json.dumps({"lang": lang, "frases": [
+        {"id": "f001", "t_in": 0.0, "t_out": 2.0, "orig": "oi gente", "trad": "hola gente"},
+        {"id": "f002", "t_in": 2.5, "t_out": 3.0, "orig": "tudo bem", "trad": None}]}), encoding="utf-8")
+    if textos:
+        (d / "textos.json").write_text(json.dumps({"textos": {
+            "Fecha o caderno": {"id": "t01", "trad": "Cierra el cuaderno", "arquivos": ["anim.html"]}}}),
+            encoding="utf-8")
+
+
+def test_ler_traducao(proj):
+    _dub_fixture(proj)
+    d = folha.ler(proj, "traducao")
+    assert d["lang"] == "es" and d["cps"] == 15.0
+    assert d["frases"][0] == {"id": "f001", "t_in": 0.0, "t_out": 2.0, "orig": "oi gente", "trad": "hola gente",
+                              "slot": 2.0, "estimativa": 0.67}
+    assert d["frases"][1]["trad"] == "" and d["frases"][1]["estimativa"] == 0.0
+    assert d["textos"] == [{"id": "t01", "orig": "Fecha o caderno", "trad": "Cierra el cuaderno", "arquivos": ["anim.html"]}]
+
+
+def test_ler_traducao_idiomas(proj):
+    with pytest.raises(ValueError, match="não encontrado"):
+        folha.ler(proj, "traducao")
+    _dub_fixture(proj, "es", textos=False)
+    _dub_fixture(proj, "en", textos=False)
+    with pytest.raises(ValueError, match="vários idiomas"):
+        folha.ler(proj, "traducao")
+    assert folha.ler(proj, "traducao", lang="en")["lang"] == "en"
+    assert folha.ler(proj, "traducao", lang="en")["textos"] == []
+    with pytest.raises(ValueError, match="idioma"):
+        folha.ler(proj, "traducao", lang="../x")

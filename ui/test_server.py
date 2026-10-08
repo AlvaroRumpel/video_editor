@@ -629,3 +629,13 @@ def test_reply_log_falhando_nao_quebra(client, fake_root, monkeypatch):
     monkeypatch.setattr(eventos, "registrar_resposta", quebra)
     r = client.post("/api/reply", params={"id": "edit-fake"}, json={"qid": 5, "text": "ok"})
     assert r.status_code == 200 and r.json()["status"] == "pending"
+
+
+def test_folha_traducao_route(client, fake_root):
+    d = fake_root / "edit-fake" / "dub" / "es"
+    d.mkdir(parents=True)
+    (d / "dublagem.json").write_text(json.dumps({"lang": "es", "frases": [
+        {"id": "f001", "t_in": 0, "t_out": 1, "orig": "oi", "trad": "hola"}]}), encoding="utf-8")
+    r = client.get("/api/folha", params={"id": "edit-fake", "tipo": "traducao", "lang": "es"})
+    assert r.status_code == 200 and r.json()["frases"][0]["trad"] == "hola"
+    assert client.get("/api/folha", params={"id": "edit-fake", "tipo": "traducao", "lang": "zz"}).status_code == 422

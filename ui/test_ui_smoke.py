@@ -655,3 +655,29 @@ def test_pagina_decisoes_descarta_resposta_atrasada(page, ui_url, fake_root):
     page.wait_for_timeout(2500)
     assert page.locator(".dec-tab tbody tr").count() == 1
     assert "tirar gaguejo" in page.locator(".dec-tab").inner_text()
+
+
+def test_folha_traducao(page, ui_url, fake_root):
+    proj = fake_root / "edit-fake"
+    d = proj / "dub" / "es"
+    d.mkdir(parents=True)
+    (d / "dublagem.json").write_text(json.dumps({"lang": "es", "frases": [
+        {"id": "f001", "t_in": 0.0, "t_out": 2.0, "orig": "oi gente", "trad": "hola gente"},
+        {"id": "f002", "t_in": 2.5, "t_out": 3.0, "orig": "tudo bem", "trad": "todo bien"}]}), encoding="utf-8")
+    (d / "textos.json").write_text(json.dumps({"textos": {
+        "Fecha o caderno": {"id": "t01", "trad": "Cierra el cuaderno", "arquivos": ["anim.html"]}}}), encoding="utf-8")
+    (proj / "ui" / "queue.json").write_text(json.dumps([
+        {"id": 9, "status": "waiting_reply", "type": "instrucao", "text": "x", "resultado": "revise a tradução",
+         "folha": "traducao", "lang": "es"}]), encoding="utf-8")
+    page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
+    page.wait_for_selector(".fl-tr")
+    assert page.locator("#fl-resp").inner_text() == "ok"
+    page.fill(".fl-tr[data-i=f002] .fl-tr-trad", "todo   muy bien")
+    page.fill(".fl-tr[data-i=t01] .fl-tr-trad", "Cierra tu cuaderno")
+    assert page.locator("#fl-resp").inner_text() == "ok\nf002: todo muy bien\nt01: Cierra tu cuaderno"
+    page.fill(".fl-tr[data-i=f001] .fl-tr-trad", "hola a todos los que están viendo este video ahora mismo")
+    assert "estoura" in page.locator(".fl-tr[data-i=f001] .fl-tr-tempo").get_attribute("class")
+    page.click("#fl-enviar")
+    page.wait_for_function("document.body.dataset.tab === 'board'")
+    q = json.loads((proj / "ui" / "queue.json").read_text(encoding="utf-8"))
+    assert q[0]["reply"].startswith("ok\nf001: hola a todos") and q[0]["status"] == "pending"

@@ -37,7 +37,7 @@ async function renderFolha() {
   folhaAtual = { key, tipo: p.folha, qid: p.id, dados: null, erro: null };
   box.innerHTML = '<div class="dim fl-carregando">carregando folha…</div>';
   try {
-    const r = await fetch(api('/api/folha', { id: S.pid, tipo: p.folha }));
+    const r = await fetch(api('/api/folha', p.lang ? { id: S.pid, tipo: p.folha, lang: p.lang } : { id: S.pid, tipo: p.folha }));
     if (folhaAtual.key !== key) return;
     if (r.ok) folhaAtual.dados = await r.json();
     else folhaAtual.erro = (await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`;
@@ -315,4 +315,47 @@ FOLHA_TIPOS.overlays = {
     const x = s.o[o.id];
     return x.veto ? [`${o.id}:não`] : x.texto.trim() ? [`${o.id}: ${x.texto.trim()}`] : [];
   })),
+};
+
+// ---- tradução (dublagem): fala + textos na tela, edição inline ----
+FOLHA_TIPOS.traducao = {
+  sel: d => ({ t: Object.fromEntries(d.frases.concat(d.textos).map(x => [x.id, x.trad || ''])) }),
+  html: d => `<h3 class="fl-sec">Fala · ${escapeHtml(d.lang)}</h3>` +
+    (d.frases.length ? d.frases.map(f => `<div class="fl-tr" data-i="${escapeHtml(f.id)}">
+        <div class="fl-tr-orig"><span class="mono dim">${escapeHtml(f.id)} · ${fmtMSS(f.t_in)}</span> ${escapeHtml(f.orig)}</div>
+        <textarea class="fl-tr-trad" rows="2"></textarea>
+        <div class="mono fl-tr-tempo"></div>
+      </div>`).join('') : '<div class="dim">sem frases</div>') +
+    (d.textos.length ? `<h3 class="fl-sec">Tela</h3>` + d.textos.map(t => `<div class="fl-tr" data-i="${escapeHtml(t.id)}">
+        <div class="fl-tr-orig"><span class="mono dim">${escapeHtml(t.id)}</span> ${escapeHtml(t.orig)}
+          <span class="dim">· ${escapeHtml(t.arquivos.join(', '))}</span></div>
+        <textarea class="fl-tr-trad" rows="1"></textarea>
+        <div class="mono fl-tr-tempo"></div>
+      </div>`).join('') : ''),
+  marca: (box, d, s) => {
+    const prop = Object.fromEntries(d.frases.concat(d.textos).map(x => [x.id, x.trad || '']));
+    const fr = Object.fromEntries(d.frases.map(f => [f.id, f]));
+    box.querySelectorAll('.fl-tr').forEach(k => {
+      const id = k.dataset.i, ta = k.querySelector('.fl-tr-trad');
+      if (ta.value !== s.t[id]) ta.value = s.t[id];
+      k.classList.toggle('editada', s.t[id] !== prop[id]);
+      const tempo = k.querySelector('.fl-tr-tempo');
+      if (tempo && fr[id]) {
+        const est = s.t[id].length / d.cps;
+        tempo.textContent = `${est.toFixed(1)}s / ${fr[id].slot.toFixed(1)}s`;
+        tempo.classList.toggle('estoura', est > fr[id].slot);
+      }
+    });
+  },
+  entrada: (e, d, s) => {
+    if (!e.target.classList.contains('fl-tr-trad')) return false;
+    s.t[e.target.closest('.fl-tr').dataset.i] = e.target.value;
+    return true;
+  },
+  resposta: (d, s) => {
+    const ed = d.frases.concat(d.textos)
+      .filter(x => s.t[x.id] !== (x.trad || ''))
+      .map(x => `${x.id}: ${s.t[x.id].replace(/\s+/g, ' ').trim()}`);
+    return ed.length ? 'ok\n' + ed.join('\n') : 'ok';
+  },
 };

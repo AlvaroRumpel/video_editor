@@ -299,12 +299,12 @@ def decisoes_route(request: Request, assunto: str | None = None):
 
 
 @app.get("/api/folha")
-def folha_route(request: Request, id: str, tipo: str):
+def folha_route(request: Request, id: str, tipo: str, lang: str | None = None):
     if tipo not in folha.TIPOS:
         raise HTTPException(400, "tipo inválido")
     proj = _proj(request, id)
     try:
-        return folha.ler(proj, tipo)
+        return folha.ler(proj, tipo, lang=lang)
     except ValueError as e:
         raise HTTPException(422, str(e))
 

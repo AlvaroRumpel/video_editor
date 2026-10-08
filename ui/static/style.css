@@ -692,3 +692,13 @@ body:not([data-route="decisoes"]) .only-decisoes { display: none !important; }
 .dec-tab th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .dec-tab a { color: var(--accent); text-decoration: none; }
 .dec-vazio { padding: 30px 0; }
+
+/* ---- folha tradução ---- */
+.fl-sec { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin: 14px 0 6px; }
+.fl-tr { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: start; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.fl-tr.editada .fl-tr-trad { border-color: var(--accent); }
+.fl-tr-orig { font-size: 13px; }
+.fl-tr-trad { resize: vertical; padding: 6px; font: inherit; }
+.fl-tr-tempo { font-size: 11px; color: var(--text-dim); min-width: 90px; text-align: right; }
+.fl-tr-tempo.estoura { color: var(--fail); }
+#fl-resp { white-space: pre-wrap; }   /* resposta da tradução tem uma linha por edição */

@@ -10,10 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import pipeline  # noqa: E402
 
-TIPOS = ("broll", "clips", "conceitos", "overlays")
+TIPOS = ("broll", "clips", "conceitos", "overlays", "traducao")
 X_PADRAO = 636
 ANIMATIC_RE = re.compile(r"animatic-[A-Z]\.png")
 OVERLAY_PNG_RE = re.compile(r"overlays/o\d{2,3}\.png")
+LANG_RE = re.compile(r"[a-z]{2}")
 
 
 def _json(path: Path) -> dict:
@@ -124,10 +125,45 @@ def _overlays_ler(proj: Path) -> dict:
     return {"overlays": out}
 
 
+def _traducao(proj: Path, lang=None) -> dict:
+    import dublagem   # import local: dublagem puxa clips/audio
+    dub = proj / "dub"
+    langs = sorted(p.name for p in dub.iterdir() if p.is_dir() and (p / "dublagem.json").is_file()) if dub.is_dir() else []
+    if lang is None:
+        if not langs:
+            raise ValueError("dublagem.json não encontrado")
+        if len(langs) > 1:
+            raise ValueError(f"vários idiomas ({', '.join(langs)}) — informe lang")
+        lang = langs[0]
+    if not isinstance(lang, str) or not LANG_RE.fullmatch(lang):
+        raise ValueError(f"idioma inválido: {lang!r}")
+    d = _json(dub / lang / "dublagem.json")
+    cps = dublagem.CPS.get(lang, dublagem.CPS_PADRAO)
+    frases = []
+    for f in _itens(d, "frases", "dublagem.json"):
+        t_in, t_out = _f(f.get("t_in")), _f(f.get("t_out"))
+        trad = f.get("trad") or ""
+        frases.append({"id": f["id"], "t_in": t_in, "t_out": t_out, "orig": f.get("orig") or "", "trad": trad,
+                       "slot": round(t_out - t_in, 2), "estimativa": round(len(trad) / cps, 2)})
+    textos = []
+    tp = dub / lang / "textos.json"
+    if tp.is_file():
+        t = _json(tp).get("textos") or {}
+        if not isinstance(t, dict):
+            raise ValueError("textos.json inválido")
+        for orig, v in t.items():
+            if isinstance(v, dict):
+                textos.append({"id": v.get("id") or "", "orig": orig, "trad": v.get("trad") or "",
+                               "arquivos": list(v.get("arquivos") or [])})
+    return {"lang": lang, "cps": cps, "frases": frases, "textos": textos}
+
+
 LEITORES = {"broll": _broll, "clips": _clips, "conceitos": _conceitos, "overlays": _overlays_ler}
 
 
-def ler(proj: Path, tipo: str) -> dict:
+def ler(proj: Path, tipo: str, lang=None) -> dict:
+    if tipo == "traducao":
+        return _traducao(Path(proj), lang)
     if tipo not in LEITORES:
         raise ValueError(f"tipo inválido: {tipo} (use {', '.join(TIPOS)})")
     return LEITORES[tipo](Path(proj))
@@ -185,11 +221,11 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="folhas de aprovação")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("ler"); p.add_argument("proj"); p.add_argument("tipo")
+    p = sub.add_parser("ler"); p.add_argument("proj"); p.add_argument("tipo"); p.add_argument("--lang")
     p = sub.add_parser("overlays"); p.add_argument("proj")
     ns = ap.parse_args()
     try:
-        out = ler(Path(ns.proj), ns.tipo) if ns.cmd == "ler" else overlays(Path(ns.proj))
+        out = ler(Path(ns.proj), ns.tipo, lang=ns.lang) if ns.cmd == "ler" else overlays(Path(ns.proj))
     except ValueError as e:
         print(json.dumps({"erro": str(e)}, ensure_ascii=False)); sys.exit(1)
     except Exception as e:  # noqa: BLE001
