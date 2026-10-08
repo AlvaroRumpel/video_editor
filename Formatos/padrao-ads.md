@@ -68,15 +68,30 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
 
 ## Técnica de produção
 
-**Motion graphics** (100% determinístico, sem GSAP/Remotion):
-1. `anim.html` com stage 540x960 CSS; `window.seek(frame)` posiciona tudo como função pura do frame (30fps); sem CSS animation/transition; `window.READY=true` após `document.fonts.ready` (timeout 5s).
-2. Captura: Playwright chromium headless, `viewport 540x960, deviceScaleFactor: 2` → screenshot por frame = 1080x1920 nítido. Exemplos: `edit/shorts/anotus/r8v2/capture.js`, `features/motion/`, `cronograma/`, `reler/`.
-3. Montagem: `ffmpeg -framerate 30 -i frames/f_%04d.png` + encode padrão.
+**Motion graphics** (kit HyperFrames em `motion/`, CLI `ui/motion.py`; spec `docs/superpowers/specs/2026-10-08-motion-kit-design.md`):
+1. Do `roteiro.md` aprovado, escrever `edit/shorts/<marca>/<tema>/cenas.json`: `{"marca": "anotus|campeio", "cenas": [...]}`,
+   tipos `frase | numero | lista | tela | endcard | custom`. Só papéis: `fundo` claro/escuro/marca, `estilo`
+   display/punch/corpo/mono (o tamanho do display vem do tema, `fontes.display.tamanho`), `cor` tinta/acento/sobre,
+   `destaque` marca-texto/risco/assinatura, `saida`
+   `{transicao: fade|wipe|iris, dur}` (padrão: fade 0,3 s). Tempo é automático; `dur`/`em` só para casar com fala ou trilha
+   (`em` conta a partir do início do conteúdo da cena — depois da transição de entrada + 4 quadros —, não do corte).
+   Exemplo completo: `motion/amostras/projeto/cenas.json`.
+2. `python ui/motion.py montar edit/shorts/<marca>/<tema>` → corrigir até `ok` (erros vêm com o id da cena: safe area,
+   linha que estoura, fonte em fallback, `dur` abaixo do mínimo). Grava `cues.json` e a pasta gerada `motion/` (não editar à mão).
+3. `python ui/motion.py render <proj> --rascunho` → `python ui/motion.py folha <proj>` (QC rápido) → ajustar `cenas.json` →
+   `python ui/motion.py render <proj>` → `video.mp4` mudo 1080x1920@30.
+4. Fora do catálogo: `{"id": "cNN", "tipo": "custom", "html": "cenas/cNN.html", "dur": s}` — fragmento HTML com
+   **exatamente um** `<script>KIT.custom((c) => { ...; return fim; })</script>` (zero = erro "não chamou
+   KIT.custom", dois = "chamado 2x"; o `montar` registra a cena pelo id, pois `document.currentScript` é nulo no render) com `data-k-texto` nos elementos de texto (sem ele não há checagem de layout/fonte) usando `c.C`
+   (palavras, letras, mascara, fade, marcaTexto, risco, assinatura, contador, kenBurns), `c.tl`, `c.t0`, `c.cue`.
+   Custom repetido em 2+ vídeos vira tipo no kit (`motion/kit/kit.js`) e decisão `motion` no log.
+5. Primeira vez na máquina: `cd motion && npm ci`.
 
 **SFX** (biblioteca da marca em `assets/sfx/`, gerada uma vez — ver `assets/sfx/CREDITS.md`):
-- Cada `anim.html` exporta `cues.json` ao lado: `[{"t": 1.23, "som": "pop-dourado", "ganho_db": -6}]`,
-  derivado dos frames dos eventos (ponto dourado = `pop-dourado`, reveal = `whoosh-reveal`,
-  pill = `click-pill`, end card = `sting-endcard`, contagem = `tick`, subida = `rise`).
+- `motion.py montar` grava `cues.json` ao lado: `[{"t": 1.23, "som": "pop-dourado", "ganho_db": -6}]`, a partir dos eventos
+  do kit (assinatura = `pop-dourado`, letras/máscara = `whoosh-reveal`, pill/CTA = `click-pill`, end card = `sting-endcard`,
+  contador = `tick`, palavras subindo = `rise`). Ajuste fino: editar o `cues.json` depois do `montar` final — `montar` e `render` (que remonta se algo ficou velho) regravam o
+  `cues.json`, então cue ajustado à mão se refaz depois do último deles.
 - Após montar o vídeo mudo: `python ui/audio.py mix-sfx <mudo.mp4> cues.json assets/sfx <com_sfx.mp4>`;
   só então a trilha (linha **Áudio** abaixo):
   `python ui/audio.py mix-trilha <com_sfx.mp4> assets/music/<trilha>.mp3 <final.mp4> --nivel -18 --duck -8`
@@ -99,9 +114,12 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
   exit 2/3 → `waiting_reply` com o `motivo`/estimativa e, após o reply, repetir com `--aprovacao <id DESSE pedido>`.
   `animar` leva minutos por clipe: rodar em background (ou um `--ids` por vez); repetir após timeout/kill é seguro (retoma, nunca reenvia).
   Só montar as cenas com o último `animar` em `pendentes: []` e `falhas: []`.
-- Montagem por ffmpeg (sem `<video>` no `anim.html`, que é só motion por `seek`):
-  `ffmpeg -i broll/cand/c01-ia1.mp4 -t <dur> -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" <encode padrão> cenas/c01.mp4`, depois concat.
+- Montagem: o clipe aprovado entra como cena `{"tipo": "tela", "arquivo": "broll/cand/c01-ia1.mp4", "moldura": "nenhuma"}`
+  (ou `celular`/`browser`); `dur` padrão = duração do arquivo.
 - `python ui/stock.py creditos edit/shorts/<proj>/broll.json edit/shorts/<proj>/creditos.md` → bloco "Divulgação" vale na publicação.
+
+**Ads legados (capture.js)**: os vídeos de antes do kit (`anim.html` + `window.seek` + Playwright) continuam como estão;
+só para manutenção deles. Vídeo novo = kit.
 
 **Encode padrão** (tudo igual → concat `-c copy`):
 `-r 30 -c:v libx264 -crf 18 -preset medium -pix_fmt yuv420p -profile:v high -an`, 1080x1920.
@@ -113,7 +131,7 @@ vídeo, rede social = `inspiracao`: só ângulo, nunca fato.
 **Duração alvo**: 27-35s.
 
 ## QC antes de entregar
-1. Contact sheet + frames nas bordas de cena (atenção: `fps=0.5` em vídeo de concat amostra torto o início; conferir cenas iniciais com `-ss` direto).
+1. `python ui/motion.py folha <proj>` (entrada, estado final e meio da transição de cada cena) + frames nas bordas de cena.
 2. Checar: legibilidade, safe areas, fontes carregadas (Fraunces serif de verdade, não fallback genérico), ponto dourado presente, wordmark, end card padrão.
 3. `ffprobe`: duração esperada, 1080x1920@30, faixa de áudio presente.
 4. Com cena IA: `creditos.md` tem o bloco "Divulgação" e o post leva o rótulo de IA.

@@ -91,7 +91,7 @@ polêmico). Escolha óbvia sem alternativa não entra. Teto ~30 por projeto.
 `python ui/eventos.py decisao <proj> <assunto> "<escolha>" --etapa <id> --alt "<alternativa>" ... --motivo "<por quê>" [--custo <usd estimado>] [--confianca alta|media|baixa]`
 
 `assunto` ∈ provedor, trilha, sfx, broll, corte, grade, zoom, overlay,
-legenda, conceito, clipe, thumbnail, render, outro (fora da lista → `outro`
+legenda, conceito, clipe, thumbnail, render, motion, outro (fora da lista → `outro`
 e explicar no motivo). `--etapa` precisa estar na receita (ou omitir).
 Respostas do usuário entram sozinhas no log (só da fila do projeto; a fila global não entra — o servidor grava no `/api/reply`).
 
@@ -142,6 +142,9 @@ Footage gerado por IA só via `python ui/ia_video.py` (quadros → folha `broll`
 Shorts: `Formatos/padrao-youtube-shorts.md` (Clip Factory, `ui/clips.py`). Publora
 só como **draft** (`create_post` + upload + `complete_media`); nunca agendar sem
 pedido explícito — Starter limita 3 agendados / 7 dias.
+
+Motion de reel/ad: só via `python ui/motion.py` (kit HyperFrames em `motion/`, `cenas.json` por vídeo); cena
+`custom` repetida em 2+ vídeos vira tipo no kit. Upgrade do hyperframes só com `MOTION_GOLDEN=1` passando.
 
 Vídeo de referência (Reel/Short) = inspiração de mecanismo, nunca cópia; URL e autor ficam em conceitos.md. Download só via ui/referencia.py (yt-dlp ou arquivo em bruto/ref/).
 

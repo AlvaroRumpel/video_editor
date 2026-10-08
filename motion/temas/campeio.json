@@ -1,0 +1,20 @@
+{
+  "cores": {
+    "tinta": "#23281E", "acento": "#E8833A", "sobre": "#FFFFFF",
+    "marca_texto": "rgba(232,131,58,.30)", "risco": "#A32D14", "manchas": "#A8C08F",
+    "fundo": {"claro": "#F5F3EB", "escuro": "#1A2016",
+              "marca": "linear-gradient(168deg, #243420 0%, #2F4429 46%, #3D5435 100%)"}
+  },
+  "fontes": {
+    "display": {"familia": "K Archivo", "peso": 900, "tamanho": 160},
+    "punch": {"familia": "K Archivo", "peso": 800},
+    "corpo": {"familia": "K Archivo", "peso": 500},
+    "mono": {"familia": "K Plex Mono", "peso": 600}
+  },
+  "assinatura": {"tipo": "icone", "arquivo": "campeio/icone.png"},
+  "fixos": {"wordmark": "Campeio", "wordmark_fonte": "punch", "barra": true, "grao": 0.06},
+  "endcard": {"marca": "Campeio", "tagline": "O campeio na palma da mão.", "cta": "Teste grátis por 30 dias", "url": "campeio.com"},
+  "pill": {"borda": "#E9EDE2", "texto": "#3D5435"},
+  "transicao_padrao": {"transicao": "fade", "dur": 0.3},
+  "regras": {"numero_mono": true}
+}

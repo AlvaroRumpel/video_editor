@@ -30,3 +30,6 @@ ui/cache/
 !assets/sfx/*.wav
 
 .claude/worktrees/
+
+# Kit de motion: dependências Node (npm ci em motion/)
+motion/node_modules/

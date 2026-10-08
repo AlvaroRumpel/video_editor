@@ -31,7 +31,8 @@ Escopo por formato:
 
 5. Longo: `python ui/localiza.py extrair edit/animations/remotion/src --saida edit/<proj>/dub/<lang>/textos.json`
    (pasta = recursivo em .html/.htm/.tsx/.jsx; não depende de glob do shell).
-   Ads: `python ui/localiza.py extrair edit/shorts/<marca>/<tema>/anim.html --saida edit/shorts/<marca>/<tema>/dub/<lang>/textos.json`.
+   Ads (kit): `python ui/localiza.py extrair edit/shorts/<marca>/<tema>/cenas.json --saida edit/shorts/<marca>/<tema>/dub/<lang>/textos.json`
+   (+ os `cenas/*.html` de cenas custom, se houver). Ads legados: o mesmo com `anim.html`.
    Traduzir (Claude): preencher `trad`; `"="` para manter (marca, números de lei, código que a heurística pegou).
    `extrair` grava `contextos` por texto (`texto`/`atributo`/`script` no html; `jsx`/`literal` no tsx) — o `aplicar`
    só troca o texto nesses contextos. Não são extraídos: textos montados dinamicamente em JS (concatenação,
@@ -89,12 +90,15 @@ Escopo por formato:
    - Depois: passo 10 com `--video edit/<proj>/dub/<lang>/video.mp4`.
 10. `python ui/dublagem.py mixar edit/<proj> <lang> --export "Export/<nome> - horizontal.mp4" --nome "<nome>" [--video edit/<proj>/dub/<lang>/video.mp4]`
     → `Export/<nome> - <lang>.mp4`, `.m4a` (faixa extra do YouTube, upload manual) e `.srt`.
-11. Ads: `python ui/localiza.py aplicar edit/shorts/<marca>/<tema>/dub/<lang>/textos.json edit/shorts/<marca>/<tema>/anim.html edit/shorts/<marca>/<tema>/anim.<lang>.html`
-    (`nao_encontrados` não vazio → como no passo 9);
-    `python ui/localiza.py checar edit/shorts/<marca>/<tema>/anim.<lang>.html` → corrigir estouros (encurtar texto);
-    rodar o `checar` também no `anim.html` original: só contam os estouros que aparecem na cópia e não no original
-    (o original já pode acusar estados de animação como estouro).
-    captura/montagem/SFX/trilha como em `padrao-ads.md` usando `anim.<lang>.html` → `…-<lang>.mp4`.
+11. Ads (kit): `python ui/localiza.py aplicar edit/shorts/<marca>/<tema>/dub/<lang>/textos.json edit/shorts/<marca>/<tema>/cenas.json edit/shorts/<marca>/<tema>/cenas.<lang>.json`
+    (`nao_encontrados` não vazio → como no passo 9). O end card precisa de `cta`, `tagline` e `url` escritos em
+    `cenas.<lang>.json` (o `montar --lang` recusa sem eles; os padrões do tema são pt-BR) e `numero` formata pelo
+    `<lang>` sozinho (`1.250` vs `1,250`). Cenas custom: `python ui/localiza.py aplicar <textos> edit/shorts/<marca>/<tema>/cenas
+    edit/shorts/<marca>/<tema>/cenas.<lang>` (pasta → cópia com marca `.localiza`) e apontar cada `html` custom de
+    `cenas.<lang>.json` para `cenas.<lang>/cNN.html`. Depois `python ui/motion.py montar <proj> --lang <lang>` (estouro de texto
+    traduzido vira erro com o id da cena → encurtar a tradução); `python ui/motion.py render <proj> --lang <lang>` →
+    `video.<lang>.mp4` + `cues.<lang>.json`; SFX/trilha como em `padrao-ads.md` → `…-<lang>.mp4`.
+    Ads legados (`anim.html`): `aplicar` para `anim.<lang>.html` + `localiza.py checar` (comparar com o original) + captura antiga.
 
 ## Shorts dublados
 

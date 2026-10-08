@@ -1,0 +1,19 @@
+{
+  "cores": {
+    "tinta": "#2B215C", "acento": "#D4A017", "sobre": "#FFFFFF",
+    "marca_texto": "rgba(255,214,90,.55)", "risco": "#4A3D8F", "manchas": "#B9B3E6",
+    "fundo": {"claro": "#F3F2FA", "escuro": "#2B215C", "marca": "#4A3D8F"}
+  },
+  "fontes": {
+    "display": {"familia": "K Fraunces", "peso": 700, "estilo": "italic", "tamanho": 210},
+    "punch": {"familia": "K Inter", "peso": 800},
+    "corpo": {"familia": "K Inter", "peso": 500},
+    "mono": {"familia": "K Inter", "peso": 700}
+  },
+  "assinatura": {"tipo": "ponto"},
+  "fixos": {"wordmark": "Anotus.", "wordmark_fonte": "display", "barra": false, "grao": 0.10},
+  "endcard": {"marca": "Anotus", "tagline": "Seu segundo cérebro jurídico", "cta": "Teste grátis", "url": "link na bio"},
+  "pill": {"borda": "#B9B3E6", "texto": "#4A3D8F"},
+  "transicao_padrao": {"transicao": "fade", "dur": 0.3},
+  "regras": {"numero_mono": false}
+}

@@ -19,7 +19,7 @@ import pipeline  # noqa: E402
 STATUS = {"inicio", "fim", "espera", "pulada", "falha"}
 TERMINAIS = {"fim", "falha", "pulada"}   # fecham o ciclo da etapa
 ASSUNTOS = ("provedor", "trilha", "sfx", "broll", "corte", "grade", "zoom", "overlay",
-            "legenda", "conceito", "clipe", "thumbnail", "render", "outro")
+            "legenda", "conceito", "clipe", "thumbnail", "render", "motion", "outro")
 CONFIANCAS = ("alta", "media", "baixa")
 ID_RE = re.compile(r"[a-z0-9-]+")
 FORMATO_RE = re.compile(r"[\w\-]+")
