@@ -296,7 +296,10 @@ def _run_padrao(cmd):
 
 def render(clips: dict, proj: Path, export_dir: Path, preview: bool = False, _run=None, pasta: str = "clips") -> dict:
     run = _run or _run_padrao
-    proj = Path(proj); export_dir = Path(export_dir); export_dir.mkdir(parents=True, exist_ok=True)
+    proj = Path(proj); export_dir = Path(export_dir)
+    if pasta != "clips" and export_dir.name != Path(pasta).name:   # não sobrescrever/apagar os clipes PT
+        raise ValueError(f"export_dir de idioma deve terminar em /{Path(pasta).name}: {export_dir}")
+    export_dir.mkdir(parents=True, exist_ok=True)
     ok, erros, esperados = [], [], set()
     aps = _aprovados(clips)
     if not aps:

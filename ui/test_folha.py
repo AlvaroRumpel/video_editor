@@ -332,3 +332,18 @@ def test_ler_traducao_idiomas(proj):
     assert folha.ler(proj, "traducao", lang="en")["textos"] == []
     with pytest.raises(ValueError, match="idioma"):
         folha.ler(proj, "traducao", lang="../x")
+    with pytest.raises(ValueError, match="não encontrado"):
+        folha.ler(proj, "traducao", lang="pt")
+
+
+def test_ler_traducao_so_tela(proj):
+    """ad sem narração: só textos.json; lang="" (rota) = não informado; pasta fora de [a-z]{2} ignorada."""
+    d = proj / "dub" / "es"
+    d.mkdir(parents=True)
+    (d / "textos.json").write_text(json.dumps({"textos": {
+        "Fecha o caderno": {"id": "t01", "trad": "Cierra el cuaderno", "arquivos": ["anim.html"]},
+        "sem id": {"trad": "x"}}}), encoding="utf-8")
+    (proj / "dub" / "_tmp").mkdir()
+    (proj / "dub" / "_tmp" / "textos.json").write_text("{}", encoding="utf-8")
+    r = folha.ler(proj, "traducao", lang="")
+    assert r["lang"] == "es" and r["frases"] == [] and [t["id"] for t in r["textos"]] == ["t01"]

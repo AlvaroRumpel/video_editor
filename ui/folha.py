@@ -128,16 +128,23 @@ def _overlays_ler(proj: Path) -> dict:
 def _traducao(proj: Path, lang=None) -> dict:
     import dublagem   # import local: dublagem puxa clips/audio
     dub = proj / "dub"
-    langs = sorted(p.name for p in dub.iterdir() if p.is_dir() and (p / "dublagem.json").is_file()) if dub.is_dir() else []
-    if lang is None:
+    # ads sem narração só têm textos.json (Tela); idioma = pasta dub/<xx>/ com um dos dois
+    def tem(p):
+        return (p / "dublagem.json").is_file() or (p / "textos.json").is_file()
+    langs = sorted(p.name for p in dub.iterdir() if p.is_dir() and LANG_RE.fullmatch(p.name) and tem(p)) \
+        if dub.is_dir() else []
+    if not lang:   # None ou "" (rota sem lang)
         if not langs:
-            raise ValueError("dublagem.json não encontrado")
+            raise ValueError("dublagem.json/textos.json não encontrado")
         if len(langs) > 1:
             raise ValueError(f"vários idiomas ({', '.join(langs)}) — informe lang")
         lang = langs[0]
     if not isinstance(lang, str) or not LANG_RE.fullmatch(lang):
         raise ValueError(f"idioma inválido: {lang!r}")
-    d = _json(dub / lang / "dublagem.json")
+    if not tem(dub / lang):
+        raise ValueError(f"dub/{lang}: dublagem.json/textos.json não encontrado")
+    dp = dub / lang / "dublagem.json"
+    d = _json(dp) if dp.is_file() else {"frases": []}
     cps = dublagem.CPS.get(lang, dublagem.CPS_PADRAO)
     frases = []
     for f in _itens(d, "frases", "dublagem.json"):
@@ -152,7 +159,7 @@ def _traducao(proj: Path, lang=None) -> dict:
         if not isinstance(t, dict):
             raise ValueError("textos.json inválido")
         for orig, v in t.items():
-            if isinstance(v, dict):
+            if isinstance(v, dict) and v.get("id"):   # sem id não dá pra responder `tNN:`
                 textos.append({"id": v.get("id") or "", "orig": orig, "trad": v.get("trad") or "",
                                "arquivos": list(v.get("arquivos") or [])})
     return {"lang": lang, "cps": cps, "frases": frases, "textos": textos}

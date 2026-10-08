@@ -121,13 +121,62 @@ def test_aplicar_substitui_destino_existente(tmp_path):
     src.mkdir()
     _arq(src, "goat.tsx", TSX)
     dst = tmp_path / "src.es"
-    dst.mkdir()
-    (dst / "velho.tsx").write_text("x", encoding="utf-8")
     saida = tmp_path / "textos.json"
     localiza.extrair([src / "goat.tsx"], saida)
     _traduz(saida, {})
-    localiza.aplicar(saida, src, dst)
-    assert not (dst / "velho.tsx").exists() and (dst / "goat.tsx").exists()
+    localiza.aplicar(saida, src, dst)                                # 1ª vez: cria com a marca
+    assert (dst / localiza.MARCA).is_file()
+    (dst / "velho.tsx").write_text("x", encoding="utf-8")
+    localiza.aplicar(saida, src, dst)                                # saída anterior: substitui
+    assert not (dst / "velho.tsx").exists() and (dst / "goat.tsx").exists() and (dst / localiza.MARCA).is_file()
+
+
+def test_aplicar_recusa_pasta_alheia(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    _arq(src, "goat.tsx", TSX)
+    h = _arq(tmp_path, "anim.html", HTML)
+    saida = tmp_path / "textos.json"
+    localiza.extrair([src / "goat.tsx", h], saida)
+    _traduz(saida, {})
+    alheia = tmp_path / "alheia"
+    alheia.mkdir()
+    (alheia / "importante.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="não foi criado pelo localiza"):
+        localiza.aplicar(saida, src, alheia)                         # pasta → pasta alheia
+    with pytest.raises(ValueError, match="pasta"):
+        localiza.aplicar(saida, h, alheia)                           # arquivo → pasta existente
+    assert [p.name for p in alheia.iterdir()] == ["importante.txt"]
+
+
+def test_aplicar_nbsp_atributo_e_chave_editada(tmp_path):
+    h = _arq(tmp_path, "a.html", '<p>Fecha&nbsp;o&#160;caderno&nbsp;</p><img alt="logo da marca">'
+                                 '<script>x.alt="logo da marca"; data-title="logo da marca"</script>'
+                                 '<i data-title="logo da marca"></i>')
+    saida = tmp_path / "textos.json"
+    t = localiza.extrair([h], saida)["textos"]
+    assert set(t) == {"Fecha o caderno", "logo da marca"}
+    d = json.loads(saida.read_text(encoding="utf-8"))
+    d["textos"]["  Fecha   o caderno "] = {**d["textos"].pop("Fecha o caderno"), "trad": "Cierra el cuaderno"}
+    d["textos"]["logo da marca"].update(trad="logo de la marca", contextos=["atributo"])   # literal JS fica
+    d["textos"][" &nbsp; "] = {"id": "t99", "trad": "LIXO"}                 # chave vazia: ignorada
+    saida.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = localiza.aplicar(saida, h, tmp_path / "b.html")
+    out = (tmp_path / "b.html").read_text(encoding="utf-8")
+    assert "<p>Cierra el cuaderno&nbsp;</p>" in out and '<img alt="logo de la marca">' in out
+    assert 'x.alt="logo da marca"; data-title="logo da marca"' in out      # script intacto
+    assert '<i data-title="logo da marca">' in out                          # data-title não é title
+    assert r["nao_encontrados"] == [] and r["substituicoes"] == 2
+
+
+def test_extrair_pasta_recursiva(tmp_path):
+    src = tmp_path / "src"
+    (src / "sub").mkdir(parents=True)
+    _arq(src, "goat.tsx", TSX)
+    _arq(src / "sub", "anim.html", HTML)
+    _arq(src, "util.ts", 'const x = "não é tela aqui";')
+    t = localiza.extrair([src], tmp_path / "textos.json")["textos"]
+    assert "feito por Álvaro" in t and "Fecha o caderno" in t and "não é tela aqui" not in t
 
 
 ANIM_ESTOURO = """<!doctype html><html><body style="margin:0">

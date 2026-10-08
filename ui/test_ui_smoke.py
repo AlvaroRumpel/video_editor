@@ -672,15 +672,19 @@ def test_folha_traducao(page, ui_url, fake_root):
     page.goto(ui_url + "/#/p/edit-fake/aprovacao", wait_until="domcontentloaded")
     page.wait_for_selector(".fl-tr")
     assert page.locator("#fl-resp").inner_text() == "ok"
+    page.fill(".fl-tr[data-i=f001] .fl-tr-trad", " hola   gente ")          # só espaço: não é edição
+    assert page.locator("#fl-resp").inner_text() == "ok"
     page.fill(".fl-tr[data-i=f002] .fl-tr-trad", "todo   muy bien")
     page.fill(".fl-tr[data-i=t01] .fl-tr-trad", "Cierra tu cuaderno")
     assert page.locator("#fl-resp").inner_text() == "ok\nf002: todo muy bien\nt01: Cierra tu cuaderno"
     page.fill(".fl-tr[data-i=f001] .fl-tr-trad", "hola a todos los que están viendo este video ahora mismo")
     assert "estoura" in page.locator(".fl-tr[data-i=f001] .fl-tr-tempo").get_attribute("class")
+    page.fill(".fl-tr[data-i=t01] .fl-tr-trad", "")                         # esvaziado = `t01: `
     page.click("#fl-enviar")
     page.wait_for_function("document.body.dataset.tab === 'board'")
     q = json.loads((proj / "ui" / "queue.json").read_text(encoding="utf-8"))
     assert q[0]["reply"].startswith("ok\nf001: hola a todos") and q[0]["status"] == "pending"
+    assert q[0]["reply"].endswith("\nf002: todo muy bien\nt01: ")
 
 
 def test_board_info_dub(page, ui_url, fake_root):

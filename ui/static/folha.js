@@ -353,9 +353,11 @@ FOLHA_TIPOS.traducao = {
     return true;
   },
   resposta: (d, s) => {
+    // compara já colapsado: mexer só em espaço não vira linha; campo esvaziado vira `fNNN: ` (= pular)
+    const col = v => (v || '').replace(/\s+/g, ' ').trim();
     const ed = d.frases.concat(d.textos)
-      .filter(x => s.t[x.id] !== (x.trad || ''))
-      .map(x => `${x.id}: ${s.t[x.id].replace(/\s+/g, ' ').trim()}`);
+      .filter(x => col(s.t[x.id]) !== col(x.trad))
+      .map(x => `${x.id}: ${col(s.t[x.id])}`);
     return ed.length ? 'ok\n' + ed.join('\n') : 'ok';
   },
 };

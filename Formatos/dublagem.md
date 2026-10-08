@@ -9,6 +9,13 @@ Voz: `state.json.dub.voz` do projeto, senão a da marca/`padrao` em `ui/vozes.js
 `python ui/eventos.py decisao <proj> provedor "<nome da voz>" --etapa dublagem --motivo "<por quê>"`).
 Glossário: `ui/glossario.json` (termo → tradução por idioma, ou "manter").
 
+Escopo por formato:
+- Longo/shorts: tudo (Fala + Tela + Montagem).
+- Ads SEM narração: pular Fala e Voz (passos 1–4, 7–8 e a parte de áudio do 10); só Tela (5), folha
+  `traducao` só com a seção Tela (6) e montagem do passo 11 (captura/montagem/SFX/trilha como em `padrao-ads.md`).
+- Ads COM narração: o fluxo de fala precisa de transcrição/words do ad — fora do escopo por enquanto
+  (dublar à mão; a parte de Tela segue como acima).
+
 ## Fala
 
 1. Palavras na timeline do export (se ainda não existir):
@@ -17,11 +24,13 @@ Glossário: `ui/glossario.json` (termo → tradução por idioma, ou "manter").
 3. Traduzir (Claude): preencher `trad` de cada frase em `edit/<proj>/dub/<lang>/dublagem.json` (merge;
    preservar outros campos). Respeitar o glossário; não mudar o sentido de fatos com `[F#]`; caber no tempo.
 4. `python ui/dublagem.py validar edit/<proj> <lang>` → corrigir até `ok` (erros = sem tradução/glossário;
-   `longas` = encurtar a frase antes de gastar crédito).
+   `longas` = encurtar a frase antes de gastar crédito). Frases com `"pular": true` não são validadas;
+   "nenhuma frase para dublar" = todas puladas.
 
 ## Tela (se houver texto na tela)
 
-5. Longo: `python ui/localiza.py extrair edit/animations/remotion/src/*.tsx --saida edit/<proj>/dub/<lang>/textos.json`.
+5. Longo: `python ui/localiza.py extrair edit/animations/remotion/src --saida edit/<proj>/dub/<lang>/textos.json`
+   (pasta = recursivo em .html/.htm/.tsx/.jsx; não depende de glob do shell).
    Ads: `python ui/localiza.py extrair edit/shorts/<marca>/<tema>/anim.html --saida edit/shorts/<marca>/<tema>/dub/<lang>/textos.json`.
    Traduzir (Claude): preencher `trad`; `"="` para manter (marca, números de lei, código que a heurística pegou).
    `extrair` grava `contextos` por texto (`texto`/`atributo`/`script` no html; `jsx`/`literal` no tsx) — o `aplicar`
@@ -38,9 +47,9 @@ Glossário: `ui/glossario.json` (termo → tradução por idioma, ou "manter").
    Gramática da resposta:
    - Linhas que casam `^[ft]\d+: ` (ou `^[ft]\d+:$`, se o espaço final foi aparado) são edições: o texto depois
      de `: ` substitui a tradução (`trad`) daquele id — `fNNN` em `dublagem.json`, `tNN` em `textos.json`.
-   - `fNNN: ` com valor VAZIO = essa frase não é dublada: deixar `trad` vazio (e limpar `audio`/`hash` se já
-     havia áudio); `tts`/`encaixar`/`srt` pulam a frase. O `validar` vai listá-la como "sem tradução" — esperado,
-     ignorar só esses ids.
+   - `fNNN: ` com valor VAZIO = essa frase não é dublada: gravar `"pular": true` na frase (não só esvaziar
+     `trad`). `validar` a ignora; `tts`/`encaixar`/`srt`/`words` pulam — vira SILÊNCIO na faixa dublada
+     (a voz original não entra). `frases` preserva o `pular` ao reagrupar. Para voltar a dublar: remover `pular`.
    - `tNN: ` com valor VAZIO = manter o original na tela (`"trad": "="`).
    - Edição igual à proposta atual = nada a fazer.
    - Demais linhas (depois das edições) = comentário do usuário, não edição — ler e atender.
@@ -48,22 +57,40 @@ Glossário: `ui/glossario.json` (termo → tradução por idioma, ou "manter").
 
 ## Voz (paga)
 
-7. `python ui/dublagem.py tts edit/<proj> <lang>` (autoriza e registra no orçamento sozinho). Exit 2/3 →
-   `waiting_reply` com motivo + estimativa; aprovado → repetir com `--aprovacao <id>`.
-   1ª rodada: `python ui/budget.py saldo` antes/depois → `creditos` por caractere em `ui/precos.json`.
+7. `python ui/dublagem.py tts edit/<proj> <lang>` (valida, autoriza e registra no orçamento sozinho).
+   Exit 1 com `"status": "invalido"` = `validar` falhou → corrigir (passo 4); `--forcar` só se o usuário mandar.
+   Exit 2/3 → `waiting_reply` com motivo + estimativa; aprovado → repetir com `--aprovacao <id>`.
+   Exit 4 = erro (HTTP/rede/disco), ver `"erro"`; o que já foi gerado está registrado — repetir só refaz o resto.
+   `precos.json` assume ~1 crédito/caractere (o `autorizar` checa o saldo ElevenLabs).
+   1ª rodada: `python ui/budget.py saldo` antes/depois → confirmar `creditos` por caractere em `ui/precos.json`.
 8. `python ui/dublagem.py encaixar edit/<proj> <lang> --export "Export/<nome> - horizontal.mp4"`.
    `estouradas` → encurtar essas frases, `validar`, `tts` (só elas são refeitas), `encaixar` de novo.
+   `desatualizadas` (áudio de outro texto/voz, ou sem tradução) não entram no voz.wav → rodar `tts` e `encaixar` de novo.
    Aceleração > 1.15× → `python ui/eventos.py decisao <proj> outro "acelerar fNNN" --etapa dublagem --motivo "..."`.
 
 ## Montagem
 
-9. Longo com overlays traduzidos: `python ui/localiza.py aplicar edit/<proj>/dub/<lang>/textos.json edit/animations/remotion/src edit/animations/remotion/src.<lang>`;
-   renderizar só as composições usadas no `edl.json` com entrada `src.<lang>/index.tsx` para
-   `edit/animations/remotion/out_<lang>/`; `python ui/dublagem.py edl edit/<proj> <lang>`;
-   `python video-use/helpers/render.py edit/<proj>/dub/<lang>/edl.json -o edit/<proj>/dub/<lang>/video.mp4 --no-subtitles`.
+9. Longo com overlays traduzidos:
+   - `python ui/localiza.py aplicar edit/<proj>/dub/<lang>/textos.json edit/animations/remotion/src edit/animations/remotion/src.<lang>`
+     (pasta-destino só é substituída se foi criada pelo `aplicar` — marca `.localiza`; senão erro, nada apagado).
+     `nao_encontrados` não vazio → abrir o fonte, ver como o texto aparece (quebra, entidade, prop), corrigir a
+     chave ou os `contextos` em `textos.json` e rodar `aplicar` de novo até vazio.
+   - Renderizar só as composições usadas no `edl.json` do projeto, de `edit/animations/remotion`, igual ao
+     `render_some.ps1` mas com a entrada localizada e saída em `out_<lang>/` (alfa preservado):
+     `npx remotion render src.<lang>/index.tsx <Composicao> out_<lang>/seq_<Composicao> --sequence --image-format=png --log=error`
+     + `ffmpeg -y -v error -framerate 60 -i out_<lang>/seq_<Composicao>/element-%03d.png -c:v qtrle -pix_fmt argb out_<lang>/<Composicao>.mov`
+     (apagar a `seq_` depois). `out_<lang>/` tem que ficar ao lado do `out/` que o `edl.json` referencia
+     (`animations/remotion/out/X.mov` → `animations/remotion/out_<lang>/X.mov`, relativo ao projeto).
+   - `python ui/dublagem.py edl edit/<proj> <lang>` (troca os overlays que têm versão em `out_<lang>/`).
+   - `python ui/dublagem.py video edit/<proj> <lang>` → `dub/<lang>/video.mp4` (overlays localizados sobre
+     `base_final.mp4`, sem refazer os cortes).
+   - Projeto sem `base_final.mp4` (o `video` recusa): fallback
+     `python video-use/helpers/render.py edit/<proj>/dub/<lang>/edl.json -o edit/<proj>/dub/<lang>/video.mp4 --no-subtitles`.
+   - Depois: passo 10 com `--video edit/<proj>/dub/<lang>/video.mp4`.
 10. `python ui/dublagem.py mixar edit/<proj> <lang> --export "Export/<nome> - horizontal.mp4" --nome "<nome>" [--video edit/<proj>/dub/<lang>/video.mp4]`
     → `Export/<nome> - <lang>.mp4`, `.m4a` (faixa extra do YouTube, upload manual) e `.srt`.
-11. Ads: `python ui/localiza.py aplicar edit/shorts/<marca>/<tema>/dub/<lang>/textos.json edit/shorts/<marca>/<tema>/anim.html edit/shorts/<marca>/<tema>/anim.<lang>.html`;
+11. Ads: `python ui/localiza.py aplicar edit/shorts/<marca>/<tema>/dub/<lang>/textos.json edit/shorts/<marca>/<tema>/anim.html edit/shorts/<marca>/<tema>/anim.<lang>.html`
+    (`nao_encontrados` não vazio → como no passo 9);
     `python ui/localiza.py checar edit/shorts/<marca>/<tema>/anim.<lang>.html` → corrigir estouros (encurtar texto);
     rodar o `checar` também no `anim.html` original: só contam os estouros que aparecem na cópia e não no original
     (o original já pode acusar estados de animação como estouro).

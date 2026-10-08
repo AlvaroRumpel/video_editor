@@ -5,6 +5,6 @@
                        "nota": "free: creditos/efeito medido na 1a rodada (saldo antes/depois)"},
   "elevenlabs_music": {"unidade": "faixa",  "usd": 0.0, "creditos": 0,
                        "nota": "free: creditos/faixa medido na 1a rodada (saldo antes/depois)"},
-  "elevenlabs_tts":   {"unidade": "caractere", "usd": 0.0, "creditos": 0,
-                       "nota": "free: creditos/caractere medido na 1a rodada (saldo antes/depois)"}
+  "elevenlabs_tts":   {"unidade": "caractere", "usd": 0.0, "creditos": 1,
+                       "nota": "~1 crédito/caractere; confirmar na 1a rodada (saldo antes/depois)"}
 }

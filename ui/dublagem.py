@@ -3,6 +3,7 @@ validada contra glossário e tempo, TTS ElevenLabs por frase (cache + orçamento
 encaixe no tempo, remix e exports por idioma. Artefato: <proj>/dub/<lang>/dublagem.json."""
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -23,11 +24,12 @@ FOLGA = 1.15
 MAX_FATOR = 1.25
 MAX_FRASE_S = 12.0
 PAUSA = 0.35
-CAMPOS_TTS = ("trad", "audio", "hash", "dur", "fator", "estado")
+CAMPOS_TTS = ("trad", "audio", "hash", "dur", "fator", "estado", "pular")
 TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
 MODELO_TTS = "eleven_multilingual_v2"
 SR = 48000
-EXIT_ORCAMENTO = {"ok": 0, "precisa_aprovacao": 2, "bloqueado": 3}
+EXIT_ORCAMENTO = {"ok": 0, "invalido": 1, "precisa_aprovacao": 2, "bloqueado": 3}
+EXIT_ERRO_TTS = 4
 
 
 def _dir(proj, lang) -> Path:
@@ -71,7 +73,7 @@ def frases(proj, lang, words: list) -> dict:
             f = {"id": fid, "t_in": words[ix[0]]["t"], "t_out": words[ix[-1]]["e"], "orig": orig,
                  "trad": None, "audio": None, "hash": None, "dur": None, "fator": None, "estado": "nova"}
             v = velhas.get((fid, orig))
-            if v and v.get("trad"):
+            if v and (v.get("trad") or v.get("pular")):
                 f.update({k: v.get(k) for k in CAMPOS_TTS})
                 preservadas += 1
             out.append(f)
@@ -95,7 +97,10 @@ def validar(proj, lang, root=None) -> dict:
     g = _glossario(root)
     cps = CPS.get(lang, CPS_PADRAO)
     erros, longas = [], []
-    for f in d["frases"]:
+    ativas = [f for f in d["frases"] if not f.get("pular")]   # pular = frase não dublada (silêncio)
+    if not ativas:
+        erros.append("nenhuma frase para dublar")
+    for f in ativas:
         trad = (f.get("trad") or "").strip()
         if not trad:
             erros.append(f"{f['id']}: sem tradução")
@@ -117,7 +122,8 @@ def voz(proj, root=None) -> dict:
     """Voz do projeto (state.json.dub.voz) > marca (edit/shorts/<marca>/…) > padrao."""
     root = Path(root or pipeline.ROOT)
     st = pipeline.read_json(Path(proj) / "ui" / "state.json", {})
-    v = (st.get("dub") or {}).get("voz") if isinstance(st, dict) else None
+    dub = st.get("dub") if isinstance(st, dict) else None
+    v = dub.get("voz") if isinstance(dub, dict) else None
     if isinstance(v, dict) and v.get("voice_id"):
         return v
     vozes = pipeline.read_json(root / "ui" / "vozes.json", {})
@@ -158,7 +164,7 @@ def _linhas(texto: str, largura: int = 42) -> list:
 def srt(proj, lang) -> str:
     cues = []
     for f in _ler(proj, lang)["frases"]:
-        trad = (f.get("trad") or "").strip()
+        trad = "" if f.get("pular") else (f.get("trad") or "").strip()
         if not trad:
             continue
         ls = _linhas(trad)
@@ -176,7 +182,7 @@ def words(proj, lang) -> list:
     """Pseudo-palavras traduzidas espalhadas no tempo de cada frase (formato de words_out)."""
     out = []
     for f in _ler(proj, lang)["frases"]:
-        ps = (f.get("trad") or "").split()
+        ps = [] if f.get("pular") else (f.get("trad") or "").split()
         if not ps:
             continue
         span, total, t = float(f["t_out"]) - float(f["t_in"]), sum(len(p) for p in ps), float(f["t_in"])
@@ -203,8 +209,10 @@ def edl(proj, lang) -> dict:
     if e.get("subtitles"):
         e["subtitles"] = _abs(proj, e["subtitles"])
     trocados, mantidos = [], []
-    for o in e.get("overlays") or []:
-        f = str(o.get("file", ""))
+    for i, o in enumerate(e.get("overlays") or []):
+        if not isinstance(o, dict) or not o.get("file"):
+            raise ValueError(f"edl.json: overlay {i} sem file")
+        f = str(o["file"])
         loc = f.replace("animations/remotion/out/", f"animations/remotion/out_{lang}/", 1)
         if loc != f and (proj / loc).is_file():
             o["file"] = _abs(proj, loc)
@@ -217,17 +225,39 @@ def edl(proj, lang) -> dict:
     return {"trocados": trocados, "mantidos": mantidos}
 
 
+def video(proj, lang, _composite=None) -> dict:
+    """Longo: base_final.mp4 (sem overlays) + overlays de dub/<lang>/edl.json → dub/<lang>/video.mp4."""
+    proj = Path(proj)
+    dd = _dir(proj, lang)
+    base = proj / "base_final.mp4"
+    if not base.is_file():
+        raise ValueError(f"sem base_final.mp4 — use render.py com dub/{lang}/edl.json")
+    e = pipeline.read_json(dd / "edl.json", None)
+    if not isinstance(e, dict):
+        raise ValueError(f"dub/{lang}/edl.json ausente ou inválido — rode `edl` antes")
+    if _composite is None:
+        sys.path.insert(0, str(pipeline.ROOT / "video-use" / "helpers"))
+        from render import build_final_composite as _composite  # noqa: E402 — como edit/recomposite.py
+    out = dd / "video.mp4"
+    _composite(base, e.get("overlays") or [], None, out, proj)
+    return {"video": str(out)}
+
+
 def _hash(voice_id: str, trad: str) -> str:
     return hashlib.sha1(f"{voice_id}\n{trad}".encode("utf-8")).hexdigest()
 
 
-def tts(proj, lang, root=None, aprovacao=None, _fetch=None) -> dict:
-    """Gera mp3 das frases traduzidas que mudaram (texto ou voz). Autoriza antes; registra o gerado."""
+def tts(proj, lang, root=None, aprovacao=None, _fetch=None, forcar=False) -> dict:
+    """Gera mp3 das frases traduzidas que mudaram (texto ou voz). Valida, autoriza antes; registra o gerado."""
     root = Path(root or pipeline.ROOT)
     proj = Path(proj)
     d = _ler(proj, lang)
+    if not forcar:
+        val = validar(proj, lang, root=root)
+        if not val["ok"]:
+            return {"status": "invalido", **val}
     v = voz(proj, root)
-    pend = [f for f in d["frases"] if (f.get("trad") or "").strip() and (
+    pend = [f for f in d["frases"] if not f.get("pular") and (f.get("trad") or "").strip() and (
         f.get("hash") != _hash(v["voice_id"], f["trad"].strip())
         or not f.get("audio") or not (proj / f["audio"]).is_file())]
     if not pend:
@@ -251,17 +281,19 @@ def tts(proj, lang, root=None, aprovacao=None, _fetch=None) -> dict:
             except RuntimeError as e:
                 erro = str(e)
                 break
+            usados += len(trad)          # crédito gasto no fetch: conta antes de gravar o arquivo
+            geradas.append(f["id"])
             (dd / f"{f['id']}.mp3").write_bytes(dados)
             f.update(audio=f"dub/{lang}/{f['id']}.mp3", hash=_hash(v["voice_id"], trad),
                      dur=None, fator=None, estado="gerada")
-            geradas.append(f["id"])
-            usados += len(trad)
     finally:
         d["voz"] = v
-        _gravar(proj, lang, d)
-        if usados:   # créditos já consumidos: registrar mesmo se o lote parou
-            budget.registrar(proj, "elevenlabs_tts", usados, aprovacao=aprovacao,
-                             nota=f"dublagem {lang}: {len(geradas)} frases", root=root)
+        try:
+            if usados:   # créditos já consumidos: registrar mesmo se o lote parou (antes do estado)
+                budget.registrar(proj, "elevenlabs_tts", usados, aprovacao=aprovacao,
+                                 nota=f"dublagem {lang}: {len(geradas)} frases", root=root)
+        finally:
+            _gravar(proj, lang, d)
     if erro:
         raise RuntimeError(f"TTS parou após {len(geradas)} frases: {erro}")
     return {"status": "ok", "geradas": geradas, "caracteres": usados}
@@ -282,11 +314,18 @@ def encaixar(proj, lang, dur_total: float, _run=None) -> dict:
     tmp = dd / "_encaixe"
     tmp.mkdir(parents=True, exist_ok=True)
     buf = bytearray(int(dur_total * SR) * 2)
-    res = {"encaixadas": [], "aceleradas": [], "estouradas": []}
+    res = {"encaixadas": [], "aceleradas": [], "estouradas": [], "desatualizadas": []}
+    vid = d["voz"].get("voice_id") if isinstance(d.get("voz"), dict) else None
     try:
         for f in d["frases"]:
+            if f.get("pular"):
+                continue
             src = proj / f["audio"] if f.get("audio") else None
             if not src or not src.is_file():
+                continue
+            trad = (f.get("trad") or "").strip()
+            if not trad or not vid or f.get("hash") != _hash(vid, trad):   # áudio de outro texto/voz
+                res["desatualizadas"].append(f["id"])
                 continue
             slot = float(f["t_out"]) - float(f["t_in"])
             dur = _dur(src, run)
@@ -309,11 +348,12 @@ def encaixar(proj, lang, dur_total: float, _run=None) -> dict:
                 buf[ini:fim] = pcm[:fim - ini]
             f["estado"] = "encaixada"
             (res["aceleradas"] if fator > 1 else res["encaixadas"]).append(f["id"])
-        with wave.open(str(dd / "voz.wav"), "wb") as w:
+        with wave.open(str(dd / "voz.tmp.wav"), "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(SR)
-            w.writeframes(bytes(buf))
+            w.writeframes(buf)
+        os.replace(dd / "voz.tmp.wav", dd / "voz.wav")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         _gravar(proj, lang, d)
@@ -385,8 +425,13 @@ def _cli(ns, root: Path):
     if ns.cmd == "edl":
         return edl(proj, ns.lang), 0
     if ns.cmd == "tts":
-        r = tts(proj, ns.lang, root=root, aprovacao=ns.aprovacao)
+        try:
+            r = tts(proj, ns.lang, root=root, aprovacao=ns.aprovacao, forcar=ns.forcar)
+        except (RuntimeError, OSError) as e:   # HTTP/rede/disco: distinto de orçamento (2/3)
+            return {"erro": f"{type(e).__name__}: {e}"}, EXIT_ERRO_TTS
         return r, EXIT_ORCAMENTO.get(r["status"], 2)
+    if ns.cmd == "video":
+        return video(proj, ns.lang), 0
     if ns.cmd == "encaixar":
         return encaixar(proj, ns.lang, audio.duracao(Path(ns.export))), 0
     if ns.cmd == "mixar":
@@ -401,10 +446,11 @@ def _parser():
     ap.add_argument("--root", default=str(pipeline.ROOT))
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("frases"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--words", required=True)
-    for c in ("validar", "words", "edl"):
+    for c in ("validar", "words", "edl", "video"):
         p = sub.add_parser(c); p.add_argument("proj"); p.add_argument("lang")
     p = sub.add_parser("srt"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--saida", required=True)
     p = sub.add_parser("tts"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--aprovacao", type=int)
+    p.add_argument("--forcar", action="store_true", help="gera mesmo com validar falhando")
     p = sub.add_parser("encaixar"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--export", required=True)
     p = sub.add_parser("mixar"); p.add_argument("proj"); p.add_argument("lang"); p.add_argument("--export", required=True)
     p.add_argument("--nome", required=True); p.add_argument("--video"); p.add_argument("--saida"); p.add_argument("--trilha")

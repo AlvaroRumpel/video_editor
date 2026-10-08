@@ -49,11 +49,12 @@ em vez de sobrescrever o objeto inteiro.
    `resultado`. UI devolve resposta em `reply` e volta status a `pending`.
    TODA pergunta ao usuário passa por aqui — nunca só no chat: o usuário
    acompanha e responde pela UI.
-   Aprovação com folha visual (b-roll, clipes, conceitos, overlays): gravar no
-   pedido `"folha": "broll" | "clips" | "conceitos" | "overlays"` junto com a
-   pergunta — a UI mostra a aba Aprovação e devolve a resposta no formato
+   Aprovação com folha visual (b-roll, clipes, conceitos, overlays, tradução): gravar no
+   pedido `"folha": "broll" | "clips" | "conceitos" | "overlays" | "traducao"` junto com a
+   pergunta (`traducao` leva também `"lang": "<xx>"`) — a UI mostra a aba Aprovação e devolve a resposta no formato
    `ok` + exceções: `ok` = tudo como proposto; `ok b03:2 b05:não` = as
-   exceções valem e o resto fica aprovado como proposto. Resposta só com
+   exceções valem e o resto fica aprovado como proposto (`traducao`: `ok` + linhas
+   `fNNN: <texto>`/`tNN: <texto>`, gramática em `Formatos/dublagem.md`). Resposta só com
    tokens (sem `ok`) continua válida. Pedido da fila global (ex.: referencia):
    criar o pedido com `folha` na fila do projeto (a folha só abre de lá).
 5. Tarefa longa (ex.: novo-projeto): manter `status: "executing"` e ir

@@ -639,3 +639,5 @@ def test_folha_traducao_route(client, fake_root):
     r = client.get("/api/folha", params={"id": "edit-fake", "tipo": "traducao", "lang": "es"})
     assert r.status_code == 200 and r.json()["frases"][0]["trad"] == "hola"
     assert client.get("/api/folha", params={"id": "edit-fake", "tipo": "traducao", "lang": "zz"}).status_code == 422
+    r = client.get("/api/folha", params={"id": "edit-fake", "tipo": "traducao", "lang": ""})   # "" = não informado
+    assert r.status_code == 200 and r.json()["lang"] == "es"

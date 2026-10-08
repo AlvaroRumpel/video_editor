@@ -17,10 +17,14 @@ LITERAL = re.compile(r"""(["'])((?:(?!\1)[^\\\n])+)\1""")
 TOKEN_CSS = re.compile(r"^[a-z0-9:\-\[\]./#]+$")
 CODIGO = re.compile(r"&&|\|\||=>|==|;")
 EXT_TEXTO = {".html", ".htm", ".tsx", ".jsx", ".ts", ".js"}
+EXT_EXTRAIR = {".html", ".htm", ".tsx", ".jsx"}
+NBSP = re.compile(r"&nbsp;|&#160;")
+ESP = r"(?:\s|&nbsp;|&#160;)"      # espaço no fonte: tolera &nbsp; entre/ao redor das palavras
+MARCA = ".localiza"                 # pasta-destino criada pelo aplicar (só essa pode ser substituída)
 
 
 def _norm(s: str) -> str:
-    return " ".join(s.split())
+    return " ".join(NBSP.sub(" ", s).split())
 
 
 class _Visiveis(HTMLParser):
@@ -84,8 +88,10 @@ def extrair(arquivos, saida) -> dict:
     textos = (atual.get("textos") if isinstance(atual, dict) else None) or {}
     ids = [int(v["id"][1:]) for v in textos.values() if isinstance(v, dict) and re.fullmatch(r"t\d+", str(v.get("id", "")))]
     prox = max(ids, default=0) + 1
-    vistos = {}
-    for arq in map(Path, arquivos):
+    vistos, lista = {}, []
+    for a in map(Path, arquivos):     # pasta → recursivo (a receita não depende de glob do shell)
+        lista += sorted(p for p in a.rglob("*") if p.suffix.lower() in EXT_EXTRAIR) if a.is_dir() else [a]
+    for arq in lista:
         txt = arq.read_text(encoding="utf-8")
         brutos = _de_html(txt) if arq.suffix.lower() in (".html", ".htm") else _de_tsx(txt)
         for b, ctx in brutos:
@@ -138,7 +144,7 @@ SCRIPT = re.compile(r"(<script\b[^>]*>)(.*?)(</script\s*>)", re.S | re.I)
 
 def _troca(s: str, ctx: str, mapa: dict, cont: dict) -> str:
     """Uma passada por contexto: alternação única (mais longo primeiro) + lookup — sem cascata."""
-    alt = "|".join(r"\s+".join(map(re.escape, k.split())) for k in sorted(mapa, key=len, reverse=True))
+    alt = "|".join((ESP + "+").join(map(re.escape, k.split())) for k in sorted(mapa, key=len, reverse=True))
 
     def trad(m):
         k = _norm(m.group("t"))
@@ -146,18 +152,22 @@ def _troca(s: str, ctx: str, mapa: dict, cont: dict) -> str:
         return mapa[k]
 
     def entre_tags(txt, esc):
-        return re.sub(r"(?<=>)(\s*)(?P<t>" + alt + r")(\s*)(?=<)",
+        return re.sub(r"(?<=>)(" + ESP + r"*)(?P<t>" + alt + r")(" + ESP + r"*)(?=<)",
                       lambda m: m.group(1) + esc(trad(m)) + m.group(3), txt)
 
     def aspas(txt):
         return re.sub(r"([\"'])(?P<t>" + alt + r")\1",
                       lambda m: m.group(1) + _curvas(trad(m).replace("\\", "\\\\"), m.group(1)) + m.group(1), txt)
 
-    if ctx == "texto":     # só fora de <script>/<style> (split: texto, bloco, texto, ...)
-        return "".join(p if i % 2 else entre_tags(p, _esc_texto) for i, p in enumerate(BLOCO.split(s)))
+    def fora_blocos(f):    # só fora de <script>/<style> (split: texto, bloco, texto, ...)
+        return "".join(p if i % 2 else f(p) for i, p in enumerate(BLOCO.split(s)))
+
+    if ctx == "texto":
+        return fora_blocos(lambda p: entre_tags(p, _esc_texto))
     if ctx == "atributo":
-        return re.sub(r"\b(alt|title)=([\"'])(?P<t>" + alt + r")\2",
-                      lambda m: f"{m.group(1)}={m.group(2)}{_curvas(_esc_texto(trad(m)), m.group(2))}{m.group(2)}", s)
+        return fora_blocos(lambda p: re.sub(
+            r"(?<![\w.-])(alt|title)=([\"'])(?P<t>" + alt + r")\2",
+            lambda m: f"{m.group(1)}={m.group(2)}{_curvas(_esc_texto(trad(m)), m.group(2))}{m.group(2)}", p))
     if ctx == "script":    # só literais dentro de <script>
         return SCRIPT.sub(lambda m: m.group(1) + aspas(m.group(2)) + m.group(3), s)
     if ctx == "jsx":
@@ -181,16 +191,23 @@ def aplicar(textos_json, origem, destino) -> dict:
         raise ValueError(f"origem não existe: {origem}")
     if destino.is_relative_to(origem) or origem.is_relative_to(destino):
         raise ValueError("destino não pode ser a origem, ficar dentro dela nem contê-la")
-    if destino.is_dir():
-        shutil.rmtree(destino)
     if origem.is_dir():
+        if destino.exists():
+            if not (destino / MARCA).is_file():
+                raise ValueError(f"destino existe e não foi criado pelo localiza: {destino}")
+            shutil.rmtree(destino)
         shutil.copytree(origem, destino)
+        (destino / MARCA).write_text(f"cópia localizada de {origem}\n", encoding="utf-8")
         arquivos = [p for p in destino.rglob("*") if p.suffix.lower() in EXT_TEXTO]
     else:
+        if destino.is_dir():
+            raise ValueError(f"destino é uma pasta (origem é arquivo): {destino}")
         destino.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(origem, destino)
         arquivos = [destino]
-    ativos = {k: v for k, v in tx.items() if str(v["trad"]).strip() != "="}
+    # chave normalizada: chave editada à mão com espaço extra/&nbsp; ainda casa
+    # (chave vazia após normalizar viraria alternativa "" no regex e casaria em todo lugar)
+    ativos = {_norm(k): v for k, v in tx.items() if _norm(k) and str(v["trad"]).strip() != "="}
     contagem = {k: 0 for k in ativos}
     for arq in arquivos:
         ctxs = CTX_HTML if arq.suffix.lower() in (".html", ".htm") else CTX_TSX
@@ -203,7 +220,7 @@ def aplicar(textos_json, origem, destino) -> dict:
         if s != antes:
             arq.write_text(s, encoding="utf-8", newline="")
     return {"substituicoes": sum(contagem.values()), "arquivos": [str(a) for a in arquivos],
-            "nao_encontrados": [tx[k].get("id", k) for k, n in contagem.items() if n == 0]}
+            "nao_encontrados": [ativos[k].get("id", k) for k, n in contagem.items() if n == 0]}
 
 
 JS_ESTOURO = """() => {

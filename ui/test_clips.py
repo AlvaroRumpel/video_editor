@@ -305,8 +305,19 @@ def test_render_pasta_por_idioma(tmp_path, words60):
         vistos.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    r = clips.render(c, proj, tmp_path / "out", preview=True, _run=run, pasta="clips/es")
+    r = clips.render(c, proj, tmp_path / "out" / "es", preview=True, _run=run, pasta="clips/es")
     assert r["erros"] == [] and str(proj / "clips" / "es" / "01-um-shorts" / "edl.json") in vistos[0]
+
+
+def test_render_idioma_exige_export_dir_do_idioma(tmp_path, words60):
+    proj = tmp_path / "p"; proj.mkdir(); export = tmp_path / "e.mp4"; export.write_bytes(b"0")
+    c = _clips(words60, plataformas=["shorts"])
+    clips.edl(c, proj, export, words60, pasta="clips/es")
+    pt = tmp_path / "shorts"; pt.mkdir()
+    (pt / "01-um-shorts.mp4").write_bytes(b"pt")
+    with pytest.raises(ValueError, match="/es"):
+        clips.render(c, proj, pt, _run=lambda cmd: pytest.fail("não deveria renderizar"), pasta="clips/es")
+    assert (pt / "01-um-shorts.mp4").read_bytes() == b"pt"
 
 
 def test_cli_edl_lang(tmp_path, words60):
