@@ -305,3 +305,21 @@ def test_gerar_sfx_registrar_falha_mantem_bytes(root, tmp_path, monkeypatch):
     with pytest.raises(OSError):
         audio.gerar_sfx(root, root / "edit-fake", "x", 1, dst, _fetch=lambda *a: b"pago")
     assert dst.with_suffix(".wav.bin").read_bytes() == b"pago"
+
+
+def test_sfx_kit_gera_todos_os_sons(tmp_path):
+    feitos = audio.sfx_kit(tmp_path / "sfx")
+    nomes = {p.stem for p in feitos}
+    assert {"whoosh", "impacto", "ping", "tique", "maquina", "carimbo", "clarao",
+            "tick", "rise", "whoosh-reveal", "pop-dourado", "click-pill", "sting-endcard"} <= nomes
+    for p in feitos:
+        assert 0.01 < audio.duracao(p) < 1.6, p.name
+        assert audio.rms_db(p, 0, audio.duracao(p)) > -45, p.name     # não é silêncio
+
+
+def test_mix_trilha_realce_sobe_a_trilha_no_trecho(video, trilha, tmp_path):
+    dst = tmp_path / "mix.mp4"
+    audio.mix_trilha(video, trilha, dst, realces=[(4.0, 5.0)])
+    com = audio.rms_db(dst, 4.2, 4.9, BP100)        # voz desligada em 4–5 s, com realce
+    sem = audio.rms_db(dst, 6.2, 6.9, BP100)        # voz desligada em 6–7 s, sem realce
+    assert com > sem + 5
