@@ -1,12 +1,16 @@
 """Vídeo narrado (canal dark): episodio.json (cenas com texto, fontes e visual) →
-TTS ElevenLabs por cena → cenas.<lang>.json do kit de motion em 16:9 → render →
+TTS por cena (Google Cloud ou ElevenLabs) → cenas.<lang>.json do kit de motion em 16:9 → render →
 voz mixada nos tempos medidos → <proj>/<lang>/final.mp4 + final.srt.
 Substitui o fluxo bruto/*.mkv quando não há gravação."""
+import base64
 import copy
 import json
+import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -21,6 +25,10 @@ LANG_RE = re.compile(r"[a-z]{2}")
 PAUSA = 0.4            # respiro depois da fala de cada cena
 MAX_CHARS_CENA = 5000  # acima disso é erro de colagem, não cena
 VISUAIS = ("arquivo", "motion", "ia")
+GOOGLE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+GOOGLE_MAX_BYTES = 5000           # limite do Google por requisição (texto em UTF-8)
+PROVEDORES = {"elevenlabs": "elevenlabs_tts", "google": "google_tts"}   # provedor → chave do precos.json
+ENV_FILE = pipeline.ROOT / "video-use" / ".env"
 LICENCA_RE = re.compile(
     r"^(public domain|domínio público|pd|pd-[\w.-]+|cc0|cc[ -]by(?:[ -]sa)?(?:[ -][\d.]+)?"
     r"|https?://creativecommons\.org/(?:publicdomain/(?:mark|zero)/[\d.]+|licenses/by(?:-sa)?/[\d.]+)/?)$",
@@ -152,54 +160,95 @@ def estado(proj: Path, lang: str) -> dict:
     return st if isinstance(st, dict) else {}
 
 
-def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None) -> dict:
-    """mp3 por cena só onde texto ou voz mudou. Valida e autoriza antes; registra o gasto mesmo se parar no meio."""
+def _chave(nome: str) -> str:
+    v = os.environ.get(nome, "")
+    if v:
+        return v
+    try:
+        for ln in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            k, _, val = ln.partition("=")
+            if k.strip() == nome:
+                return val.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _fetch_google(key: str, url: str, body: dict) -> bytes:
+    """Chave no header (nunca na URL); resposta traz o áudio em base64."""
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                 headers={"X-Goog-Api-Key": key, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return base64.b64decode(json.loads(r.read())["audioContent"])
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Google TTS HTTP {e.code}: {e.read()[:300]!r}") from e
+    except (urllib.error.URLError, TimeoutError, KeyError, ValueError) as e:
+        raise RuntimeError(f"Google TTS falhou: {e}") from e
+
+
+def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None, provedor="elevenlabs") -> dict:
+    """mp3 por cena só onde texto, voz ou provedor mudou. Valida e autoriza antes; registra o gasto mesmo se parar no meio."""
     root = Path(root or pipeline.ROOT)
     proj = Path(proj)
+    if provedor not in PROVEDORES:
+        raise ValueError(f"provedor desconhecido: {provedor!r} ({'|'.join(PROVEDORES)})")
     if not motion._str(voice_id):
-        raise ValueError("voice_id vazio: configurar canal/idiomas.json")
+        raise ValueError("voz vazia: configurar canal/idiomas.json")
+    voz = voice_id if provedor == "elevenlabs" else f"{provedor}:{voice_id}"   # entra no hash do cache
     ep = ler(proj)
     erros = validar(ep, proj, lang, visuais=False)
+    if provedor == "google":
+        erros += [{"id": c["id"], "motivo": f"texto.{lang} passa de {GOOGLE_MAX_BYTES} bytes (limite do Google): dividir a cena"}
+                  for c in ep.get("cenas", []) if isinstance(c, dict)
+                  and len((_loc(c.get("texto"), lang) or "").strip().encode("utf-8")) > GOOGLE_MAX_BYTES]
     if erros:
         return {"status": "invalido", "erros": erros}
     st = estado(proj, lang)
     pend = []
     for c in ep["cenas"]:
         txt = _loc(c["texto"], lang).strip()
-        h = dublagem._hash(voice_id, txt)
+        h = dublagem._hash(voz, txt)
         s = st.get(c["id"], {})
         if s.get("hash") != h or not (proj / s.get("audio", "-")).is_file():
             pend.append((c["id"], txt, h))
     if not pend:
         return {"status": "ok", "geradas": [], "caracteres": 0}
     chars = sum(len(t) for _, t, _ in pend)
-    a = budget.autorizar(root, proj, "elevenlabs_tts", chars, aprovacao=aprovacao)
+    a = budget.autorizar(root, proj, PROVEDORES[provedor], chars, aprovacao=aprovacao)
     if a["status"] != "ok":
         return {**a, "caracteres": chars, "pendentes": len(pend)}
-    key = budget._chave_elevenlabs()
+    if provedor == "google":
+        key, nome_chave = _chave("GOOGLE_TTS_API_KEY"), "GOOGLE_TTS_API_KEY"
+        fetch, url = _fetch or _fetch_google, GOOGLE_URL
+        corpo = lambda txt: {"input": {"text": txt},     # noqa: E731
+                             "voice": {"languageCode": "-".join(voice_id.split("-")[:2]), "name": voice_id},
+                             "audioConfig": {"audioEncoding": "MP3"}}
+    else:
+        key, nome_chave = budget._chave_elevenlabs(), "ELEVENLABS_API_KEY"
+        fetch, url = _fetch or audio._fetch_elevenlabs, dublagem.TTS_URL.format(voice_id=voice_id)
+        corpo = lambda txt: {"text": txt, "model_id": dublagem.MODELO_TTS}   # noqa: E731
     if not key:
-        raise RuntimeError("ELEVENLABS_API_KEY ausente")
-    fetch = _fetch or audio._fetch_elevenlabs
-    url = dublagem.TTS_URL.format(voice_id=voice_id)
+        raise RuntimeError(f"{nome_chave} ausente (ambiente ou video-use/.env)")
     pasta = _dir(proj, lang) / "audio"
     pasta.mkdir(parents=True, exist_ok=True)
     geradas, usados, erro = [], 0, None
     try:
         for cid, txt, h in pend:
             try:
-                dados = fetch(key, url, {"text": txt, "model_id": dublagem.MODELO_TTS})
+                dados = fetch(key, url, corpo(txt))
             except RuntimeError as ex:
                 erro = str(ex)
                 break
             usados += len(txt)          # crédito gasto no fetch: conta antes de gravar
             (pasta / f"{cid}.mp3").write_bytes(dados)
             rel = f"{lang}/audio/{cid}.mp3"
-            st[cid] = {"hash": h, "voz": voice_id, "audio": rel, "dur": round(audio.duracao(proj / rel), 3)}
+            st[cid] = {"hash": h, "voz": voz, "audio": rel, "dur": round(audio.duracao(proj / rel), 3)}
             geradas.append(cid)
     finally:
         try:
             if usados:
-                budget.registrar(proj, "elevenlabs_tts", usados, aprovacao=aprovacao,
+                budget.registrar(proj, PROVEDORES[provedor], usados, aprovacao=aprovacao,
                                  nota=f"narração {lang}: {len(geradas)} cenas", root=root)
         finally:
             pipeline.atomic_write_json(_dir(proj, lang) / "narracao.json", st)
@@ -384,7 +433,7 @@ def _cli(ns):
         erros = validar(ler(p), p, ns.lang)
         return {"ok": not erros, "erros": erros}, (0 if not erros else 1)
     if ns.cmd == "tts":
-        r = tts(p, ns.lang, ns.voz, root=Path(ns.root), aprovacao=ns.aprovacao)
+        r = tts(p, ns.lang, ns.voz, root=Path(ns.root), aprovacao=ns.aprovacao, provedor=ns.provedor)
         return r, EXIT.get(r["status"], 4)
     if ns.cmd == "render":
         r = render(p, ns.lang, ns.rascunho, ns.trilha)
@@ -407,6 +456,7 @@ if __name__ == "__main__":
         sp.add_argument("--lang", default="pt")
         if nome == "tts":
             sp.add_argument("--voz", required=True)
+            sp.add_argument("--provedor", choices=sorted(PROVEDORES), default="elevenlabs")
             sp.add_argument("--aprovacao", type=int)
         if nome == "render":
             sp.add_argument("--rascunho", action="store_true")

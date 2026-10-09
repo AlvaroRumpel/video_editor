@@ -349,3 +349,78 @@ def test_escrever_cenas_retrato_usa_contain(tmp_path, root, mp3):
     Image.new("RGB", (1600, 1000), "gray").save(p / "assets" / "foto.png")     # paisagem
     d = json.loads(narrado.escrever_cenas(p, "pt").read_text(encoding="utf-8"))
     assert "ajuste" not in d["cenas"][0]
+
+
+# --- Google Cloud TTS ---
+
+VOZ_G = "pt-BR-Chirp3-HD-Charon"
+
+
+def _fetch_g(mp3, chamadas):
+    def f(key, url, body):
+        chamadas.append((key, url, body))
+        return mp3
+    return f
+
+
+@ffmpeg
+def test_tts_google_envia_voz_registra_e_renderiza(tmp_path, root, mp3, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "gkey")
+    p, ch = _proj(tmp_path), []
+    r = narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, ch), provedor="google")
+    assert r["status"] == "ok" and r["geradas"] == ["c01", "c02"]
+    key, url, body = ch[0]
+    assert key == "gkey" and url == narrado.GOOGLE_URL
+    assert body["voice"] == {"languageCode": "pt-BR", "name": VOZ_G}
+    assert body["input"] == {"text": "Em 1908, algo explodiu sobre a Sibéria."}
+    assert body["audioConfig"]["audioEncoding"] == "MP3"
+    assert narrado.estado(p, "pt")["c01"]["voz"] == f"google:{VOZ_G}"
+    custos = [json.loads(l) for l in (p / "ui" / "costs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert custos[-1]["provedor"] == "google_tts" and custos[-1]["usd"] > 0
+    narrado.escrever_cenas(p, "pt")                     # hash com provedor bate na hora do render
+
+
+def test_tts_google_recusa_cena_acima_de_5000_bytes(tmp_path, root, mp3, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "gkey")
+    ep = _ep()
+    ep["cenas"][0]["texto"]["pt"] = "ã" * 2600            # 2.600 caracteres, 5.200 bytes
+    p, ch = _proj(tmp_path, ep), []
+    r = narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, ch), provedor="google")
+    assert r["status"] == "invalido" and ch == []
+    assert any(e["id"] == "c01" and "5000 bytes" in e["motivo"] for e in r["erros"])
+
+
+@ffmpeg
+def test_tts_trocar_provedor_regenera(tmp_path, root, mp3, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "gkey")
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch(mp3, []))
+    r = narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, []), provedor="google")
+    assert r["geradas"] == ["c01", "c02"]
+
+
+def test_tts_google_sem_chave(tmp_path, root, mp3, monkeypatch):
+    monkeypatch.delenv("GOOGLE_TTS_API_KEY", raising=False)
+    monkeypatch.setattr(narrado, "ENV_FILE", tmp_path / "nada.env")
+    p = _proj(tmp_path)
+    with pytest.raises(RuntimeError, match="GOOGLE_TTS_API_KEY"):
+        narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, []), provedor="google")
+
+
+def test_tts_provedor_desconhecido(tmp_path, root):
+    with pytest.raises(ValueError, match="provedor"):
+        narrado.tts(_proj(tmp_path), "pt", "x", root=root, provedor="polly")
+
+
+def test_fetch_google_usa_header_e_decodifica(monkeypatch):
+    import base64
+    import io
+    visto = {}
+
+    def urlopen(req, timeout):
+        visto["req"] = req
+        return io.BytesIO(json.dumps({"audioContent": base64.b64encode(b"ID3audio").decode()}).encode())
+    monkeypatch.setattr(narrado.urllib.request, "urlopen", urlopen)
+    out = narrado._fetch_google("gkey", narrado.GOOGLE_URL, {"input": {"text": "oi"}})
+    req = visto["req"]
+    assert out == b"ID3audio" and req.get_header("X-goog-api-key") == "gkey" and "gkey" not in req.full_url

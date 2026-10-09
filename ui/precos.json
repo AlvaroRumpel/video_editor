@@ -7,6 +7,8 @@
                        "nota": "free: creditos/faixa medido na 1a rodada (saldo antes/depois)"},
   "elevenlabs_tts":   {"unidade": "caractere", "usd": 0.0, "creditos": 1,
                        "nota": "~1 crédito/caractere; confirmar na 1a rodada (saldo antes/depois)"},
+  "google_tts":       {"unidade": "caractere", "usd": 0.00003, "creditos": 0,
+                       "nota": "Chirp 3 HD: US$30/1M após a franquia grátis; conta como pago (conservador)"},
   "fal_quadro":    {"unidade": "imagem", "usd": 0.006, "creditos": 0,
                     "nota": "flux schnell ~US$0,003/MP, arredonda p/ cima; conferir no painel do fal na 1a rodada"},
   "fal_video":     {"unidade": "segundo", "usd": 0.07, "creditos": 0,
