@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import audio  # noqa: E402
+import budget  # noqa: E402
+import dublagem  # noqa: E402
 import motion  # noqa: E402
 import pesquisa  # noqa: E402
 import pipeline  # noqa: E402
@@ -131,3 +134,70 @@ def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict) -> dict:
         out.append(k)
         entra = saida
     return {"marca": ep["marca"], "aspecto": "16:9", "cenas": out}
+
+
+def _dir(proj: Path, lang: str) -> Path:
+    if not isinstance(lang, str) or not LANG_RE.fullmatch(lang):
+        raise ValueError(f"idioma inválido: {lang!r} (2 letras minúsculas, ex.: pt)")
+    return Path(proj) / lang
+
+
+def estado(proj: Path, lang: str) -> dict:
+    st = pipeline.read_json(_dir(proj, lang) / "narracao.json", {})
+    return st if isinstance(st, dict) else {}
+
+
+def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None) -> dict:
+    """mp3 por cena só onde texto ou voz mudou. Valida e autoriza antes; registra o gasto mesmo se parar no meio."""
+    root = Path(root or pipeline.ROOT)
+    proj = Path(proj)
+    if not motion._str(voice_id):
+        raise ValueError("voice_id vazio: configurar canal/idiomas.json")
+    ep = ler(proj)
+    erros = validar(ep, proj, lang)
+    if erros:
+        return {"status": "invalido", "erros": erros}
+    st = estado(proj, lang)
+    pend = []
+    for c in ep["cenas"]:
+        txt = _loc(c["texto"], lang).strip()
+        h = dublagem._hash(voice_id, txt)
+        s = st.get(c["id"], {})
+        if s.get("hash") != h or not (proj / s.get("audio", "-")).is_file():
+            pend.append((c["id"], txt, h))
+    if not pend:
+        return {"status": "ok", "geradas": [], "caracteres": 0}
+    chars = sum(len(t) for _, t, _ in pend)
+    a = budget.autorizar(root, proj, "elevenlabs_tts", chars, aprovacao=aprovacao)
+    if a["status"] != "ok":
+        return {**a, "caracteres": chars, "pendentes": len(pend)}
+    key = budget._chave_elevenlabs()
+    if not key:
+        raise RuntimeError("ELEVENLABS_API_KEY ausente")
+    fetch = _fetch or audio._fetch_elevenlabs
+    url = dublagem.TTS_URL.format(voice_id=voice_id)
+    pasta = _dir(proj, lang) / "audio"
+    pasta.mkdir(parents=True, exist_ok=True)
+    geradas, usados, erro = [], 0, None
+    try:
+        for cid, txt, h in pend:
+            try:
+                dados = fetch(key, url, {"text": txt, "model_id": dublagem.MODELO_TTS})
+            except RuntimeError as ex:
+                erro = str(ex)
+                break
+            usados += len(txt)          # crédito gasto no fetch: conta antes de gravar
+            (pasta / f"{cid}.mp3").write_bytes(dados)
+            rel = f"{lang}/audio/{cid}.mp3"
+            st[cid] = {"hash": h, "audio": rel, "dur": round(audio.duracao(proj / rel), 3)}
+            geradas.append(cid)
+    finally:
+        try:
+            if usados:
+                budget.registrar(proj, "elevenlabs_tts", usados, aprovacao=aprovacao,
+                                 nota=f"narração {lang}: {len(geradas)} cenas", root=root)
+        finally:
+            pipeline.atomic_write_json(_dir(proj, lang) / "narracao.json", st)
+    if erro:
+        raise RuntimeError(f"TTS parou após {len(geradas)} cenas: {erro}")
+    return {"status": "ok", "geradas": geradas, "caracteres": usados}

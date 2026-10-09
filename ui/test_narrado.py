@@ -1,9 +1,12 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+import budget
 import motion
 import narrado
 
@@ -103,3 +106,85 @@ def test_cenas_motion_valida_no_kit(tmp_path):
     p = _proj(tmp_path)
     d = narrado.cenas_motion(narrado.ler(p), "pt", {"c01": 3.0, "c02": 2.0}, motion.carregar_tema("dark-historia"))
     assert motion.validar(d, p, "pt") == []
+
+
+ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+
+
+@pytest.fixture(scope="module")
+def mp3(tmp_path_factory):
+    p = tmp_path_factory.mktemp("a") / "s.mp3"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=220:d=1.5",
+                    "-c:a", "libmp3lame", str(p)], check=True)
+    return p.read_bytes()
+
+
+@pytest.fixture
+def root(tmp_path, monkeypatch):
+    r = tmp_path / "ve"
+    (r / "ui").mkdir(parents=True)
+    shutil.copy(Path(narrado.__file__).parent / "precos.json", r / "ui" / "precos.json")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "teste")
+    monkeypatch.setattr(budget, "saldo_elevenlabs", lambda root, **k: {"usados": 0, "limite": 10**6,
+                                                                        "restante": 10**6, "reset_ts": 0})
+    return r
+
+
+def _fetch(mp3, chamadas):
+    def f(key, url, body):
+        chamadas.append(body["text"])
+        return mp3
+    return f
+
+
+@ffmpeg
+def test_tts_gera_cacheia_e_registra(tmp_path, root, mp3):
+    p, ch = _proj(tmp_path), []
+    r = narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))
+    assert r["status"] == "ok" and r["geradas"] == ["c01", "c02"] and len(ch) == 2
+    st = narrado.estado(p, "pt")
+    assert st["c01"]["audio"] == "pt/audio/c01.mp3" and abs(st["c01"]["dur"] - 1.5) < 0.1
+    assert budget.gasto_projeto(p)["creditos"] == r["caracteres"]
+    assert narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))["geradas"] == []   # cache
+    assert len(ch) == 2
+
+
+@ffmpeg
+def test_tts_regenera_so_a_cena_editada(tmp_path, root, mp3):
+    p, ch = _proj(tmp_path), []
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))
+    ep = narrado.ler(p)
+    ep["cenas"][1]["texto"]["pt"] = "Ninguém, de fato, viu a explosão."
+    (p / "episodio.json").write_text(json.dumps(ep, ensure_ascii=False), encoding="utf-8")
+    r = narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))
+    assert r["geradas"] == ["c02"] and ch[-1] == "Ninguém, de fato, viu a explosão."
+
+
+def test_tts_invalido_nao_gasta(tmp_path, root, mp3):
+    ep = _ep()
+    ep["cenas"][0]["visual"]["licenca"] = "CC BY-NC 4.0"
+    p, ch = _proj(tmp_path, ep), []
+    r = narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))
+    assert r["status"] == "invalido" and ch == []
+
+
+def test_tts_orcamento_bloqueado_nao_gasta(tmp_path, root, mp3, monkeypatch):
+    p, ch = _proj(tmp_path), []
+    monkeypatch.setattr(budget, "autorizar", lambda *a, **k: {"status": "bloqueado", "motivo": "teto"})
+    r = narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))
+    assert r["status"] == "bloqueado" and ch == []
+
+
+@ffmpeg
+def test_tts_falha_no_meio_registra_o_gasto(tmp_path, root, mp3):
+    p = _proj(tmp_path)
+    n = []
+
+    def f(key, url, body):
+        n.append(1)
+        if len(n) == 2:
+            raise RuntimeError("ElevenLabs HTTP 500")
+        return mp3
+    with pytest.raises(RuntimeError, match="após 1 cenas"):
+        narrado.tts(p, "pt", "voz1", root=root, _fetch=f)
+    assert list(narrado.estado(p, "pt")) == ["c01"] and budget.gasto_projeto(p)["creditos"] > 0
