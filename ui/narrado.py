@@ -136,6 +136,23 @@ def _inicios(c: dict, lang: str) -> list:
     return out
 
 
+def _com_frase(b: dict, lang: str) -> dict:
+    """Beat `palavras` com `frase`: `palavras` passa a ser as palavras da frase, como escritas (validar e resolver)."""
+    fr = _loc(b["frase"], lang)
+    return {**b, "palavras": fr.split() if isinstance(fr, str) else fr}
+
+
+def avisos_direcao(ep: dict, lang: str) -> list[str]:
+    out = []
+    for c in ep.get("cenas") or []:
+        for b in c.get("beats") or []:
+            if isinstance(b, dict) and b.get("faz") == "palavras" and "frase" not in b:
+                pal = _loc(b.get("palavras"), lang)
+                if isinstance(pal, list) and len(pal) < 4:
+                    out.append(f"{c['id']}: palavras soltas ({' '.join(map(str, pal))}); prefira frase da fala")
+    return out
+
+
 def _v_acao(b: dict, ep: dict, lang: str, e) -> None:
     m = b.get("modelo")
     if m not in MODELOS_ACAO:
@@ -194,6 +211,15 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
             continue
         if isinstance(b.get("palavras"), dict):     # {"pt": [...], "en": [...]}, como em resolver_beats
             b = {**b, "palavras": _loc(b["palavras"], lang)}
+        if b["faz"] == "palavras" and "frase" in b:
+            if not isinstance(_loc(b["frase"], lang), str):
+                e(q, "frase precisa ser texto")
+                continue
+            b = _com_frase(b, lang)
+            if len(b["palavras"]) > 10:
+                e(q, "frase com mais de 10 palavras (use citacao)")
+                continue
+            b["_frase"] = True
         for campo in FAZ[b["faz"]]:
             if campo not in b:
                 e(q, f"{b['faz']} precisa de {campo}")
@@ -218,13 +244,16 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
             w = _loc(w, lang)
             if w and _acha(ws, w) is None:
                 e(q, f"palavra {w!r} não está no texto da cena")
-        d = ini[k - 1]
+        d, ks = ini[k - 1], []
         for w in (b.get("palavras") or []) if d is not None else []:
             d = _acha(ws, w, d)
             if d is None:
                 e(q, f"palavra {w!r} não está no texto da cena (na ordem do beat)")
                 break
+            ks.append(d)
             d += 1
+        if b.get("_frase") and ks and ks != list(range(ks[0], ks[0] + len(ks))):
+            e(q, "frase precisa ser trecho contíguo da fala")
         if b["faz"] == "contador" and b.get("pontos") and not (
                 isinstance(b.get("valor"), int) and not isinstance(b["valor"], bool) and 0 < b["valor"] <= 500):
             e(q, "pontos só com valor inteiro entre 1 e 500")
@@ -329,6 +358,8 @@ def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
         if k is None:
             raise ValueError(f"{c['id']}: palavra {b.get('em')!r} não encontrada no texto (rode validar)")
         b["s"] = pal[k]["s"]
+        if b["faz"] == "palavras" and "frase" in b:
+            b["palavras"] = b["frase"].split()
         if b["faz"] == "palavras":
             ts, d = [], k
             for w in b["palavras"]:
@@ -761,7 +792,8 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
             tmp2.unlink(missing_ok=True)
     legenda = out.with_suffix(".srt")
     legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
-    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"], "avisos": avisos}
+    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"],
+            "avisos": avisos + (avisos_direcao(ep, lang) if doc else [])}
 
 
 FONTE_THUMB = pipeline.ROOT / "motion" / "kit" / "fonts" / "Archivo.ttf"

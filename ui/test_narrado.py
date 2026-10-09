@@ -914,3 +914,50 @@ def test_validar_atores_traje_invalido(tmp_path, traje):
     ep["atores"]["kendall"]["traje"] = traje
     p = _proj(tmp_path, ep)
     assert any("traje" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def _com_beat(ep, beat):
+    ep["cenas"][0]["beats"].append(beat)
+    return ep
+
+
+def test_frase_valida_e_resolve(tmp_path):
+    ep = _com_beat(_ep_doc(), {"em": "não", "faz": "palavras", "frase": "Não havia água.", "risco": "água"})
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))[-1]
+    assert b["palavras"] == ["Não", "havia", "água."] and len(b["ts"]) == 3 and b["ts"] == sorted(b["ts"])
+
+
+def test_frase_com_pontuacao_e_caixa_casa_tokens(tmp_path):
+    ep = _com_beat(_ep_doc(), {"em": "Em", "faz": "palavras", "frase": "EM junho, de 1629"})
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("frase, trecho", [
+    ("junho 1629 chegaram", "contígu"),
+    ("não havia ouro", "não está no texto"),
+    (" ".join(["havia"] * 11), "mais de 10 palavras"),
+])
+def test_frase_erros(tmp_path, frase, trecho):
+    ep = _com_beat(_ep_doc(), {"em": "junho", "faz": "palavras", "frase": frase})
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_frase_localizada(tmp_path):
+    ep = _ep_doc_en(["no", "water"])
+    ep["cenas"][0]["beats"][0] = {"faz": "palavras", "frase": {"pt": "Não havia água", "en": "There was no water"}}
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    assert narrado.validar(narrado.ler(p), p, "en") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "en", _palavras(ep, "en"))[0]
+    assert b["palavras"] == ["There", "was", "no", "water"]
+
+
+def test_aviso_palavras_soltas():
+    ep = _com_beat(_ep_doc(), {"faz": "palavras", "palavras": ["água"]})   # _ep_doc já traz 3 palavras soltas
+    assert len(narrado.avisos_direcao(ep, "pt")) == 2
+    ok = _com_beat(_ep_doc(), {"faz": "palavras", "frase": "Não havia água"})
+    assert len(narrado.avisos_direcao(ok, "pt")) == 1                      # só a lista original
