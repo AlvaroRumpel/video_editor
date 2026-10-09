@@ -539,3 +539,9 @@ def test_wikimedia_autor_unescape(tmp_path, mp4, jpg, chaves):
     assert stock.buscar("g", "video", ["wikimedia"], 1, tmp_path / "c", _fetch=f)["candidatos"][0]["autor"] == "Jo & Co"
     em["Artist"]["value"] = "<br>"
     assert stock.buscar("g", "video", ["wikimedia"], 1, tmp_path / "d", _fetch=f)["candidatos"][0]["autor"] == "(autor não informado)"
+
+
+def test_filtrar_largura_min_para_arquivo_historico():
+    c = {"tipo": "foto", "download_url": "https://x/y.jpg", "largura": 1400}
+    assert not stock._filtrar(c, "foto")
+    assert stock._filtrar(c, "foto", 1200)

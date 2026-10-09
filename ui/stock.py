@@ -230,12 +230,12 @@ def _wikimedia(termo, tipo, n, k, fetch):
 FONTES = {"pexels": _pexels, "pixabay": _pixabay, "unsplash": _unsplash, "archive": _archive, "wikimedia": _wikimedia}
 
 
-def _filtrar(c: dict, tipo: str) -> bool:
+def _filtrar(c: dict, tipo: str, largura_min: int = 1920) -> bool:
     if c["tipo"] != tipo or not c.get("download_url"):
         return False
     if tipo == "video":
         return c["largura"] >= 1280 and 3 <= c["dur"] <= 30 and c["largura"] > c.get("altura", 0)
-    return c["largura"] >= 1920
+    return c["largura"] >= largura_min
 
 
 def _rel(dst_dir: Path, nome: str) -> str:
@@ -245,7 +245,8 @@ def _rel(dst_dir: Path, nome: str) -> str:
     return (dst_dir / nome).as_posix()
 
 
-def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fetch=None) -> dict:
+def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fetch=None,
+           largura_min: int = 1920) -> dict:
     fetch = _fetch or _fetch_url
     k = chaves()
     dst_dir = Path(dst_dir)
@@ -263,7 +264,7 @@ def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fet
             avisos.append(av)
         baixados = 0
         for c in cands:
-            if baixados >= n or not _filtrar(c, tipo):
+            if baixados >= n or not _filtrar(c, tipo, largura_min):
                 continue
             status, corpo, _ = fetch(c["download_url"], None)
             if len(corpo) > MAX_DOWNLOAD:
@@ -527,7 +528,8 @@ def ranquear(broll_json: Path, proj: Path) -> dict:
 
 def _cli(ns):
     if ns.cmd == "buscar":
-        return buscar(ns.termo, ns.tipo, [f.strip() for f in ns.fontes.split(",")], ns.n, Path(ns.dst)), 0
+        return buscar(ns.termo, ns.tipo, [f.strip() for f in ns.fontes.split(",")], ns.n, Path(ns.dst),
+                      largura_min=ns.largura_min), 0
     if ns.cmd == "sheet":
         return sheet(Path(ns.broll), Path(ns.png), Path(ns.proj)), 0
     if ns.cmd == "ranquear":
@@ -545,6 +547,7 @@ if __name__ == "__main__":
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("buscar"); p.add_argument("termo"); p.add_argument("--tipo", choices=["video", "foto"], default="video")
     p.add_argument("--fontes", default="pexels,pixabay"); p.add_argument("--n", type=int, default=3); p.add_argument("--dst", required=True)
+    p.add_argument("--largura-min", type=int, default=1920)
     p = sub.add_parser("sheet"); p.add_argument("broll"); p.add_argument("png"); p.add_argument("proj")
     p = sub.add_parser("ranquear"); p.add_argument("broll"); p.add_argument("proj")
     p = sub.add_parser("preparar"); p.add_argument("broll"); p.add_argument("edl"); p.add_argument("proj")
