@@ -795,3 +795,29 @@ def test_doc_beats_estado_no_tempo(tmp_path):
         ano, pal, rota = op(0.3, ".d-data .a"), op(2.4, ".d-palavras"), op(0.3, ".d-rota")
         b.close()
     assert ano == 0 and pal > 0.9 and rota == 0
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_mergulho_aproxima_o_mapa_e_da_clarao(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = [{"faz": "ponto", "ponto": "b", "s": 0.3}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r
+    c2 = next(c for c in r["cenas"] if c["id"] == "c02")
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        escala = lambda t: pg.evaluate("t => { __kit.ir(t); const m = document.querySelector('#c01 .d-cam').style.transform;"
+                                       " return parseFloat(m.match(/scale\(([\d.]+)\)/)[1]); }", t)
+        antes, durante = escala(c2["ini"] - 0.3), escala(c2["ini"] + 0.5)
+        flash = pg.evaluate("t => { __kit.ir(t); return +getComputedStyle(document.querySelector('.d-flash')).opacity; }",
+                            c2["ini"] + 0.6 * 0.45)
+        b.close()
+    assert durante > antes * 1.8 and flash > 0.5
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert "clarao" in sons

@@ -436,8 +436,27 @@
 
   KIT.tipo("vinheta", (c) => c.t0 + 0.1);
   KIT.tipo("telafinal", (c) => c.t0 + 0.1);
-  for (const n of ["mergulho", "recuo", "corte"])
-    KIT.transicao(n, (tl, cam, t, d) => tl.fromTo(cam, { opacity: 0 }, { opacity: 1, duration: d }, t));
+  // ---------- transições ligadas (entrada da cena nova; `ant` = camada da cena anterior)
+  KIT.transicao("mergulho", (tl, cam, t, d, tema, ant) => {
+    const meio = t + d * 0.45, flash = iniciarFx().flash;
+    if (ant && ant._doc) ant._doc.mergulho(t - 0.1, d * 0.55 + 0.1);
+    tl.fromTo(cam, { opacity: 0 }, { opacity: 1, duration: d * 0.4 }, meio);
+    tl.fromTo(flash, { opacity: 0 }, { opacity: 0.85, duration: 0.1, immediateRender: false }, meio - 0.05)
+      .to(flash, { opacity: 0, duration: 0.45 }, meio + 0.05);
+    const palco = cam.querySelector(".d-palco");
+    if (palco) tl.fromTo(palco, { scale: 1.7 }, { scale: 1, duration: 1.1, ease: "power3.out", immediateRender: false }, meio);
+    KIT.cue(meio, "clarao", -8);
+  });
+  KIT.transicao("recuo", (tl, cam, t, d, tema, ant) => {
+    const pp = ant && ant.querySelector(".d-palco");
+    if (pp) tl.to(pp, { scale: 0.8, opacity: 0, duration: d, ease: "power2.in" }, t);
+    tl.fromTo(cam, { opacity: 0 }, { opacity: 1, duration: d * 0.6 }, t + d * 0.4);
+    KIT.cue(t, "whoosh", -8);
+  });
+  KIT.transicao("corte", (tl, cam, t, d) => {
+    tl.fromTo(cam, { opacity: 0 }, { opacity: 1, duration: 0.01 }, t + d * 0.5);
+    KIT.cue(t, "whoosh", -10);
+  });
 
   window.__doc = { W, H, el, svg, texto, clamp, easeIO, easeOut, fmt, iniciarFx, camAt, BEATS, SAIDA };
 })();
