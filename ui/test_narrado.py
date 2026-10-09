@@ -658,7 +658,7 @@ def test_render_doc_sfx_trilha_realces_e_ritmo(tmp_path, root, mp3, monkeypatch)
     with pytest.raises(ValueError, match="trilha"):
         narrado.render(p, "pt")                                   # final sem trilha
     r = narrado.render(p, "pt", rascunho=True)
-    assert r["ok"] and Path(chamadas["sfx"]).name == "cues.pt.json"
+    assert r["ok"] and Path(chamadas["sfx"]).name == "cues.pt.json" and "rascunho sem trilha" in r["avisos"]
     tempos = json.loads((p / "motion.pt" / "tempos.json").read_text(encoding="utf-8"))
     esperado = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
     trilha = tmp_path / "t.wav"
@@ -693,3 +693,105 @@ def test_render_doc_sem_tts_pede_tts(tmp_path):
     p = _proj(tmp_path, _ep_doc())
     with pytest.raises(ValueError, match="rode tts"):
         narrado.render(p, "pt", rascunho=True)
+
+
+# --- correções da revisão final ---
+
+@ffmpeg
+def test_render_doc_valida_antes_de_resolver_beats(tmp_path, root, mp3):
+    p = _proj(tmp_path, _ep_doc())
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    _alinhado(p)
+    ep = narrado.ler(p)
+    ep["cenas"][0]["beats"].append({"em": "junho"})                  # beat sem faz: antes era KeyError
+    (p / "episodio.json").write_text(json.dumps(ep, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="episódio inválido"):
+        narrado.render(p, "pt", rascunho=True)
+
+
+@pytest.mark.parametrize("beat", [
+    {"faz": "ponto", "ponto": "abrolhos"},
+    {"faz": "rota", "de": "cabo", "para": "abrolhos"},
+    {"faz": "camera", "para": "abrolhos"},
+])
+def test_validar_ponto_rota_camera_so_em_fundo_mapa(tmp_path, beat):
+    ep = _ep_doc()
+    ep["cenas"][1]["beats"] = [beat]
+    p = _proj(tmp_path, ep)
+    erros = narrado.validar(narrado.ler(p), p, "pt")
+    assert any(e["id"].startswith("c02") and f"{beat['faz']} só em cena com fundo mapa" in e["motivo"]
+               for e in erros), erros
+
+
+def test_validar_camera_area_fora_do_mapa_ok(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][1]["beats"] = [{"faz": "camera", "area": [0.1, 0.1, 0.3, 0.3]}]
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("mut", [
+    lambda e: e["cenas"][1].__setitem__("fundo", {"tipo": "imagem", "src": "../001-teste/assets/foto.png",
+                                                  "fonte_url": "https://x", "licenca": "CC0", "credito": "x"}),
+    lambda e: e["mapa"].__setitem__("src", "assets/../assets/foto.png"),
+])
+def test_validar_doc_recusa_caminho_com_ponto_ponto(tmp_path, mut):
+    ep = _ep_doc()
+    mut(ep)
+    p = _proj(tmp_path, ep)
+    assert any("relativo" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_render_trilha_inexistente_falha_antes_do_motion(tmp_path, monkeypatch):
+    p = _proj(tmp_path, _ep_doc())
+    monkeypatch.setattr(motion, "render", lambda *a, **k: pytest.fail("render não devia rodar"))
+    with pytest.raises(ValueError, match="trilha não encontrada"):
+        narrado.render(p, "pt", rascunho=True, trilha=tmp_path / "nao.wav")
+
+
+def test_ritmo_conta_itens_e_marcos():
+    beats = [{"s": 0.0, "itens": [{"s": 4.0}, {"s": 8.0}]}, {"s": 9.0, "marcos": [{"s": 13.0}]}]
+    assert narrado.ritmo("c01", beats, 15.0) == []
+
+
+@ffmpeg
+def test_escrever_cenas_doc_palco_e_inserto_retrato_usam_contain(tmp_path, root, mp3):
+    ep = _ep_doc()
+    arq = {"fonte_url": "https://x", "licenca": "CC0", "credito": "x"}
+    ep["cenas"][1]["fundo"] = {"tipo": "imagem", "src": "assets/jornal.png", **arq}
+    ep["cenas"][1]["beats"] = [{"faz": "inserto", "src": "assets/jornal.png", **arq},
+                               {"faz": "inserto", "src": "assets/foto.png", **arq}]
+    p = _proj(tmp_path, ep)
+    Image.new("RGB", (800, 1200), "gray").save(p / "assets" / "jornal.png")
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    _alinhado(p)
+    d = json.loads(narrado.escrever_cenas(p, "pt").read_text(encoding="utf-8"))
+    c02 = next(c for c in d["cenas"] if c["id"] == "c02")
+    assert c02["palco"]["ajuste"] == "contain"
+    assert c02["beats"][0]["ajuste"] == "contain" and "ajuste" not in c02["beats"][1]
+
+
+@pytest.mark.parametrize("beat", [
+    {"faz": "lista", "itens": "abc"},
+    {"faz": "linha_tempo", "marcos": 5},
+    {"faz": "ponto", "ponto": ["x"]},
+    {"faz": "rota", "de": "cabo", "para": "abrolhos", "via": 5},
+    {"faz": "palavras", "palavras": "não havia"},
+    {"faz": "palavras", "palavras": [3]},
+    {"faz": "lista", "itens": [3]},
+])
+def test_validar_beat_com_tipo_errado_reporta_erro(tmp_path, beat):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"].append(beat)
+    p = _proj(tmp_path, ep)
+    assert any(e["id"] == "c01 beat 6" for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_em_localizado_em_itens(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"].append({"faz": "lista", "itens": [{"t": "a", "em": {"pt": "doce"}}],
+                                    "marcos": []})
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
+    assert b[-1]["itens"][0]["s"] == 7.0                            # "doce" = token 14

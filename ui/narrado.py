@@ -82,7 +82,9 @@ def _achados(proj: Path) -> set | None:
 
 def _v_arquivo(d: dict, proj: Path, err) -> None:
     """Imagem de arquivo (src no projeto + licença aceita + fonte_url + credito)."""
-    if motion._dentro(proj, d.get("src")) is None:
+    if not motion._rel_ok(d.get("src")):
+        err(f"src precisa ser caminho relativo sem '..': {d.get('src')!r}")
+    elif motion._dentro(proj, d.get("src")) is None:
         err(f"src não encontrado no projeto: {d.get('src')!r}")
     if not licenca_ok(d.get("licenca")):
         err(f"licença não aceita: {d.get('licenca')!r} (PD, CC0, CC BY, CC BY-SA)")
@@ -134,6 +136,7 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
     pontos = mapa.get("pontos") if isinstance(mapa.get("pontos"), dict) else {}
     i = c["id"]
     f = c.get("fundo")
+    no_mapa = isinstance(f, dict) and f.get("tipo") == "mapa"
     if f is not None:
         t = f.get("tipo") if isinstance(f, dict) else None
         if t not in FUNDOS_DOC:
@@ -158,11 +161,23 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
         for campo in FAZ[b["faz"]]:
             if campo not in b:
                 e(q, f"{b['faz']} precisa de {campo}")
-        for nome in [b.get(x) for x in ("de", "para", "ponto")] + list(b.get("via", [])):
+        tipo_ruim = [x for x in ("itens", "marcos", "palavras", "via") if x in b and not isinstance(b[x], list)]
+        tipo_ruim += [x for x in ("de", "para", "ponto") if x in b and not isinstance(b[x], str)]
+        tipo_ruim += [x for x in ("palavras", "via") if isinstance(b.get(x), list) and not all(isinstance(w, str) for w in b[x])]
+        tipo_ruim += [x for x in ("itens", "marcos") if isinstance(b.get(x), list)
+                      and not all(isinstance(w, (str, dict)) for w in b[x])]
+        if tipo_ruim:
+            for x in dict.fromkeys(tipo_ruim):
+                e(q, f"{x} com tipo inválido (listas: itens, marcos, palavras, via; textos: de, para, ponto)")
+            continue
+        if (b["faz"] in ("rota", "ponto") or (b["faz"] == "camera" and "para" in b)) and not no_mapa:
+            e(q, f"{b['faz']} só em cena com fundo mapa")
+        for nome in [b.get(x) for x in ("de", "para", "ponto")] + b.get("via", []):
             if nome is not None and nome not in pontos:
                 e(q, f"ponto {nome!r} não existe no mapa")
         sub = [x for x in (b.get("itens") or []) + (b.get("marcos") or []) if isinstance(x, dict)]
         for w in [b.get("em")] + [x.get("em") for x in sub]:
+            w = _loc(w, lang)
             if w and _acha(ws, w) is None:
                 e(q, f"palavra {w!r} não está no texto da cena")
         d = ini[k - 1]
@@ -282,12 +297,14 @@ def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
 
 
 def ritmo(cid: str, beats: list[dict], dur: float) -> list[str]:
-    ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", []))})
+    sub = [x["s"] for b in beats for k in ("itens", "marcos") for x in b.get(k) or [] if isinstance(x, dict) and "s" in x]
+    ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", [])), *sub})
     return [f"{cid}: {a:.1f}–{b:.1f} s sem beat" for a, b in zip(ts, ts[1:]) if b - a > RITMO_MAX]
 
 
 def modo_doc(ep: dict) -> bool:
-    return any(c.get("beats") for c in ep.get("cenas", []))
+    cenas = ep.get("cenas")
+    return isinstance(cenas, list) and any(isinstance(c, dict) and c.get("beats") for c in cenas)
 
 
 def _palco(c: dict) -> dict | None:
@@ -600,12 +617,18 @@ def escrever_cenas(proj: Path, lang: str) -> Path:
     if d.get("mapa"):
         with Image.open(proj / d["mapa"]["arquivo"]) as im:
             d["mapa"]["w"], d["mapa"]["h"] = im.size
+    def razao(arq):
+        with Image.open(proj / arq) as im:
+            w, h = im.size
+        return w / h
     for k in d["cenas"]:
         if k["tipo"] == "tela" and Path(k["arquivo"]).suffix.lower() in motion.EXT_IMG:
-            with Image.open(proj / k["arquivo"]) as im:
-                w, h = im.size
-            if w / h < 1.2:
+            if razao(k["arquivo"]) < 1.2:
                 k["ajuste"] = "contain"     # retrato/jornal: inteiro sobre fundo desfocado, sem corte
+        if k["tipo"] == "doc":              # palco imagem e insertos: retrato/jornal e panorama inteiros
+            for x in [k["palco"]] + [b for b in k["beats"] if b["faz"] == "inserto"]:
+                if x.get("arquivo") and not 1.2 <= razao(x["arquivo"]) <= 2.2:
+                    x["ajuste"] = "contain"
     dst = proj / f"cenas.{lang}.json"
     pipeline.atomic_write_json(dst, d)
     return dst
@@ -631,13 +654,13 @@ def _voz(proj: Path, lang: str, tempos: dict, st: dict) -> Path:
 
 def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     proj = Path(proj)
+    if trilha and not Path(trilha).is_file():
+        raise ValueError(f"trilha não encontrada: {trilha}")
+    escrever_cenas(proj, lang)          # valida, confere tts e alinhar antes de resolver beats
     ep = ler(proj)
     doc, avisos = modo_doc(ep), []
     if doc:
         st0 = estado(proj, lang)
-        faltam = [c["id"] for c in ep["cenas"] if c["id"] not in st0]
-        if faltam:
-            raise ValueError(f"rode tts antes: áudio ausente em {', '.join(faltam)}")
         pal = _palavras(proj, lang, ep, st0)
         for c in ep["cenas"]:
             beats = resolver_beats(c, lang, pal) if c.get("beats") else []
@@ -646,7 +669,8 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
             raise ValueError("ritmo: " + "; ".join(avisos))
         if not trilha and not rascunho:
             raise ValueError("render final do modo doc exige --trilha (canal/trilhas/)")
-    escrever_cenas(proj, lang)
+        if not trilha:
+            avisos.append("rascunho sem trilha")
     r = motion.render(proj, rascunho, lang)
     if not r.get("ok"):
         return r
