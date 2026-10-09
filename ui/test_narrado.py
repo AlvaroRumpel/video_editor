@@ -676,3 +676,20 @@ def test_descricao_inclui_creditos_de_mapa_fundo_e_inserto(tmp_path):
     narrado.descricao(p, "pt")
     txt = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
     assert "Blaeu, 1650" in txt and "Museu — https://ins (CC BY 4.0)" in txt
+
+
+@ffmpeg
+def test_render_nao_doc_com_trilha_real(tmp_path, root, mp3, monkeypatch):
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    monkeypatch.setattr(motion, "render", _fake_render)
+    trilha = tmp_path / "t.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=100:d=2", str(trilha)], check=True)
+    r = narrado.render(p, "pt", trilha=trilha)
+    assert r["ok"] and Path(r["video"]).is_file()
+
+
+def test_render_doc_sem_tts_pede_tts(tmp_path):
+    p = _proj(tmp_path, _ep_doc())
+    with pytest.raises(ValueError, match="rode tts"):
+        narrado.render(p, "pt", rascunho=True)

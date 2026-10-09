@@ -635,6 +635,9 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     doc, avisos = modo_doc(ep), []
     if doc:
         st0 = estado(proj, lang)
+        faltam = [c["id"] for c in ep["cenas"] if c["id"] not in st0]
+        if faltam:
+            raise ValueError(f"rode tts antes: áudio ausente em {', '.join(faltam)}")
         pal = _palavras(proj, lang, ep, st0)
         for c in ep["cenas"]:
             beats = resolver_beats(c, lang, pal) if c.get("beats") else []
@@ -655,24 +658,35 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     out = _dir(proj, lang) / ("final_rascunho.mp4" if rascunho else "final.mp4")
     tmp = out.with_name(f".{out.stem}.voz.mp4")
     tmp2 = out.with_name(f".{out.stem}.sfx.mp4")
-    try:
-        _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
-        base = tmp
-        cues = proj / f"cues.{lang}.json"
-        if doc and cues.is_file() and json.loads(cues.read_text(encoding="utf-8")):
-            if not SFX_DIR.is_dir():
-                audio.sfx_kit(SFX_DIR)
-            audio.mix_sfx(tmp, cues, SFX_DIR, tmp2)
-            base = tmp2
+    if not doc:          # episódio sem beats: caminho original
         if trilha:
-            realces = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
-            audio.mix_trilha(base, Path(trilha), out, realces=realces)        # ducking + realce + loudnorm −14
+            try:
+                _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
+                audio.mix_trilha(tmp, Path(trilha), out)          # ducking + loudnorm −14
+            finally:
+                tmp.unlink(missing_ok=True)
         else:
-            _ff(["-i", str(base), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+            _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                  "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
-    finally:
-        tmp.unlink(missing_ok=True)
-        tmp2.unlink(missing_ok=True)
+    else:
+        try:
+            _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
+            base = tmp
+            cues = proj / f"cues.{lang}.json"
+            if cues.is_file() and json.loads(cues.read_text(encoding="utf-8")):
+                if not SFX_DIR.is_dir():
+                    audio.sfx_kit(SFX_DIR)
+                audio.mix_sfx(tmp, cues, SFX_DIR, tmp2)
+                base = tmp2
+            if trilha:
+                realces = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
+                audio.mix_trilha(base, Path(trilha), out, **({"realces": realces} if realces else {}))
+            else:
+                _ff(["-i", str(base), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+                     "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
+        finally:
+            tmp.unlink(missing_ok=True)
+            tmp2.unlink(missing_ok=True)
     legenda = out.with_suffix(".srt")
     legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
     return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"], "avisos": avisos}
