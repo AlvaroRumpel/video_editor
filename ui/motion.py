@@ -246,7 +246,7 @@ def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
                 e(i, "última cena não tem saida")
             elif not isinstance(s, dict) or s.get("transicao") not in TRANSICOES \
                     or not (_num(s.get("dur")) and 0 < s["dur"] <= 2):
-                e(i, "saida precisa de transicao ({'|'.join(TRANSICOES)}) e dur em (0, 2]")
+                e(i, f"saida precisa de transicao ({'|'.join(TRANSICOES)}) e dur em (0, 2]")
         err = lambda m, i=i: e(i, m)
         if tipo == "endcard":
             _v_endcard(c, proj, err, lang)

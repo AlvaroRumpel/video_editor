@@ -58,7 +58,7 @@ def test_validar_ok(tmp_path):
     (lambda d: d["cenas"].append({"id": "c03", "tipo": "custom", "html": "x.html"}), "c03", "html não encontrado"),
     (lambda d: d["cenas"].append({"id": "c03", "tipo": "custom", "html": "x.html"}), "c03", "custom precisa de dur"),
     (lambda d: d["cenas"][1].update(saida={"transicao": "fade", "dur": 0.3}), "c02", "última cena"),
-    (lambda d: d["cenas"][0].update(saida={"transicao": "zoom", "dur": 0.3}), "c01", "saida precisa"),
+    (lambda d: d["cenas"][0].update(saida={"transicao": "zoom", "dur": 0.3}), "c01", "saida precisa de transicao (fade|wipe|iris|mergulho|recuo|corte)"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "tela", "arquivo": "../fora.png"}), "c09", "arquivo não encontrado"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "lista", "itens": ["a"] * 7}), "c09", "no máximo 6"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "numero", "valor": "mil"}), "c09", "valor precisa"),
