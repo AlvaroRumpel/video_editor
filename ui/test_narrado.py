@@ -292,8 +292,49 @@ def test_descricao_fontes_creditos_e_ia(tmp_path):
     md = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
     assert r == {"fontes": 1, "creditos": 1, "ia": True}
     assert md.startswith("Em 1908") and "[F1] Smithsonian Magazine — https://www.smithsonianmag.com/x" in md
-    assert "Leonid Kulik, 1927 — https://commons.wikimedia.org/wiki/File:X.jpg (Public domain)" in md
+    assert "Leonid Kulik, 1927 (Public domain) — https://commons.wikimedia.org/wiki/File:X.jpg" in md
     assert "Conteúdo alterado ou sintético" in md
+
+
+def test_descricao_en_titulos_e_trilha(tmp_path):
+    ep = _ep()
+    ep["cenas"].append({"id": "c03", "texto": {"pt": "x", "en": "x"}, "fontes": ["F1"],
+                        "visual": {"tipo": "ia", "src": "assets/ia.png", "prompt": "p"}})
+    p = _proj(tmp_path, ep)
+    Image.new("RGB", (1600, 1000)).save(p / "assets" / "ia.png")
+    tr = tmp_path / "trilhas.json"
+    tr.write_text('{"faixas": [{"arquivo": "a.mp3", "licenca": "CC BY 4.0", "atribuicao": "Track by Kevin"}, '
+                  '{"arquivo": "b.mp3"}]}', encoding="utf-8")
+    narrado.descricao(p, "en", tr)
+    md = (p / "en" / "descricao.md").read_text(encoding="utf-8")
+    assert "Sources:\n" in md and "Images:\n" in md and "Music:\nTrack by Kevin" in md
+    assert "Fontes:" not in md and "AI-generated images" in md
+    narrado.descricao(p, "pt")
+    assert "Música:" not in (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+
+
+def test_ids_compactos():
+    assert narrado._ids(["F1", "F2", "F3", "F7", "F9", "F10"]) == "F1–F3, F7, F9–F10"
+    assert narrado._ids(["F4"]) == "F4"
+
+
+def test_descricao_agrupa_fontes_sem_licenca_duplicada_e_cabe_no_youtube(tmp_path, monkeypatch):
+    ep = _ep()
+    ep["cenas"][0]["fontes"] = ["F1", "F2", "F3", "F5"]
+    for k in range(25):
+        ep["cenas"].append({"id": f"x{k}", "texto": {"pt": "x"}, "fontes": [], "visual": {
+            "tipo": "arquivo", "src": "assets/foto.png", "licenca": "CC BY-SA 4.0",
+            "fonte_url": f"https://commons.wikimedia.org/wiki/File:Um_nome_bem_comprido_de_arquivo_{k}_Batavia_wreck.jpg",
+            "credito": "Guy de la Bedoyere — CC BY-SA 4.0" if k % 2 else "Vunz"}})
+    p = _proj(tmp_path, ep)
+    a = lambda i: {"id": f"F{i}", "fonte": "Smithsonian", "url": "https://s/x"}
+    monkeypatch.setattr(narrado.pesquisa, "parse_pesquisa", lambda _t: {"achados": [a(i) for i in (1, 2, 3, 5)]})
+    narrado.descricao(p, "pt")
+    md = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+    assert md.count("https://s/x") == 1 and "[F1–F3, F5] Smithsonian — https://s/x" in md
+    assert "CC BY-SA 4.0 — CC BY-SA 4.0" not in md and "(CC BY-SA 4.0) — " in md   # Vunz: licença só 1x
+    assert "Guy de la Bedoyere — CC BY-SA 4.0 — " in md and "CC BY-SA 4.0 (CC BY-SA 4.0)" not in md
+    assert len(md.encode("utf-8")) < 5000
 
 
 def test_cli_validar_codigo_de_saida(tmp_path):
@@ -481,3 +522,342 @@ def test_perfil_le_idioma_do_canal(tmp_path):
     assert narrado.perfil(f, "pt") == {"voice_id": VOZ_G, "provedor": "google", "velocidade": 0.95, "tratamento": TRAT}
     with pytest.raises(ValueError, match="en"):
         narrado.perfil(f, "en")
+
+
+def _ep_doc():
+    ep = _ep()
+    ep["mapa"] = {"src": "assets/foto.png", "fonte_url": "https://commons.wikimedia.org/wiki/File:M.jpg",
+                  "licenca": "CC0", "credito": "Blaeu, 1650", "pontos": {"cabo": [100, 900], "abrolhos": [1300, 700]}}
+    ep["vinheta_apos"] = "c01"
+    ep["cenas"][0]["texto"]["pt"] = "Em junho de 1629, cerca de trezentas pessoas chegaram. Não havia água. Nem água doce."
+    ep["cenas"][0]["fundo"] = {"tipo": "mapa"}
+    ep["cenas"][0]["beats"] = [
+        {"em": "junho", "faz": "data", "t": {"pt": "Junho 1629"}},
+        {"faz": "rota", "de": "cabo", "para": "abrolhos", "navio": True},
+        {"em": "trezentas", "faz": "contador", "valor": 300, "legenda": {"pt": "sobreviventes"}, "pontos": True},
+        {"faz": "palavras", "palavras": ["não", "havia", "água"], "risco": "água"},
+        {"em": "água#2", "faz": "ponto", "ponto": "abrolhos", "rotulo": {"pt": "Abrolhos"}}]
+    return ep
+
+
+def _palavras(ep, lang="pt"):
+    """palavras.json falso: token k começa em k * 0.5 s."""
+    import alinhar
+    out = {}
+    for c in ep["cenas"]:
+        n = len(alinhar.tokens(narrado._loc(c["texto"], lang)))
+        out[c["id"]] = {"hash": "h", "palavras": [{"w": "x", "s": k * 0.5, "e": k * 0.5 + 0.4} for k in range(n)]}
+    return out
+
+
+def test_validar_doc_ok(tmp_path):
+    p = _proj(tmp_path, _ep_doc())
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("mut, trecho", [
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "explodir"}), "faz desconhecido"),
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "ponto", "ponto": "batavia"}), "ponto 'batavia' não existe"),
+    (lambda e: e["cenas"][0]["beats"].append({"em": "baleia", "faz": "data", "t": {"pt": "x"}}), "palavra 'baleia'"),
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "contador", "valor": 9000, "pontos": True}), "pontos só com valor"),
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "rota", "de": "cabo"}), "rota precisa de para"),
+    (lambda e: e.pop("mapa"), "fundo mapa sem 'mapa'"),
+    (lambda e: e.__setitem__("vinheta_apos", "c77"), "vinheta_apos"),
+    (lambda e: e["cenas"][0].__setitem__("fundo", {"tipo": "video"}), "fundo.tipo inválido"),
+    (lambda e: e["mapa"].__setitem__("licenca", "CC BY-NC"), "licença não aceita"),
+])
+def test_validar_doc_erros(tmp_path, mut, trecho):
+    ep = _ep_doc()
+    mut(ep)
+    p = _proj(tmp_path, ep)
+    erros = narrado.validar(narrado.ler(p), p, "pt")
+    assert any(trecho in e["motivo"] for e in erros), erros
+
+
+def test_resolver_beats_em_frase_palavras_e_ocorrencia():
+    ep = _ep_doc()
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
+    # tokens: em junho de 1629 cerca de 300 pessoas chegaram | nao havia agua | nem agua doce
+    assert b[0]["s"] == 0.5 and b[0]["t"] == "Junho 1629"            # "junho" = token 1, texto localizado
+    assert b[1]["s"] == 4.5                                           # sem em: início da frase seguinte (token 9)
+    assert b[2]["s"] == 3.0 and b[2]["legenda"] == "sobreviventes"   # "trezentas" → "300" = token 6
+    assert b[3]["s"] == 4.5 and b[3]["ts"] == [4.5, 5.0, 5.5]        # frase seguinte (token 9) e cada palavra
+    assert b[4]["s"] == 6.5                                           # "água#2" = token 13
+
+
+def test_ritmo_aponta_trecho_parado():
+    assert narrado.ritmo("c01", [{"s": 1.0}, {"s": 3.0}], 12.0) == ["c01: 3.0–12.0 s sem beat"]
+    assert narrado.ritmo("c01", [{"s": 1.0, "ts": [4.0, 7.0]}], 10.0) == []
+
+
+def test_validar_palavras_fora_de_ordem(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"].append({"faz": "palavras", "palavras": ["água", "havia"]})
+    p = _proj(tmp_path, ep)
+    assert any("na ordem do beat" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def _ep_doc_en(pal_en):
+    ep = _ep_doc()
+    ep["titulo"]["en"] = "The Tunguska mystery"
+    ep["cenas"][0]["texto"]["en"] = "In June 1629, about 300 people arrived. There was no water. Not even fresh water."
+    ep["cenas"][1]["texto"]["en"] = "Nobody saw the explosion up close."
+    ep["cenas"][0]["beats"] = [{"faz": "palavras", "palavras": {"pt": ["não", "havia", "água"], "en": pal_en},
+                                "risco": {"pt": "água", "en": "water"}}]
+    return ep
+
+
+def test_validar_palavras_localizadas(tmp_path):
+    p = _proj(tmp_path, _ep_doc_en(["no", "water"]))
+    ep = narrado.ler(p)
+    assert narrado.validar(ep, p, "pt") == []
+    assert narrado.validar(ep, p, "en") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "en", _palavras(ep, "en"))[0]
+    assert b["palavras"] == ["no", "water"] and b["risco"] == "water"
+
+
+def test_validar_palavras_localizadas_ausente_em_en(tmp_path):
+    p = _proj(tmp_path, _ep_doc_en(["no", "baleia"]))
+    erros = narrado.validar(narrado.ler(p), p, "en")
+    assert any("'baleia'" in e["motivo"] for e in erros)
+
+
+def test_resolver_beats_palavra_ausente_levanta():
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"] = [{"em": "baleia", "faz": "data", "t": {"pt": "x"}}]
+    with pytest.raises(ValueError, match="não encontrada"):
+        narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
+
+
+def test_validar_palavras_sem_em_usa_inicio_da_frase(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"] = [{"em": "junho", "faz": "data", "t": {"pt": "x"}},
+                               {"faz": "palavras", "palavras": ["chegaram"]}]
+    p = _proj(tmp_path, ep)
+    assert any("na ordem do beat" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_cenas_motion_doc_vinheta_telafinal_transicoes():
+    ep = _ep_doc()
+    ep["cenas"][1]["fundo"] = {"tipo": "imagem", "src": "assets/foto.png", "fonte_url": "https://x", "licenca": "CC0",
+                               "credito": "x"}
+    ep["cenas"][1]["beats"] = [{"faz": "rotulo", "nome": {"pt": "Pelsaert"}}]
+    tema = motion.carregar_tema("dark-historia")
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))
+    assert d["modo"] == "doc" and d["mapa"] == {"arquivo": "assets/foto.png", "pontos": ep["mapa"]["pontos"]}
+    assert [c["id"] for c in d["cenas"]] == ["c01", "c900", "c02", "c901"]
+    c01, vin, c02, fim = d["cenas"]
+    assert c01["tipo"] == "doc" and c01["palco"] == {"tipo": "mapa"} and c01["beats"][2]["s"] == 3.0
+    assert vin["tipo"] == "vinheta" and vin["titulo"] == ep["titulo"]["pt"]
+    assert c02["palco"] == {"tipo": "imagem", "arquivo": "assets/foto.png"}
+    assert fim["tipo"] == "telafinal" and fim["textos"]["inscreva"] == "inscreva-se" and "saida" not in fim
+    assert c01["saida"]["transicao"] == "fade" and vin["saida"] == {"transicao": "fade", "dur": 0.6}
+    assert c01["dur"] == round(9.0 + narrado.PAUSA + 0.3, 3)               # sem entrada, saída 0.3
+    assert vin["dur"] == round(0.3 + narrado.VINHETA_DUR + 0.6, 3) and fim["dur"] == round(0.3 + narrado.TELAFINAL_DUR, 3)
+
+
+def test_transicao_automatica():
+    k = lambda t: {"tipo": "doc", "palco": {"tipo": t}}
+    assert narrado._transicao(k("mapa"), k("imagem"))["transicao"] == "mergulho"
+    assert narrado._transicao(k("imagem"), k("mapa"))["transicao"] == "recuo"
+    assert narrado._transicao(k("imagem"), k("imagem"))["transicao"] == "corte"
+    assert narrado._transicao(k("escuro"), {"tipo": "vinheta"})["transicao"] == "fade"
+    assert narrado._transicao({"tipo": "vinheta"}, k("imagem")) == {"transicao": "fade", "dur": 0.6}
+
+
+def test_cenas_motion_doc_sem_vinheta_nem_mapa():
+    ep = _ep_doc()
+    ep.pop("vinheta_apos")
+    ep.pop("mapa")
+    ep["cenas"][0]["fundo"] = {"tipo": "escuro"}
+    ep["cenas"][0]["beats"] = [{"faz": "rotulo", "nome": {"pt": "x"}}]
+    d = narrado.cenas_motion(ep, "pt", {"c01": 2.0, "c02": 2.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
+    assert [c["id"] for c in d["cenas"]] == ["c01", "c02", "c901"] and "mapa" not in d
+
+
+def test_cena_motion_antiga_segue_no_modo_doc():
+    ep = _ep_doc()
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
+    c02 = next(c for c in d["cenas"] if c["id"] == "c02")
+    assert c02["tipo"] == "frase"           # cena motion antiga, sem beats, segue como era
+
+
+def test_escrever_cenas_doc_exige_alinhar_em_dia(tmp_path, root, mp3):
+    p = _proj(tmp_path, _ep_doc())
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    with pytest.raises(ValueError, match="rode alinhar"):
+        narrado.escrever_cenas(p, "pt")
+    st = narrado.estado(p, "pt")
+    pal = _palavras(narrado.ler(p))
+    for cid in pal:
+        pal[cid]["hash"] = st[cid]["hash"]
+    pal["c02"]["hash"] = "velho"                       # texto mudou depois do alinhar
+    (p / "pt" / "palavras.json").write_text(json.dumps(pal), encoding="utf-8")
+    with pytest.raises(ValueError, match="rode alinhar.*c02"):
+        narrado.escrever_cenas(p, "pt")
+
+
+def _alinhado(p):
+    st = narrado.estado(p, "pt")
+    pal = _palavras(narrado.ler(p))
+    for cid in pal:
+        pal[cid]["hash"] = st[cid]["hash"]
+    (p / "pt" / "palavras.json").write_text(json.dumps(pal), encoding="utf-8")
+
+
+@ffmpeg
+def test_render_doc_sfx_trilha_realces_e_ritmo(tmp_path, root, mp3, monkeypatch):
+    p = _proj(tmp_path, _ep_doc())
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    _alinhado(p)
+    chamadas = {}
+
+    def fake_render(proj, rascunho=False, lang=None, motion_dir=None):
+        r = _fake_render(proj, rascunho, lang, motion_dir)
+        (proj / f"cues.{lang}.json").write_text(json.dumps([{"t": 0.5, "som": "ping", "ganho_db": -6}]), encoding="utf-8")
+        return r
+    monkeypatch.setattr(motion, "render", fake_render)
+    monkeypatch.setattr(audio, "sfx_kit", lambda d: [], raising=False)   # existe só após o Task 9
+    monkeypatch.setattr(audio, "mix_sfx", lambda v, cues, d, dst: (chamadas.setdefault("sfx", cues), shutil.copy2(v, dst))[1])
+    monkeypatch.setattr(audio, "mix_trilha", lambda v, t, dst, realces=(): (chamadas.setdefault("realces", realces),
+                                                                            shutil.copy2(v, dst))[1])
+    with pytest.raises(ValueError, match="trilha"):
+        narrado.render(p, "pt")                                   # final sem trilha
+    r = narrado.render(p, "pt", rascunho=True)
+    assert r["ok"] and Path(chamadas["sfx"]).name == "cues.pt.json" and "rascunho sem trilha" in r["avisos"]
+    tempos = json.loads((p / "motion.pt" / "tempos.json").read_text(encoding="utf-8"))
+    esperado = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
+    trilha = tmp_path / "t.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=100:d=2", str(trilha)], check=True)
+    r = narrado.render(p, "pt", rascunho=True, trilha=trilha)
+    assert chamadas["realces"] == esperado
+    assert all("sem beat" in a for a in r["avisos"])              # c02 (fala de teste) sem beats → aviso, não erro
+
+
+def test_descricao_inclui_creditos_de_mapa_fundo_e_inserto(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][1]["beats"] = [{"faz": "inserto", "src": "assets/foto.png", "fonte_url": "https://ins",
+                                "licenca": "CC BY 4.0", "credito": "Museu"}]
+    p = _proj(tmp_path, ep)
+    narrado.descricao(p, "pt")
+    txt = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+    assert "Blaeu, 1650" in txt and "Museu (CC BY 4.0) — https://ins" in txt
+
+
+@ffmpeg
+def test_render_nao_doc_com_trilha_real(tmp_path, root, mp3, monkeypatch):
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    monkeypatch.setattr(motion, "render", _fake_render)
+    trilha = tmp_path / "t.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=100:d=2", str(trilha)], check=True)
+    r = narrado.render(p, "pt", trilha=trilha)
+    assert r["ok"] and Path(r["video"]).is_file()
+
+
+def test_render_doc_sem_tts_pede_tts(tmp_path):
+    p = _proj(tmp_path, _ep_doc())
+    with pytest.raises(ValueError, match="rode tts"):
+        narrado.render(p, "pt", rascunho=True)
+
+
+# --- correções da revisão final ---
+
+@ffmpeg
+def test_render_doc_valida_antes_de_resolver_beats(tmp_path, root, mp3):
+    p = _proj(tmp_path, _ep_doc())
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    _alinhado(p)
+    ep = narrado.ler(p)
+    ep["cenas"][0]["beats"].append({"em": "junho"})                  # beat sem faz: antes era KeyError
+    (p / "episodio.json").write_text(json.dumps(ep, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="episódio inválido"):
+        narrado.render(p, "pt", rascunho=True)
+
+
+@pytest.mark.parametrize("beat", [
+    {"faz": "ponto", "ponto": "abrolhos"},
+    {"faz": "rota", "de": "cabo", "para": "abrolhos"},
+    {"faz": "camera", "para": "abrolhos"},
+])
+def test_validar_ponto_rota_camera_so_em_fundo_mapa(tmp_path, beat):
+    ep = _ep_doc()
+    ep["cenas"][1]["beats"] = [beat]
+    p = _proj(tmp_path, ep)
+    erros = narrado.validar(narrado.ler(p), p, "pt")
+    assert any(e["id"].startswith("c02") and f"{beat['faz']} só em cena com fundo mapa" in e["motivo"]
+               for e in erros), erros
+
+
+def test_validar_camera_area_fora_do_mapa_ok(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][1]["beats"] = [{"faz": "camera", "area": [0.1, 0.1, 0.3, 0.3]}]
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("mut", [
+    lambda e: e["cenas"][1].__setitem__("fundo", {"tipo": "imagem", "src": "../001-teste/assets/foto.png",
+                                                  "fonte_url": "https://x", "licenca": "CC0", "credito": "x"}),
+    lambda e: e["mapa"].__setitem__("src", "assets/../assets/foto.png"),
+])
+def test_validar_doc_recusa_caminho_com_ponto_ponto(tmp_path, mut):
+    ep = _ep_doc()
+    mut(ep)
+    p = _proj(tmp_path, ep)
+    assert any("relativo" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_render_trilha_inexistente_falha_antes_do_motion(tmp_path, monkeypatch):
+    p = _proj(tmp_path, _ep_doc())
+    monkeypatch.setattr(motion, "render", lambda *a, **k: pytest.fail("render não devia rodar"))
+    with pytest.raises(ValueError, match="trilha não encontrada"):
+        narrado.render(p, "pt", rascunho=True, trilha=tmp_path / "nao.wav")
+
+
+def test_ritmo_conta_itens_e_marcos():
+    beats = [{"s": 0.0, "itens": [{"s": 4.0}, {"s": 8.0}]}, {"s": 9.0, "marcos": [{"s": 13.0}]}]
+    assert narrado.ritmo("c01", beats, 15.0) == []
+
+
+@ffmpeg
+def test_escrever_cenas_doc_palco_e_inserto_retrato_usam_contain(tmp_path, root, mp3):
+    ep = _ep_doc()
+    arq = {"fonte_url": "https://x", "licenca": "CC0", "credito": "x"}
+    ep["cenas"][1]["fundo"] = {"tipo": "imagem", "src": "assets/jornal.png", **arq}
+    ep["cenas"][1]["beats"] = [{"faz": "inserto", "src": "assets/jornal.png", **arq},
+                               {"faz": "inserto", "src": "assets/foto.png", **arq}]
+    p = _proj(tmp_path, ep)
+    Image.new("RGB", (800, 1200), "gray").save(p / "assets" / "jornal.png")
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    _alinhado(p)
+    d = json.loads(narrado.escrever_cenas(p, "pt").read_text(encoding="utf-8"))
+    c02 = next(c for c in d["cenas"] if c["id"] == "c02")
+    assert c02["palco"]["ajuste"] == "contain"
+    assert c02["beats"][0]["ajuste"] == "contain" and "ajuste" not in c02["beats"][1]
+
+
+@pytest.mark.parametrize("beat", [
+    {"faz": "lista", "itens": "abc"},
+    {"faz": "linha_tempo", "marcos": 5},
+    {"faz": "ponto", "ponto": ["x"]},
+    {"faz": "rota", "de": "cabo", "para": "abrolhos", "via": 5},
+    {"faz": "palavras", "palavras": "não havia"},
+    {"faz": "palavras", "palavras": [3]},
+    {"faz": "lista", "itens": [3]},
+])
+def test_validar_beat_com_tipo_errado_reporta_erro(tmp_path, beat):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"].append(beat)
+    p = _proj(tmp_path, ep)
+    assert any(e["id"] == "c01 beat 6" for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_em_localizado_em_itens(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"].append({"faz": "lista", "itens": [{"t": "a", "em": {"pt": "doce"}}],
+                                    "marcos": []})
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
+    assert b[-1]["itens"][0]["s"] == 7.0                            # "doce" = token 14

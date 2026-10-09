@@ -58,7 +58,7 @@ def test_validar_ok(tmp_path):
     (lambda d: d["cenas"].append({"id": "c03", "tipo": "custom", "html": "x.html"}), "c03", "html não encontrado"),
     (lambda d: d["cenas"].append({"id": "c03", "tipo": "custom", "html": "x.html"}), "c03", "custom precisa de dur"),
     (lambda d: d["cenas"][1].update(saida={"transicao": "fade", "dur": 0.3}), "c02", "última cena"),
-    (lambda d: d["cenas"][0].update(saida={"transicao": "zoom", "dur": 0.3}), "c01", "saida precisa"),
+    (lambda d: d["cenas"][0].update(saida={"transicao": "zoom", "dur": 0.3}), "c01", "saida precisa de transicao (fade|wipe|iris|mergulho|recuo|corte)"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "tela", "arquivo": "../fora.png"}), "c09", "arquivo não encontrado"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "lista", "itens": ["a"] * 7}), "c09", "no máximo 6"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "numero", "valor": "mil"}), "c09", "valor precisa"),
@@ -660,3 +660,289 @@ def test_tela_contain_com_fundo_desfocado(tmp_path):
           return {fit: getComputedStyle(cx.querySelector('img.k-midia:not(.k-midia-fundo)')).objectFit,
                   fundo: cx.querySelectorAll('img.k-midia-fundo').length}; })()""")
     assert _abrir(p / "motion" / "index.html", medir, 1920, 1080) == {"fit": "contain", "fundo": 1}
+
+
+def _doc(tmp_path):
+    p = tmp_path / "doc"
+    (p / "assets").mkdir(parents=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=1600x1200:d=1",
+                    "-frames:v", "1", str(p / "assets" / "mapa.png")], check=True)
+    d = {"marca": "dark-historia", "aspecto": "16:9", "modo": "doc",
+         "mapa": {"arquivo": "assets/mapa.png", "pontos": {"a": [200, 900], "b": [1300, 500]}, "w": 1600, "h": 1200},
+         "cenas": [
+             {"id": "c01", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "mapa"}, "beats": [], "dur": 3,
+              "dur_piso": True, "saida": {"transicao": "mergulho", "dur": 0.6}},
+             {"id": "c02", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "imagem", "arquivo": "assets/mapa.png"},
+              "beats": [], "dur": 3, "dur_piso": True, "saida": {"transicao": "fade", "dur": 0.3}},
+             {"id": "c900", "tipo": "vinheta", "fundo": "escuro", "titulo": "Teste", "dur": 4, "dur_piso": True,
+              "saida": {"transicao": "fade", "dur": 0.6}},
+             {"id": "c901", "tipo": "telafinal", "fundo": "escuro", "dur": 3, "dur_piso": True,
+              "textos": {"prox": "Próxima história", "inscreva": "inscreva-se", "video": "próximo vídeo"}}]}
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return p, d
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_validar_doc(tmp_path):
+    p, d = _doc(tmp_path)
+    assert motion.validar(d, p) == []
+    d["cenas"][0]["palco"] = {"tipo": "imagem", "arquivo": "assets/nao.png"}
+    d["modo"] = "zz"
+    erros = {x["motivo"] for x in motion.validar(d, p)}
+    assert any("modo inválido" in m for m in erros) and any("palco" in m for m in erros)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_validar_doc_mapa_obrigatorio(tmp_path):
+    p, d = _doc(tmp_path)
+    d.pop("mapa")
+    assert any("mapa" in x["motivo"] for x in motion.validar(d, p))
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_montar_doc_copia_midias_e_carrega_doc_js(tmp_path):
+    p, _ = _doc(tmp_path)
+    r = motion.montar(p)
+    assert r["ok"], r
+    comp = p / "motion"
+    html = (comp / "index.html").read_text(encoding="utf-8")
+    assert '<script src="kit/doc.js"></script>' in html and (comp / "kit" / "doc.js").is_file()
+    assert (comp / "assets" / "mapa.png").is_file()
+    assert [c["id"] for c in r["cenas"]] == ["c01", "c02", "c900", "c901"]
+
+
+@pw
+def test_montar_sem_modo_doc_nao_carrega_doc_js(tmp_path):
+    p = _proj(tmp_path, _cenas())
+    assert motion.montar(p)["ok"]
+    assert "doc.js" not in (p / "motion" / "index.html").read_text(encoding="utf-8")
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_camera_move_entre_quadros(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = [{"faz": "camera", "para": "b", "zoom": 2.0, "s": 0.5}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        tr = lambda t: pg.evaluate("t => { __kit.ir(t); return document.querySelector('#c01 .d-cam').style.transform; }", t)
+        a, m, z = tr(0.1), tr(1.0), tr(2.5)
+        b.close()
+    assert a != m != z and "scale" in z
+
+
+BEATS_TODOS = [
+    {"faz": "data", "t": "Junho 1629", "s": 0.2},
+    {"faz": "rota", "de": "a", "para": "b", "navio": True, "km": 3000, "s": 0.4},
+    {"faz": "ponto", "ponto": "b", "rotulo": "Abrolhos", "s": 1.0},
+    {"faz": "contador", "valor": 300, "legenda": "sobreviventes", "pontos": True, "s": 1.2},
+    {"faz": "rotulo", "nome": "Jeronimus Cornelisz", "papel": "subcomerciante", "s": 1.4},
+    {"faz": "palavras", "palavras": ["ilhas", "sem", "água"], "risco": "água", "s": 1.6, "ts": [1.6, 1.8, 2.0]},
+    {"faz": "selo", "s": 2.4},
+]
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+@pytest.mark.parametrize("com_contador", [False, True])
+def test_doc_rotulo_e_palavras_nao_se_sobrepoem(tmp_path, com_contador):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    beats = [{"faz": "rotulo", "nome": "Kieran Hosty", "papel": "mergulhador", "s": 0.2},
+             {"faz": "palavras", "palavras": ["naufrágio", "notável"], "s": 0.3, "ts": [0.3, 0.5]}]
+    if com_contador:
+        beats.append({"faz": "contador", "valor": 300, "legenda": "sobreviventes", "pontos": True, "s": 0.2})
+    d["cenas"][0]["beats"] = beats
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        sels = [".d-rotulo", ".d-palavras"] + ([".d-painel"] if com_contador else [])
+        rs = pg.evaluate("""([t, sels]) => { __kit.ir(t); return sels.map(s => {
+            const r = document.querySelector('#c01 ' + s).getBoundingClientRect();
+            return [r.left, r.top, r.right, r.bottom]; }); }""", [1.0, sels])
+        b.close()
+    for i, a in enumerate(rs):
+        for c in rs[i + 1:]:
+            assert a[2] <= c[0] or c[2] <= a[0] or a[3] <= c[1] or c[3] <= a[1], (sels, rs)
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_todos_os_beats_montam_com_cues(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = BEATS_TODOS
+    d["cenas"][1]["beats"] = [
+        {"faz": "camera", "area": [0.5, 0.2, 0.3, 0.3], "s": 0.1},
+        {"faz": "citacao", "t": "Uma história incrível", "autor": "Kieran Hosty", "s": 0.3},
+        {"faz": "lista", "itens": [{"t": "Crânio", "s": 0.6}, {"t": "Clava"}], "s": 0.5},
+        {"faz": "linha_tempo", "marcos": [{"data": "1628", "t": "partida"}, {"data": "1629", "t": "naufrágio"}], "s": 1.0},
+        {"faz": "inserto", "arquivo": "assets/mapa.png", "s": 1.5}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert {"ping", "whoosh", "tique", "carimbo", "impacto"} <= sons
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_citacao_longa_estoura_safe_area(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][1]["beats"] = [{"faz": "citacao", "t": "palavra " * 120, "autor": "x", "s": 0.2}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert not r["ok"] and any("safe area" in e["motivo"] for e in r["erros"])
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_beats_estado_no_tempo(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = BEATS_TODOS
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        op = lambda t, sel: float(pg.evaluate(
+            "([t, s]) => { __kit.ir(t); return getComputedStyle(document.querySelector('#c01 ' + s)).opacity; }", [t, sel]))
+        ano, pal, rota = op(0.3, ".d-data .a"), op(2.4, ".d-palavras"), op(0.3, ".d-rota")
+        b.close()
+    assert ano == 0 and pal > 0.9 and rota == 0
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_mergulho_aproxima_o_mapa_e_da_clarao(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = [{"faz": "ponto", "ponto": "b", "s": 0.3}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r
+    c2 = next(c for c in r["cenas"] if c["id"] == "c02")
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        escala = lambda t: pg.evaluate("t => { __kit.ir(t); const m = document.querySelector('#c01 .d-cam').style.transform;"
+                                       " return parseFloat(m.match(/scale\\(([\\d.]+)\\)/)[1]); }", t)
+        antes, durante = escala(c2["ini"] - 0.3), escala(c2["ini"] + 0.5)
+        flash = pg.evaluate("t => { __kit.ir(t); return +getComputedStyle(document.querySelector('.d-flash')).opacity; }",
+                            c2["ini"] + 0.6 * 0.45 + 0.05)
+        b.close()
+    assert durante > antes * 1.8 and flash > 0.5
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert "clarao" in sons
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_vinheta_e_tela_final(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, _ = _doc(tmp_path)
+    r = motion.montar(p)
+    assert r["ok"], r
+    v = next(c for c in r["cenas"] if c["id"] == "c900")
+    f = next(c for c in r["cenas"] if c["id"] == "c901")
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        op = lambda t, sel: pg.evaluate("([t, s]) => { __kit.ir(t); return +getComputedStyle(document.querySelector(s)).opacity; }", [t, sel])
+        tit = op(v["ini"] + 2.5, "#c900 .d-titulo")
+        zoom = op(v["ini"] + v["dur"] - 0.05, "#c900 .d-palco")
+        guias = op(f["ini"] + 2.0, "#c901 .d-guia")
+        textos = pg.evaluate("() => [...document.querySelectorAll('#c901 .g')].map(e => e.textContent)")
+        b.close()
+    assert zoom < 0.5 and tit > 0.9 and guias > 0.9 and textos == ["inscreva-se", "próximo vídeo"]
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert {"carimbo", "maquina"} <= sons
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_chip_do_ponto_nao_fica_sob_o_painel(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = BEATS_TODOS
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        r = pg.evaluate("""() => { __kit.ir(2.0);
+            const q = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; };
+            const chip = [...document.querySelectorAll('#c01 .d-chip')].find((e) => e.textContent.includes('Abrolhos'));
+            return { chip: q(chip), painel: q(document.querySelector('#c01 .d-painel')) }; }""")
+        b.close()
+    c, q = r["chip"], r["painel"]
+    assert c[2] <= q[0] or c[0] >= q[2] or c[3] <= q[1] or c[1] >= q[3], r
+    assert q[0] >= 120 and q[2] <= 1800 and q[3] <= 1000, r
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+@pytest.mark.parametrize("rel", ["../doc/assets/mapa.png", "assets/../assets/mapa.png", "ABS"])
+def test_validar_doc_recusa_caminho_fora(tmp_path, rel):
+    p, d = _doc(tmp_path)
+    rel = str((p / "assets" / "mapa.png").resolve()) if rel == "ABS" else rel
+    d["cenas"][1]["palco"]["arquivo"] = rel
+    d["cenas"][1]["beats"] = [{"faz": "inserto", "arquivo": rel, "s": 0.5}]
+    motivos = [x["motivo"] for x in motion.validar(d, p)]
+    assert sum("relativo" in m for m in motivos) == 2, motivos
+    d = _doc(tmp_path / "b")[1]
+    d["mapa"]["arquivo"] = rel
+    assert any("relativo" in x["motivo"] for x in motion.validar(d, tmp_path / "b" / "doc"))
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_validar_doc_mapa_presente_exige_arquivo(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["palco"] = {"tipo": "escuro"}       # nenhuma cena usa o mapa, mas ele vai para a vinheta/tela final
+    d["mapa"]["arquivo"] = "assets/nao.png"
+    assert any("mapa" in x["motivo"] for x in motion.validar(d, p))
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_preparar_doc_nao_copia_fora_da_pasta(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][1]["palco"]["arquivo"] = "../doc/assets/mapa.png"
+    with pytest.raises(ValueError, match="fora"):
+        motion._preparar(p / "motion", p, d, motion.carregar_tema("dark-historia"), motion.MOTION)
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_palco_contain_sobre_copia_desfocada(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][1]["palco"]["ajuste"] = "contain"
+    d["cenas"][1]["beats"] = [{"faz": "inserto", "arquivo": "assets/mapa.png", "ajuste": "contain", "s": 0.5}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r
+
+    def medir(pg):
+        pg.evaluate("t => __kit.ir(t)", r["cenas"][1]["ini"] + 1.5)
+        return pg.evaluate("""(() => [...document.querySelectorAll('#c02 .d-foto')].map((e) => [
+          e.parentElement.className, getComputedStyle(e).backgroundSize, getComputedStyle(e).filter.includes('blur')]))()""")
+    got = _abrir(p / "motion" / "index.html", medir, 1920, 1080)
+    assert sorted(got) == [["d-img", "contain", False], ["d-img", "cover", True],
+                           ["d-inserto", "contain", False], ["d-inserto", "cover", True]]

@@ -163,7 +163,7 @@ ARCHIVE_META = {"metadata": {"title": "Court film", "licenseurl": "https://creat
                           {"name": "big.mp4", "format": "MPEG4", "size": "900000000", "width": "1920", "height": "1080", "length": "20"}]}
 WIKI_SEARCH = {"query": {"search": [{"title": "File:Gavel.webm"}]}}
 WIKI_INFO = {"query": {"pages": {"1": {"title": "File:Gavel.webm", "imageinfo": [
-    {"url": "https://upload.wikimedia.org/x/Gavel.webm", "width": 1920, "height": 1080, "duration": 9.0,
+    {"url": "https://upload.wikimedia.org/x/Gavel.webm?utm_source=commons.wikimedia.org", "width": 1920, "height": 1080, "duration": 9.0,
      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Gavel.webm",
      "extmetadata": {"Artist": {"value": "Ivo"}, "LicenseShortName": {"value": "CC BY-SA 4.0"}}}]}}}}
 
@@ -177,7 +177,7 @@ def _fetch2(mp4, jpg):
         if "archive.org/metadata/" in url: return 200, json.dumps(ARCHIVE_META).encode(), {}
         if "list=search" in url: return 200, json.dumps(WIKI_SEARCH).encode(), {}
         if "prop=imageinfo" in url: return 200, json.dumps(WIKI_INFO).encode(), {}
-        if url.endswith((".mp4", ".webm")): return 200, mp4, {}
+        if url.split("?")[0].endswith((".mp4", ".webm")): return 200, mp4, {}
         if url.endswith(".jpg"): return 200, jpg, {}
         return 404, b"", {}
     fetch.chamadas = chamadas

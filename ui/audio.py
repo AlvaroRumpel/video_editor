@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import sys
 import urllib.error
 import urllib.request
@@ -12,9 +13,37 @@ from pathlib import Path
 import budget
 import pipeline
 
-FFMPEG = "ffmpeg"
+FFMPEG = "ffmpeg"  # exige ffmpeg >= 7: mix_sfx usa -/filter_complex <arquivo>
 FFPROBE = "ffprobe"
 ROOT = pipeline.ROOT
+
+# SFX sintetizados (lavfi): sem custo nem licença. Volume baixo: o mix aplica ganho_db de cada cue.
+SONS = {
+    "whoosh": "anoisesrc=d=0.6:c=pink:a=0.6,highpass=f=300,lowpass=f=2800,afade=t=in:d=0.25,afade=t=out:st=0.3:d=0.3",
+    "impacto": "sine=f=55:d=0.6,volume=1.6,afade=t=out:st=0.05:d=0.55",
+    "ping": "sine=f=1320:d=0.8,volume=0.5,afade=t=out:st=0.02:d=0.78:curve=exp",
+    "tique": "sine=f=2000:d=0.03,volume=0.5,afade=t=out:st=0.005:d=0.025",
+    "maquina": "anoisesrc=d=0.04:c=white:a=0.8,highpass=f=2000,afade=t=out:st=0.005:d=0.035",
+    "carimbo": "anoisesrc=d=0.25:c=brown:a=1,lowpass=f=400,volume=2,afade=t=out:st=0.02:d=0.23",
+    "clarao": "anoisesrc=d=0.5:c=white:a=0.4,highpass=f=4000,afade=t=in:d=0.05,afade=t=out:st=0.1:d=0.4",
+}
+ALIASES = {"tick": "tique", "rise": "whoosh", "whoosh-reveal": "whoosh", "pop-dourado": "ping",
+           "click-pill": "maquina", "sting-endcard": "impacto"}   # cues dos tipos antigos do kit
+
+
+def sfx_kit(dst: Path) -> list[Path]:
+    dst = Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    feitos = []
+    for nome, grafo in SONS.items():
+        p = dst / f"{nome}.wav"
+        _ff(["-f", "lavfi", "-i", grafo, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(p)])
+        feitos.append(p)
+    for nome, origem in ALIASES.items():
+        p = dst / f"{nome}.wav"
+        p.write_bytes((dst / f"{origem}.wav").read_bytes())
+        feitos.append(p)
+    return feitos
 
 
 def _ff(args: list[str]) -> str:
@@ -88,13 +117,17 @@ def _ratio(duck_db: float) -> float:
 
 
 def mix_trilha(video: Path, trilha: Path, dst: Path, nivel_db: float = -18.0,
-               duck_db: float = -8.0, fade_s: float = 1.5) -> Path:
+               duck_db: float = -8.0, fade_s: float = 1.5, realces=(), realce_db: float = 8.0) -> Path:
     dur = duracao(video)
     fmt = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+    realce = ""
+    if realces:   # trilha sobe nos trechos sem fala (vinheta, tela final)
+        expr = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in realces)
+        realce = f",volume=volume='if({expr},{10 ** (realce_db / 20):.4f},1)':eval=frame"
     graph = (
         f"[0:a]{fmt},asplit=2[voz][sc];"
         f"[1:a]aloop=loop=-1:size=2000000000,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,{fmt},"
-        f"volume={nivel_db}dB,afade=t=in:d={fade_s},afade=t=out:st={max(dur - fade_s, 0):.3f}:d={fade_s}[tr];"
+        f"volume={nivel_db}dB{realce},afade=t=in:d={fade_s},afade=t=out:st={max(dur - fade_s, 0):.3f}:d={fade_s}[tr];"
         f"[tr][sc]sidechaincompress=threshold=0.05:ratio={_ratio(duck_db):.3f}:attack=200:release=800[duck];"
         f"[voz][duck]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1:LRA=11[out]"
     )
@@ -134,16 +167,36 @@ def mix_sfx(video: Path, cues, sfx_dir: Path, dst: Path) -> Path:
         args += ["-f", "lavfi", "-t", f"{dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
         n_inputs += 1
         partes.append(f"[1:a]{fmt}[base]")
+    por_som: dict[Path, list[tuple[float, float]]] = {}
+    for p, t, g in entradas:
+        por_som.setdefault(p, []).append((t, g))
     rotulos = ["[base]"]
-    for i, (p, t, g) in enumerate(entradas):
+    i = 0
+    for p, lista in por_som.items():
         args += ["-i", str(p)]
-        ms = int(round(t * 1000))
-        partes.append(f"[{n_inputs}:a]{fmt},adelay={ms}|{ms},volume={g}dB[s{i}]")
+        k = len(lista)
+        if k == 1:
+            fontes = [f"[{n_inputs}:a]"]
+        else:
+            fontes = [f"[x{n_inputs}_{j}]" for j in range(k)]
+            partes.append(f"[{n_inputs}:a]{fmt},asplit={k}{''.join(fontes)}")
+        for src, (t, g) in zip(fontes, lista):
+            ms = int(round(t * 1000))
+            pre = "" if k > 1 else f"{fmt},"
+            partes.append(f"{src}{pre}adelay={ms}|{ms},volume={g}dB[s{i}]")
+            rotulos.append(f"[s{i}]")
+            i += 1
         n_inputs += 1
-        rotulos.append(f"[s{i}]")
+    # ponytail: amix único (testado com 300 entradas); em lotes de 64 se o ffmpeg reclamar.
     partes.append("".join(rotulos) + f"amix=inputs={len(rotulos)}:duration=first:normalize=0[out]")
-    return _atomico(dst, [*args, "-filter_complex", ";".join(partes), "-map", "0:v", "-map", "[out]",
-                          "-c:v", "copy", *AAC, "-movflags", "+faststart"])
+    fd, nome = tempfile.mkstemp(suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(";".join(partes))
+        return _atomico(dst, [*args, "-/filter_complex", nome, "-map", "0:v", "-map", "[out]",
+                              "-c:v", "copy", *AAC, "-movflags", "+faststart"])
+    finally:
+        Path(nome).unlink(missing_ok=True)
 
 
 ELEVEN_SFX_URL = "https://api.elevenlabs.io/v1/sound-generation"
@@ -213,6 +266,8 @@ def _cli(ns, root: Path):
     if ns.cmd == "mix-trilha":
         return {"path": str(mix_trilha(Path(ns.video), Path(ns.trilha), Path(ns.dst),
                                        nivel_db=ns.nivel, duck_db=ns.duck))}, 0
+    if ns.cmd == "sfx-kit":
+        return {"sons": [str(x) for x in sfx_kit(Path(ns.dst))]}, 0
     if ns.cmd == "mix-sfx":
         return {"path": str(mix_sfx(Path(ns.video), Path(ns.cues), Path(ns.sfx_dir), Path(ns.dst)))}, 0
     fn = gerar_sfx if ns.cmd == "gerar-sfx" else gerar_musica
@@ -232,6 +287,7 @@ if __name__ == "__main__":
     p = sub.add_parser("mix-trilha"); p.add_argument("video"); p.add_argument("trilha"); p.add_argument("dst")
     p.add_argument("--nivel", type=float, default=-18.0); p.add_argument("--duck", type=float, default=-8.0)
     p = sub.add_parser("mix-sfx"); p.add_argument("video"); p.add_argument("cues"); p.add_argument("sfx_dir"); p.add_argument("dst")
+    p = sub.add_parser("sfx-kit"); p.add_argument("dst", nargs="?", default=str(ROOT / "motion" / "sfx"))
     for nome in ("gerar-sfx", "gerar-musica"):
         p = sub.add_parser(nome); p.add_argument("proj"); p.add_argument("prompt")
         p.add_argument("dur", type=float); p.add_argument("dst"); p.add_argument("--aprovacao", type=int)

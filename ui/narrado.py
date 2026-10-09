@@ -20,11 +20,22 @@ import dublagem  # noqa: E402
 import motion  # noqa: E402
 import pesquisa  # noqa: E402
 import pipeline  # noqa: E402
+import alinhar  # noqa: E402
 
 LANG_RE = re.compile(r"[a-z]{2}")
 PAUSA = 0.4            # respiro depois da fala de cada cena
+VINHETA_DUR = 4.0
+TELAFINAL_DUR = 20.0
+TEXTOS_FIM = {"pt": {"prox": "Próxima história", "inscreva": "inscreva-se", "video": "próximo vídeo"},
+              "en": {"prox": "Next story", "inscreva": "subscribe", "video": "next video"}}
+SFX_DIR = pipeline.ROOT / "motion" / "sfx"
 MAX_CHARS_CENA = 5000  # acima disso é erro de colagem, não cena
 VISUAIS = ("arquivo", "motion", "ia")
+FAZ = {"camera": (), "rota": ("de", "para"), "ponto": ("ponto",), "contador": ("valor",), "data": ("t",),
+       "rotulo": ("nome",), "palavras": ("palavras",), "citacao": ("t", "autor"), "lista": ("itens",),
+       "linha_tempo": ("marcos",), "inserto": ("src", "fonte_url", "licenca", "credito"), "selo": ()}
+FUNDOS_DOC = ("mapa", "imagem", "escuro")
+RITMO_MAX = 6.0   # s de fala sem beat nem troca de cena
 GOOGLE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 GOOGLE_MAX_BYTES = 5000           # limite do Google por requisição (texto em UTF-8)
 PROVEDORES = {"elevenlabs": "elevenlabs_tts", "google": "google_tts"}   # provedor → chave do precos.json
@@ -69,6 +80,122 @@ def _achados(proj: Path) -> set | None:
     return {a["id"] for a in pesquisa.parse_pesquisa(p.read_text(encoding="utf-8-sig"))["achados"]}
 
 
+def _v_arquivo(d: dict, proj: Path, err) -> None:
+    """Imagem de arquivo (src no projeto + licença aceita + fonte_url + credito)."""
+    if not motion._rel_ok(d.get("src")):
+        err(f"src precisa ser caminho relativo sem '..': {d.get('src')!r}")
+    elif motion._dentro(proj, d.get("src")) is None:
+        err(f"src não encontrado no projeto: {d.get('src')!r}")
+    if not licenca_ok(d.get("licenca")):
+        err(f"licença não aceita: {d.get('licenca')!r} (PD, CC0, CC BY, CC BY-SA)")
+    if not motion._str(d.get("fonte_url")) or not motion._str(d.get("credito")):
+        err("arquivo precisa de fonte_url e credito")
+
+
+def _acha(ws: list[str], palavra: str, depois: int = 0) -> int | None:
+    """Índice do token `palavra` (aceita 'água#2' = 2ª ocorrência) em ws, a partir de `depois`."""
+    base, _, n = str(palavra).partition("#")
+    alvo = alinhar.tokens(base)
+    if not alvo:
+        return None
+    vez = int(n) if n.isdigit() else 1
+    for k in range(depois, len(ws)):
+        if ws[k] == alvo[0]["w"]:
+            vez -= 1
+            if vez == 0:
+                return k
+    return None
+
+
+def _inicios(c: dict, lang: str) -> list:
+    """Token de início de cada beat (regra única de validar e resolver_beats): `em` → _acha;
+    sem `em`: 1º beat = 0, depois início da frase seguinte ao beat anterior (ou o mesmo token).
+    None quando `em` não está no texto ou o beat é inválido."""
+    toks = alinhar.tokens(_loc(c.get("texto"), lang) or "")
+    ws = [t["w"] for t in toks]
+    frases = [k for k, t in enumerate(toks) if t["frase"]]
+    out, ult = [], -1
+    for b in c.get("beats") or []:
+        if not isinstance(b, dict):
+            out.append(None)
+            continue
+        if b.get("em"):
+            k = _acha(ws, _loc(b["em"], lang) if isinstance(b["em"], dict) else b["em"])
+        elif ult < 0:
+            k = 0
+        else:
+            k = next((f for f in frases if f > ult), ult)
+        if k is not None:
+            ult = k
+        out.append(k)
+    return out
+
+
+def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
+    mapa = ep.get("mapa") if isinstance(ep.get("mapa"), dict) else {}
+    pontos = mapa.get("pontos") if isinstance(mapa.get("pontos"), dict) else {}
+    i = c["id"]
+    f = c.get("fundo")
+    no_mapa = isinstance(f, dict) and f.get("tipo") == "mapa"
+    if f is not None:
+        t = f.get("tipo") if isinstance(f, dict) else None
+        if t not in FUNDOS_DOC:
+            e(i, f"fundo.tipo inválido: {t!r} ({'|'.join(FUNDOS_DOC)})")
+        elif t == "mapa" and not pontos:
+            e(i, "fundo mapa sem 'mapa' com pontos no episódio")
+        elif t == "imagem":
+            _v_arquivo(f, proj, lambda m: e(i, "fundo: " + m))
+    ws = [t["w"] for t in alinhar.tokens(_loc(c.get("texto"), lang) or "")]
+    beats = c.get("beats")
+    if beats is None:
+        return
+    if not isinstance(beats, list):
+        e(i, "beats precisa ser lista")
+        return
+    ini = _inicios(c, lang)
+    for k, b in enumerate(beats, 1):
+        q = f"{i} beat {k}"
+        if not isinstance(b, dict) or b.get("faz") not in FAZ:
+            e(q, f"faz desconhecido: {(b.get('faz') if isinstance(b, dict) else b)!r} ({'|'.join(FAZ)})")
+            continue
+        if isinstance(b.get("palavras"), dict):     # {"pt": [...], "en": [...]}, como em resolver_beats
+            b = {**b, "palavras": _loc(b["palavras"], lang)}
+        for campo in FAZ[b["faz"]]:
+            if campo not in b:
+                e(q, f"{b['faz']} precisa de {campo}")
+        tipo_ruim = [x for x in ("itens", "marcos", "palavras", "via") if x in b and not isinstance(b[x], list)]
+        tipo_ruim += [x for x in ("de", "para", "ponto") if x in b and not isinstance(b[x], str)]
+        tipo_ruim += [x for x in ("palavras", "via") if isinstance(b.get(x), list) and not all(isinstance(w, str) for w in b[x])]
+        tipo_ruim += [x for x in ("itens", "marcos") if isinstance(b.get(x), list)
+                      and not all(isinstance(w, (str, dict)) for w in b[x])]
+        if tipo_ruim:
+            for x in dict.fromkeys(tipo_ruim):
+                e(q, f"{x} com tipo inválido (listas: itens, marcos, palavras, via; textos: de, para, ponto)")
+            continue
+        if (b["faz"] in ("rota", "ponto") or (b["faz"] == "camera" and "para" in b)) and not no_mapa:
+            e(q, f"{b['faz']} só em cena com fundo mapa")
+        for nome in [b.get(x) for x in ("de", "para", "ponto")] + b.get("via", []):
+            if nome is not None and nome not in pontos:
+                e(q, f"ponto {nome!r} não existe no mapa")
+        sub = [x for x in (b.get("itens") or []) + (b.get("marcos") or []) if isinstance(x, dict)]
+        for w in [b.get("em")] + [x.get("em") for x in sub]:
+            w = _loc(w, lang)
+            if w and _acha(ws, w) is None:
+                e(q, f"palavra {w!r} não está no texto da cena")
+        d = ini[k - 1]
+        for w in (b.get("palavras") or []) if d is not None else []:
+            d = _acha(ws, w, d)
+            if d is None:
+                e(q, f"palavra {w!r} não está no texto da cena (na ordem do beat)")
+                break
+            d += 1
+        if b["faz"] == "contador" and b.get("pontos") and not (
+                isinstance(b.get("valor"), int) and not isinstance(b["valor"], bool) and 0 < b["valor"] <= 500):
+            e(q, "pontos só com valor inteiro entre 1 e 500")
+        if b["faz"] == "inserto":
+            _v_arquivo(b, proj, lambda m, q=q: e(q, m))
+
+
 def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]:
     """visuais=False: só texto e fontes (TTS roda antes de escolher as imagens)."""
     erros = []
@@ -87,6 +214,16 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
     achados = _achados(proj)
     if achados is None:
         e("raiz", "falta pesquisa.md")
+    if visuais and "mapa" in ep:
+        m = ep["mapa"]
+        if not isinstance(m, dict) or not isinstance(m.get("pontos"), dict) or not m["pontos"] or not all(
+                isinstance(v, list) and len(v) == 2 and all(motion._num(x) for x in v) for v in m["pontos"].values()):
+            e("mapa", "mapa precisa de pontos {nome: [x, y]} em pixels do arquivo")
+        if isinstance(m, dict):
+            _v_arquivo(m, proj, lambda msg: e("mapa", msg))
+    ids = {c.get("id") for c in cenas if isinstance(c, dict)}
+    if "vinheta_apos" in ep and ep["vinheta_apos"] not in ids:
+        e("raiz", f"vinheta_apos aponta para cena inexistente: {ep['vinheta_apos']!r}")
     vistos = set()
     for n, c in enumerate(cenas):
         i = c.get("id") if isinstance(c, dict) else None
@@ -109,6 +246,7 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
                 e(i, f"fonte [{x}] não existe no pesquisa.md")
         if not visuais:
             continue
+        _v_direcao(ep, c, proj, lang, e)
         v = c.get("visual") if isinstance(c.get("visual"), dict) else {}
         t = v.get("tipo")
         if t in ("arquivo", "ia"):
@@ -127,8 +265,122 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
     return erros
 
 
-def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict) -> dict:
+def _ach(ws, w, c, depois=0):
+    k = _acha(ws, w, depois)
+    if k is None:
+        raise ValueError(f"{c['id']}: palavra {w!r} não encontrada no texto (rode validar)")
+    return k
+
+
+def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
+    """Beats da cena localizados, com "s" = segundos desde o início da fala da cena.
+    Sem "em": início da frase seguinte à do beat anterior (1º beat: início da fala)."""
+    ws = [t["w"] for t in alinhar.tokens(_loc(c["texto"], lang))]
+    pal = palavras[c["id"]]["palavras"]
+    out = []
+    for b, k in zip(c.get("beats", []), _inicios(c, lang)):
+        b = _loc(copy.deepcopy(b), lang)
+        if k is None:
+            raise ValueError(f"{c['id']}: palavra {b.get('em')!r} não encontrada no texto (rode validar)")
+        b["s"] = pal[k]["s"]
+        if b["faz"] == "palavras":
+            ts, d = [], k
+            for w in b["palavras"]:
+                d = _ach(ws, w, c, d)
+                ts.append(pal[d]["s"])
+                d += 1
+            b["ts"] = ts
+        for lst in ("itens", "marcos"):
+            for it in b.get(lst) or []:
+                if isinstance(it, dict) and it.get("em"):
+                    it["s"] = pal[_ach(ws, it["em"], c)]["s"]
+        out.append(b)
+    return out
+
+
+def ritmo(cid: str, beats: list[dict], dur: float) -> list[str]:
+    sub = [x["s"] for b in beats for k in ("itens", "marcos") for x in b.get(k) or [] if isinstance(x, dict) and "s" in x]
+    ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", [])), *sub})
+    return [f"{cid}: {a:.1f}–{b:.1f} s sem beat" for a, b in zip(ts, ts[1:]) if b - a > RITMO_MAX]
+
+
+def modo_doc(ep: dict) -> bool:
+    cenas = ep.get("cenas")
+    return isinstance(cenas, list) and any(isinstance(c, dict) and c.get("beats") for c in cenas)
+
+
+def _palco(c: dict) -> dict | None:
+    f = c.get("fundo")
+    if f:
+        return {"tipo": "imagem", "arquivo": f["src"]} if f["tipo"] == "imagem" else {"tipo": f["tipo"]}
+    v = c["visual"]
+    return {"tipo": "imagem", "arquivo": v["src"]} if v["tipo"] in ("arquivo", "ia") else None
+
+
+def _beat_kit(b: dict) -> dict:
+    k = {key: v for key, v in b.items() if key != "em"}
+    if k["faz"] == "inserto":
+        k["arquivo"] = k.pop("src")
+        for x in ("fonte_url", "licenca", "credito"):
+            k.pop(x, None)
+    for lst in ("itens", "marcos"):
+        if lst in k:
+            k[lst] = [{"t": x} if isinstance(x, str) else {kk: vv for kk, vv in x.items() if kk != "em"} for x in k[lst]]
+    return k
+
+
+def _transicao(a: dict, b: dict) -> dict:
+    if a["tipo"] == "vinheta":          # a saída em zoom da vinheta pede 0.6 s de sobreposição
+        return {"transicao": "fade", "dur": 0.6}
+    pa = a.get("palco", {}).get("tipo") if a["tipo"] == "doc" else a["tipo"]
+    pb = b.get("palco", {}).get("tipo") if b["tipo"] == "doc" else b["tipo"]
+    if pa == "mapa" and pb == "imagem":
+        return {"transicao": "mergulho", "dur": 0.6}
+    if pa == "imagem" and pb == "mapa":
+        return {"transicao": "recuo", "dur": 0.6}
+    if pa == pb == "imagem":
+        return {"transicao": "corte", "dur": 0.1}
+    return {"transicao": "fade", "dur": 0.3}
+
+
+def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
+    lista = []
+    for c in ep["cenas"]:
+        p = _palco(c)
+        if p is None and not c.get("beats"):
+            k = _loc(copy.deepcopy(c["visual"]["cena"]), lang)          # cartão motion antigo
+        else:
+            beats = [_beat_kit(b) for b in resolver_beats(c, lang, palavras)] if c.get("beats") else []
+            label = _loc(c.get("overlay"), lang)
+            if label and not any(b["faz"] == "rotulo" for b in beats):
+                beats.append({"faz": "rotulo", "nome": label, "s": 0.3})
+            k = {"tipo": "doc", "fundo": "escuro", "palco": p or {"tipo": "escuro"}, "beats": beats}
+        k = {"id": c["id"], **k, "_fala": duracoes[c["id"]], "_saida": c.get("saida")}
+        lista.append(k)
+        if c["id"] == ep.get("vinheta_apos"):
+            titulo = _loc(ep.get("titulo_curto"), lang) or _loc(ep.get("titulo"), lang) or ""
+            lista.append({"id": "c900", "tipo": "vinheta", "fundo": "escuro", "titulo": titulo, "_fala": None})
+    lista.append({"id": "c901", "tipo": "telafinal", "fundo": "escuro",
+                  "textos": TEXTOS_FIM.get(lang, TEXTOS_FIM["pt"]), "_fala": None})
+    for n, k in enumerate(lista[:-1]):
+        k["saida"] = k.get("_saida") or _transicao(k, lista[n + 1])
+    for n, k in enumerate(lista):
+        entra = lista[n - 1]["saida"]["dur"] if n else 0.0
+        sai = k["saida"]["dur"] if "saida" in k else 0.0
+        fala = k.pop("_fala")
+        k.pop("_saida", None)
+        corpo = fala + PAUSA if fala is not None else (VINHETA_DUR if k["tipo"] == "vinheta" else TELAFINAL_DUR)
+        k["dur"], k["dur_piso"] = round(entra + corpo + sai, 3), True
+    d = {"marca": ep["marca"], "aspecto": "16:9", "modo": "doc", "cenas": lista}
+    if ep.get("mapa"):
+        d["mapa"] = {"arquivo": ep["mapa"]["src"], "pontos": ep["mapa"]["pontos"]}
+    return d
+
+
+def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict, palavras: dict | None = None) -> dict:
     """dur de cada cena = entrada (saída da anterior) + fala + PAUSA + própria saída: voz nunca acelera."""
+    if modo_doc(ep):
+        return _cenas_doc(ep, lang, duracoes, palavras or {})
     out, entra = [], 0.0
     cenas = ep["cenas"]
     for n, c in enumerate(cenas):
@@ -158,6 +410,14 @@ def _dir(proj: Path, lang: str) -> Path:
 def estado(proj: Path, lang: str) -> dict:
     st = pipeline.read_json(_dir(proj, lang) / "narracao.json", {})
     return st if isinstance(st, dict) else {}
+
+
+def _palavras(proj: Path, lang: str, ep: dict, st: dict) -> dict:
+    pal = pipeline.read_json(_dir(proj, lang) / "palavras.json", {})
+    velhas = [c["id"] for c in ep["cenas"] if pal.get(c["id"], {}).get("hash") != st.get(c["id"], {}).get("hash")]
+    if velhas:
+        raise ValueError(f"rode alinhar antes: palavras ausentes ou desatualizadas em {', '.join(velhas)}")
+    return pal
 
 
 def _chave(nome: str) -> str:
@@ -353,14 +613,24 @@ def escrever_cenas(proj: Path, lang: str) -> Path:
     faltam = [c["id"] for c in ep["cenas"] if not em_dia(c)]
     if faltam:
         raise ValueError(f"rode tts antes: áudio ausente ou desatualizado em {', '.join(faltam)}")
-    d = cenas_motion(ep, lang, {k: v["dur"] for k, v in st.items()}, motion.carregar_tema(ep["marca"]))
+    pal = _palavras(proj, lang, ep, st) if modo_doc(ep) else None
+    d = cenas_motion(ep, lang, {k: v["dur"] for k, v in st.items()}, motion.carregar_tema(ep["marca"]), pal)
     from PIL import Image
+    if d.get("mapa"):
+        with Image.open(proj / d["mapa"]["arquivo"]) as im:
+            d["mapa"]["w"], d["mapa"]["h"] = im.size
+    def razao(arq):
+        with Image.open(proj / arq) as im:
+            w, h = im.size
+        return w / h
     for k in d["cenas"]:
         if k["tipo"] == "tela" and Path(k["arquivo"]).suffix.lower() in motion.EXT_IMG:
-            with Image.open(proj / k["arquivo"]) as im:
-                w, h = im.size
-            if w / h < 1.2:
+            if razao(k["arquivo"]) < 1.2:
                 k["ajuste"] = "contain"     # retrato/jornal: inteiro sobre fundo desfocado, sem corte
+        if k["tipo"] == "doc":              # palco imagem e insertos: retrato/jornal e panorama inteiros
+            for x in [k["palco"]] + [b for b in k["beats"] if b["faz"] == "inserto"]:
+                if x.get("arquivo") and not 1.2 <= razao(x["arquivo"]) <= 2.2:
+                    x["ajuste"] = "contain"
     dst = proj / f"cenas.{lang}.json"
     pipeline.atomic_write_json(dst, d)
     return dst
@@ -372,10 +642,11 @@ def _ff(args: list) -> None:
 
 def _voz(proj: Path, lang: str, tempos: dict, st: dict) -> Path:
     off, ins, fs = offsets(tempos), [], []
-    for k, c in enumerate(tempos["cenas"]):
+    cenas = [c for c in tempos["cenas"] if c["id"] in st]
+    for k, c in enumerate(cenas):
         ins += ["-i", str(proj / st[c["id"]]["audio"])]
         fs.append(f"[{k}:a]aresample=48000,adelay={int(round(off[c['id']] * 1000))}:all=1[a{k}]")
-    n = len(tempos["cenas"])
+    n = len(cenas)
     graph = (";".join(fs) + ";" + "".join(f"[a{k}]" for k in range(n))
              + f"amix=inputs={n}:normalize=0,apad,atrim=0:{tempos['duracao']:.3f}[out]")
     dst = _dir(proj, lang) / "narracao.wav"
@@ -385,8 +656,23 @@ def _voz(proj: Path, lang: str, tempos: dict, st: dict) -> Path:
 
 def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     proj = Path(proj)
+    if trilha and not Path(trilha).is_file():
+        raise ValueError(f"trilha não encontrada: {trilha}")
+    escrever_cenas(proj, lang)          # valida, confere tts e alinhar antes de resolver beats
     ep = ler(proj)
-    escrever_cenas(proj, lang)
+    doc, avisos = modo_doc(ep), []
+    if doc:
+        st0 = estado(proj, lang)
+        pal = _palavras(proj, lang, ep, st0)
+        for c in ep["cenas"]:
+            beats = resolver_beats(c, lang, pal) if c.get("beats") else []
+            avisos += ritmo(c["id"], beats, st0[c["id"]]["dur"])
+        if avisos and not rascunho:
+            raise ValueError("ritmo: " + "; ".join(avisos))
+        if not trilha and not rascunho:
+            raise ValueError("render final do modo doc exige --trilha (canal/trilhas/)")
+        if not trilha:
+            avisos.append("rascunho sem trilha")
     r = motion.render(proj, rascunho, lang)
     if not r.get("ok"):
         return r
@@ -396,24 +682,48 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     st = estado(proj, lang)
     voz = _voz(proj, lang, tempos, st)
     out = _dir(proj, lang) / ("final_rascunho.mp4" if rascunho else "final.mp4")
-    if trilha:
-        tmp = out.with_name(f".{out.stem}.voz.mp4")
-        _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
+    tmp = out.with_name(f".{out.stem}.voz.mp4")
+    tmp2 = out.with_name(f".{out.stem}.sfx.mp4")
+    if not doc:          # episódio sem beats: caminho original
+        if trilha:
+            try:
+                _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
+                audio.mix_trilha(tmp, Path(trilha), out)          # ducking + loudnorm −14
+            finally:
+                tmp.unlink(missing_ok=True)
+        else:
+            _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                 "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
+    else:
         try:
-            audio.mix_trilha(tmp, Path(trilha), out)          # ducking + loudnorm −14
+            _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
+            base = tmp
+            cues = proj / f"cues.{lang}.json"
+            if cues.is_file() and json.loads(cues.read_text(encoding="utf-8")):
+                if not SFX_DIR.is_dir():
+                    audio.sfx_kit(SFX_DIR)
+                audio.mix_sfx(tmp, cues, SFX_DIR, tmp2)
+                base = tmp2
+            if trilha:
+                realces = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
+                audio.mix_trilha(base, Path(trilha), out, **({"realces": realces} if realces else {}))
+            else:
+                _ff(["-i", str(base), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+                     "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
         finally:
             tmp.unlink(missing_ok=True)
-    else:
-        _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-             "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
+            tmp2.unlink(missing_ok=True)
     legenda = out.with_suffix(".srt")
     legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
-    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"]}
+    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"], "avisos": avisos}
 
 
 FONTE_THUMB = pipeline.ROOT / "motion" / "kit" / "fonts" / "Archivo.ttf"
 DIVULGACAO_IA = ("Divulgação: este vídeo usa imagens geradas por IA. "
                  "No YouTube Studio: \"Conteúdo alterado ou sintético\" = Sim.")
+DIVULGACAO_IA_EN = ("Disclosure: this video uses AI-generated images. "
+                    "YouTube Studio: \"Altered or synthetic content\" = Yes.")
+TITULOS_DESC = {"pt": ("Fontes:", "Imagens:", "Música:"), "en": ("Sources:", "Images:", "Music:")}
 
 
 def _quebra(draw, txt: str, fonte, largura: int) -> list:
@@ -457,26 +767,65 @@ def thumb(proj, lang: str, img: str) -> dict:
     return {"png": str(dst), "linhas": linhas, "tamanho": tam}
 
 
-def descricao(proj, lang: str) -> dict:
+def _ids(ids: list) -> str:
+    """["F1","F2","F3","F7"] -> "F1–F3, F7" (runs consecutivas viram intervalo)."""
+    runs = []   # [id inicial, último nº, nº inicial]
+    for i in ids:
+        n = int(i[1:]) if i[1:].isdigit() else None
+        if runs and n is not None and runs[-1][1] == n - 1:
+            runs[-1][1] = n
+        else:
+            runs.append([i, n, n])
+    return ", ".join(r[0] if r[1] == r[2] else f"{r[0]}–F{r[1]}" for r in runs)
+
+
+def descricao(proj, lang: str, trilhas=None) -> dict:
     proj = Path(proj)
     ep = ler(proj)
     achados = {a["id"]: a for a in pesquisa.parse_pesquisa(
         (proj / "pesquisa.md").read_text(encoding="utf-8-sig"))["achados"]}
     usadas = sorted({str(f) for c in ep["cenas"] for f in c.get("fontes", [])},
                     key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
-    fontes = [f"[{i}] {achados[i]['fonte']} — {achados[i]['url']}" for i in usadas if i in achados]
-    creditos, vistos = [], set()
+    grupos = {}   # (fonte, url) -> ids; uma linha por URL
+    for i in usadas:
+        if i in achados:
+            grupos.setdefault((achados[i]["fonte"], achados[i]["url"]), []).append(i)
+    fontes = [f"[{_ids(ids)}] {f} — {u}" for (f, u), ids in grupos.items()]
+    creditos = []
+
+    def credita(d):
+        if d and d.get("src") and d.get("credito"):
+            lic = d["licenca"]
+            linha = (f"{d['credito']} — {d['fonte_url']}" if lic in d["credito"]
+                     else f"{d['credito']} ({lic}) — {d['fonte_url']}")
+            if linha not in creditos:
+                creditos.append(linha)
+    credita(ep.get("mapa"))
     for c in ep["cenas"]:
-        v = c["visual"]
-        if v["tipo"] == "arquivo" and v["src"] not in vistos:
-            vistos.add(v["src"])
-            creditos.append(f"{v['credito']} — {v['fonte_url']} ({v['licenca']})")
+        if c["visual"]["tipo"] == "arquivo":
+            credita(c["visual"])
+        credita(c.get("fundo") if isinstance(c.get("fundo"), dict) and c["fundo"].get("tipo") == "imagem" else None)
+        for b in c.get("beats") or []:
+            if b.get("faz") == "inserto":
+                credita(b)
     ia = any(c["visual"]["tipo"] == "ia" for c in ep["cenas"])
-    partes = [_loc(ep.get("descricao"), lang) or "", "Fontes:\n" + "\n".join(fontes),
-              "Imagens:\n" + "\n".join(creditos)] + ([DIVULGACAO_IA] if ia else [])
+    t_fontes, t_imagens, t_musica = TITULOS_DESC.get(lang, TITULOS_DESC["pt"])
+    musica = []
+    if trilhas:   # ponytail: lista todas as faixas; o render usa uma só
+        musica = [f["atribuicao"] for f in json.loads(Path(trilhas).read_text(encoding="utf-8-sig"))["faixas"]
+                  if f.get("atribuicao")]
+    partes = [_loc(ep.get("descricao"), lang) or "", t_fontes + "\n" + "\n".join(fontes),
+              t_imagens + "\n" + "\n".join(creditos)]
+    if ia:
+        partes.append(DIVULGACAO_IA_EN if lang == "en" else DIVULGACAO_IA)
+    if musica:
+        partes.append(t_musica + "\n" + "\n\n".join(musica))
     dst = _dir(proj, lang) / "descricao.md"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text("\n\n".join(p for p in partes if p).strip() + "\n", encoding="utf-8")
+    txt = "\n\n".join(p for p in partes if p).strip() + "\n"
+    if len(txt.encode("utf-8")) > 5000:   # limite do YouTube; último recurso: URL do Commons vira "commons: File:x"
+        txt = re.sub(r"https://commons\.wikimedia\.org/wiki/(File:\S+)", r"commons: \1", txt)
+    dst.write_text(txt, encoding="utf-8")
     return {"fontes": len(fontes), "creditos": len(creditos), "ia": ia}
 
 
@@ -494,12 +843,14 @@ def _cli(ns):
             raise ValueError("informe --perfil canal/idiomas.json ou --voz")
         r = tts(p, ns.lang, root=Path(ns.root), aprovacao=ns.aprovacao, **cfg)
         return r, EXIT.get(r["status"], 4)
+    if ns.cmd == "alinhar":
+        return alinhar.alinhar(p, ns.lang), 0
     if ns.cmd == "render":
         r = render(p, ns.lang, ns.rascunho, ns.trilha)
         return r, (0 if r.get("ok") else 1)
     if ns.cmd == "thumb":
         return thumb(p, ns.lang, ns.img), 0
-    return descricao(p, ns.lang), 0
+    return descricao(p, ns.lang, ns.trilhas), 0
 
 
 if __name__ == "__main__":
@@ -509,7 +860,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="vídeo narrado: episodio.json → TTS por cena → motion 16:9")
     ap.add_argument("--root", default=str(pipeline.ROOT))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for nome in ("validar", "tts", "render", "thumb", "descricao"):
+    for nome in ("validar", "tts", "alinhar", "render", "thumb", "descricao"):
         sp = sub.add_parser(nome)
         sp.add_argument("proj")
         sp.add_argument("--lang", default="pt")
@@ -521,6 +872,8 @@ if __name__ == "__main__":
         if nome == "render":
             sp.add_argument("--rascunho", action="store_true")
             sp.add_argument("--trilha")
+        if nome == "descricao":
+            sp.add_argument("--trilhas", help="canal/trilhas.json: credita a atribuição das faixas")
         if nome == "thumb":
             sp.add_argument("--img", required=True)
     ns = ap.parse_args()
