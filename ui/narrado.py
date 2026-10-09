@@ -20,11 +20,17 @@ import dublagem  # noqa: E402
 import motion  # noqa: E402
 import pesquisa  # noqa: E402
 import pipeline  # noqa: E402
+import alinhar  # noqa: E402
 
 LANG_RE = re.compile(r"[a-z]{2}")
 PAUSA = 0.4            # respiro depois da fala de cada cena
 MAX_CHARS_CENA = 5000  # acima disso é erro de colagem, não cena
 VISUAIS = ("arquivo", "motion", "ia")
+FAZ = {"camera": (), "rota": ("de", "para"), "ponto": ("ponto",), "contador": ("valor",), "data": ("t",),
+       "rotulo": ("nome",), "palavras": ("palavras",), "citacao": ("t", "autor"), "lista": ("itens",),
+       "linha_tempo": ("marcos",), "inserto": ("src", "fonte_url", "licenca", "credito"), "selo": ()}
+FUNDOS_DOC = ("mapa", "imagem", "escuro")
+RITMO_MAX = 6.0   # s de fala sem beat nem troca de cena
 GOOGLE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 GOOGLE_MAX_BYTES = 5000           # limite do Google por requisição (texto em UTF-8)
 PROVEDORES = {"elevenlabs": "elevenlabs_tts", "google": "google_tts"}   # provedor → chave do precos.json
@@ -69,6 +75,73 @@ def _achados(proj: Path) -> set | None:
     return {a["id"] for a in pesquisa.parse_pesquisa(p.read_text(encoding="utf-8-sig"))["achados"]}
 
 
+def _v_arquivo(d: dict, proj: Path, err) -> None:
+    """Imagem de arquivo (src no projeto + licença aceita + fonte_url + credito)."""
+    if motion._dentro(proj, d.get("src")) is None:
+        err(f"src não encontrado no projeto: {d.get('src')!r}")
+    if not licenca_ok(d.get("licenca")):
+        err(f"licença não aceita: {d.get('licenca')!r} (PD, CC0, CC BY, CC BY-SA)")
+    if not motion._str(d.get("fonte_url")) or not motion._str(d.get("credito")):
+        err("arquivo precisa de fonte_url e credito")
+
+
+def _acha(ws: list[str], palavra: str, depois: int = 0) -> int | None:
+    """Índice do token `palavra` (aceita 'água#2' = 2ª ocorrência) em ws, a partir de `depois`."""
+    base, _, n = str(palavra).partition("#")
+    alvo = alinhar.tokens(base)
+    if not alvo:
+        return None
+    vez = int(n) if n.isdigit() else 1
+    for k in range(depois, len(ws)):
+        if ws[k] == alvo[0]["w"]:
+            vez -= 1
+            if vez == 0:
+                return k
+    return None
+
+
+def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
+    mapa = ep.get("mapa") if isinstance(ep.get("mapa"), dict) else {}
+    pontos = mapa.get("pontos") if isinstance(mapa.get("pontos"), dict) else {}
+    i = c["id"]
+    f = c.get("fundo")
+    if f is not None:
+        t = f.get("tipo") if isinstance(f, dict) else None
+        if t not in FUNDOS_DOC:
+            e(i, f"fundo.tipo inválido: {t!r} ({'|'.join(FUNDOS_DOC)})")
+        elif t == "mapa" and not pontos:
+            e(i, "fundo mapa sem 'mapa' com pontos no episódio")
+        elif t == "imagem":
+            _v_arquivo(f, proj, lambda m: e(i, "fundo: " + m))
+    ws = [t["w"] for t in alinhar.tokens(_loc(c.get("texto"), lang) or "")]
+    beats = c.get("beats")
+    if beats is None:
+        return
+    if not isinstance(beats, list):
+        e(i, "beats precisa ser lista")
+        return
+    for k, b in enumerate(beats, 1):
+        q = f"{i} beat {k}"
+        if not isinstance(b, dict) or b.get("faz") not in FAZ:
+            e(q, f"faz desconhecido: {(b.get('faz') if isinstance(b, dict) else b)!r} ({'|'.join(FAZ)})")
+            continue
+        for campo in FAZ[b["faz"]]:
+            if campo not in b:
+                e(q, f"{b['faz']} precisa de {campo}")
+        for nome in [b.get(x) for x in ("de", "para", "ponto")] + list(b.get("via", [])):
+            if nome is not None and nome not in pontos:
+                e(q, f"ponto {nome!r} não existe no mapa")
+        sub = [x for x in (b.get("itens") or []) + (b.get("marcos") or []) if isinstance(x, dict)]
+        for w in [b.get("em")] + [x.get("em") for x in sub] + list(b.get("palavras") or []):
+            if w and _acha(ws, w) is None:
+                e(q, f"palavra {w!r} não está no texto da cena")
+        if b["faz"] == "contador" and b.get("pontos") and not (
+                isinstance(b.get("valor"), int) and not isinstance(b["valor"], bool) and 0 < b["valor"] <= 500):
+            e(q, "pontos só com valor inteiro entre 1 e 500")
+        if b["faz"] == "inserto":
+            _v_arquivo(b, proj, lambda m, q=q: e(q, m))
+
+
 def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]:
     """visuais=False: só texto e fontes (TTS roda antes de escolher as imagens)."""
     erros = []
@@ -87,6 +160,16 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
     achados = _achados(proj)
     if achados is None:
         e("raiz", "falta pesquisa.md")
+    if visuais and "mapa" in ep:
+        m = ep["mapa"]
+        if not isinstance(m, dict) or not isinstance(m.get("pontos"), dict) or not m["pontos"] or not all(
+                isinstance(v, list) and len(v) == 2 and all(motion._num(x) for x in v) for v in m["pontos"].values()):
+            e("mapa", "mapa precisa de pontos {nome: [x, y]} em pixels do arquivo")
+        if isinstance(m, dict):
+            _v_arquivo(m, proj, lambda msg: e("mapa", msg))
+    ids = {c.get("id") for c in cenas if isinstance(c, dict)}
+    if "vinheta_apos" in ep and ep["vinheta_apos"] not in ids:
+        e("raiz", f"vinheta_apos aponta para cena inexistente: {ep['vinheta_apos']!r}")
     vistos = set()
     for n, c in enumerate(cenas):
         i = c.get("id") if isinstance(c, dict) else None
@@ -109,6 +192,7 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
                 e(i, f"fonte [{x}] não existe no pesquisa.md")
         if not visuais:
             continue
+        _v_direcao(ep, c, proj, lang, e)
         v = c.get("visual") if isinstance(c.get("visual"), dict) else {}
         t = v.get("tipo")
         if t in ("arquivo", "ia"):
@@ -125,6 +209,43 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
         else:
             e(i, f"visual.tipo inválido: {t!r} ({'|'.join(VISUAIS)})")
     return erros
+
+
+def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
+    """Beats da cena localizados, com "s" = segundos desde o início da fala da cena.
+    Sem "em": início da frase seguinte à do beat anterior (1º beat: início da fala)."""
+    toks = alinhar.tokens(_loc(c["texto"], lang))
+    ws = [t["w"] for t in toks]
+    pal = palavras[c["id"]]["palavras"]
+    frases = [k for k, t in enumerate(toks) if t["frase"]]
+    out, ult = [], -1
+    for b in c.get("beats", []):
+        b = _loc(copy.deepcopy(b), lang)
+        if b.get("em"):
+            k = _acha(ws, b["em"])
+        elif ult < 0:
+            k = 0
+        else:
+            k = next((f for f in frases if f > ult), ult)
+        b["s"], ult = pal[k]["s"], k
+        if b["faz"] == "palavras":
+            ts, d = [], k
+            for w in b["palavras"]:
+                d = _acha(ws, w, d)
+                ts.append(pal[d]["s"])
+                d += 1
+            b["ts"] = ts
+        for lst in ("itens", "marcos"):
+            for it in b.get(lst) or []:
+                if isinstance(it, dict) and it.get("em"):
+                    it["s"] = pal[_acha(ws, it["em"])]["s"]
+        out.append(b)
+    return out
+
+
+def ritmo(cid: str, beats: list[dict], dur: float) -> list[str]:
+    ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", []))})
+    return [f"{cid}: {a:.1f}–{b:.1f} s sem beat" for a, b in zip(ts, ts[1:]) if b - a > RITMO_MAX]
 
 
 def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict) -> dict:

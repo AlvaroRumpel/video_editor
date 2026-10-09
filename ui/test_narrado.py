@@ -481,3 +481,69 @@ def test_perfil_le_idioma_do_canal(tmp_path):
     assert narrado.perfil(f, "pt") == {"voice_id": VOZ_G, "provedor": "google", "velocidade": 0.95, "tratamento": TRAT}
     with pytest.raises(ValueError, match="en"):
         narrado.perfil(f, "en")
+
+
+def _ep_doc():
+    ep = _ep()
+    ep["mapa"] = {"src": "assets/foto.png", "fonte_url": "https://commons.wikimedia.org/wiki/File:M.jpg",
+                  "licenca": "CC0", "credito": "Blaeu, 1650", "pontos": {"cabo": [100, 900], "abrolhos": [1300, 700]}}
+    ep["vinheta_apos"] = "c01"
+    ep["cenas"][0]["texto"]["pt"] = "Em junho de 1629, cerca de trezentas pessoas chegaram. Não havia água. Nem água doce."
+    ep["cenas"][0]["fundo"] = {"tipo": "mapa"}
+    ep["cenas"][0]["beats"] = [
+        {"em": "junho", "faz": "data", "t": {"pt": "Junho 1629"}},
+        {"faz": "rota", "de": "cabo", "para": "abrolhos", "navio": True},
+        {"em": "trezentas", "faz": "contador", "valor": 300, "legenda": {"pt": "sobreviventes"}, "pontos": True},
+        {"faz": "palavras", "palavras": ["não", "havia", "água"], "risco": "água"},
+        {"em": "água#2", "faz": "ponto", "ponto": "abrolhos", "rotulo": {"pt": "Abrolhos"}}]
+    return ep
+
+
+def _palavras(ep, lang="pt"):
+    """palavras.json falso: token k começa em k * 0.5 s."""
+    import alinhar
+    out = {}
+    for c in ep["cenas"]:
+        n = len(alinhar.tokens(narrado._loc(c["texto"], lang)))
+        out[c["id"]] = {"hash": "h", "palavras": [{"w": "x", "s": k * 0.5, "e": k * 0.5 + 0.4} for k in range(n)]}
+    return out
+
+
+def test_validar_doc_ok(tmp_path):
+    p = _proj(tmp_path, _ep_doc())
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("mut, trecho", [
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "explodir"}), "faz desconhecido"),
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "ponto", "ponto": "batavia"}), "ponto 'batavia' não existe"),
+    (lambda e: e["cenas"][0]["beats"].append({"em": "baleia", "faz": "data", "t": {"pt": "x"}}), "palavra 'baleia'"),
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "contador", "valor": 9000, "pontos": True}), "pontos só com valor"),
+    (lambda e: e["cenas"][0]["beats"].append({"faz": "rota", "de": "cabo"}), "rota precisa de para"),
+    (lambda e: e.pop("mapa"), "fundo mapa sem 'mapa'"),
+    (lambda e: e.__setitem__("vinheta_apos", "c77"), "vinheta_apos"),
+    (lambda e: e["cenas"][0].__setitem__("fundo", {"tipo": "video"}), "fundo.tipo inválido"),
+    (lambda e: e["mapa"].__setitem__("licenca", "CC BY-NC"), "licença não aceita"),
+])
+def test_validar_doc_erros(tmp_path, mut, trecho):
+    ep = _ep_doc()
+    mut(ep)
+    p = _proj(tmp_path, ep)
+    erros = narrado.validar(narrado.ler(p), p, "pt")
+    assert any(trecho in e["motivo"] for e in erros), erros
+
+
+def test_resolver_beats_em_frase_palavras_e_ocorrencia():
+    ep = _ep_doc()
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
+    # tokens: em junho de 1629 cerca de 300 pessoas chegaram | nao havia agua | nem agua doce
+    assert b[0]["s"] == 0.5 and b[0]["t"] == "Junho 1629"            # "junho" = token 1, texto localizado
+    assert b[1]["s"] == 4.5                                           # sem em: início da frase seguinte (token 9)
+    assert b[2]["s"] == 3.0 and b[2]["legenda"] == "sobreviventes"   # "trezentas" → "300" = token 6
+    assert b[3]["s"] == 4.5 and b[3]["ts"] == [4.5, 5.0, 5.5]        # frase seguinte (token 9) e cada palavra
+    assert b[4]["s"] == 6.5                                           # "água#2" = token 13
+
+
+def test_ritmo_aponta_trecho_parado():
+    assert narrado.ritmo("c01", [{"s": 1.0}, {"s": 3.0}], 12.0) == ["c01: 3.0–12.0 s sem beat"]
+    assert narrado.ritmo("c01", [{"s": 1.0, "ts": [4.0, 7.0]}], 10.0) == []
