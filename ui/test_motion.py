@@ -821,3 +821,27 @@ def test_doc_mergulho_aproxima_o_mapa_e_da_clarao(tmp_path):
     assert durante > antes * 1.8 and flash > 0.5
     sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
     assert "clarao" in sons
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_vinheta_e_tela_final(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, _ = _doc(tmp_path)
+    r = motion.montar(p)
+    assert r["ok"], r
+    v = next(c for c in r["cenas"] if c["id"] == "c900")
+    f = next(c for c in r["cenas"] if c["id"] == "c901")
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        op = lambda t, sel: pg.evaluate("([t, s]) => { __kit.ir(t); return +getComputedStyle(document.querySelector(s)).opacity; }", [t, sel])
+        tit = op(v["ini"] + 2.5, "#c900 .d-titulo")
+        guias = op(f["ini"] + 2.0, "#c901 .d-guia")
+        textos = pg.evaluate("() => [...document.querySelectorAll('#c901 .g')].map(e => e.textContent)")
+        b.close()
+    assert tit > 0.9 and guias > 0.9 and textos == ["inscreva-se", "próximo vídeo"]
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert {"carimbo", "maquina"} <= sons

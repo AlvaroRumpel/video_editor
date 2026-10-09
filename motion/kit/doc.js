@@ -68,12 +68,12 @@
 .d-flick{position:absolute;inset:0;background:#000;opacity:0}
 .d-flash{position:absolute;inset:0;background:#fff6e0;opacity:0}
 .d-papel{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 45%,#3a3125 0%,#1d1912 60%,#0e0d0b 100%)}
-.d-marca{position:absolute;left:0;right:0;top:690px;text-align:center;font:500 44px var(--k-mono-familia);letter-spacing:.5em;clip-path:inset(0 100% 0 0)}
+.d-marca{position:absolute;left:200px;right:200px;top:690px;text-align:center;font:500 44px var(--k-mono-familia);letter-spacing:.5em;clip-path:inset(0 100% 0 0)}
 .d-titulo{position:absolute;left:200px;right:200px;top:770px;text-align:center;font:italic 400 64px var(--k-display-familia);opacity:0}
 .d-guia{position:absolute;border:2px solid rgba(184,134,43,.45);opacity:0}
 .d-guia .g{position:absolute;left:0;right:0;bottom:-52px;text-align:center;font:600 22px var(--k-corpo-familia);letter-spacing:.2em;color:rgba(237,230,214,.6);text-transform:uppercase}
-.d-prox{position:absolute;left:0;right:0;top:130px;text-align:center;font:italic 600 76px var(--k-display-familia);opacity:0}
-.d-tag{position:absolute;left:0;right:0;bottom:110px;text-align:center;font:500 30px var(--k-corpo-familia);letter-spacing:.15em;color:#cdbf9f;opacity:0}`;
+.d-prox{position:absolute;left:200px;right:200px;top:130px;text-align:center;font:italic 600 76px var(--k-display-familia);opacity:0}
+.d-tag{position:absolute;left:200px;right:200px;bottom:110px;text-align:center;font:500 30px var(--k-corpo-familia);letter-spacing:.15em;color:#cdbf9f;opacity:0}`;
   document.head.appendChild(el("style", null, CSS));
 
   // ---------- camada de clima (uma vez, dentro de #k-fixos, abaixo do grão do kit)
@@ -434,8 +434,72 @@
     return ultimo;
   });
 
-  KIT.tipo("vinheta", (c) => c.t0 + 0.1);
-  KIT.tipo("telafinal", (c) => c.t0 + 0.1);
+  // ---------- abertura: selo K carimba no papel, anéis se desenham, marca datilografada, título
+  KIT.tipo("vinheta", (c, cena) => {
+    iniciarFx();
+    const { tl } = c, t0 = c.ini + 0.1, sai = c.ini + cena.dur - (cena.saida ? cena.saida.dur : 0) - 0.01;   // zoom de saída só depois do ponto de medição do layout (fim - 0.02)
+    const palco = el("div", "d-palco");
+    palco.appendChild(el("div", "d-papel"));
+    c.layer.appendChild(palco);
+    const box = el("div", "d-selo");
+    Object.assign(box.style, { left: `${W / 2 - 160}px`, top: "300px", width: "320px", height: "320px", opacity: "0" });
+    const { s, aneis } = seloSvg(320);
+    box.appendChild(s);
+    const marca = texto(el("div", "d-marca t", "KRYVANTIS")), tit = texto(el("div", "d-titulo t", cena.titulo || ""));
+    palco.append(box, marca, tit);
+    tl.fromTo(box, { opacity: 0, scale: 2.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power4.in", immediateRender: false }, t0);
+    tl.fromTo(palco, { x: -8 }, { x: 0, duration: 0.25, ease: "elastic.out(1,0.3)", immediateRender: false }, t0 + 0.35);
+    for (let i = 0; i < 18; i++) {   // poeira do impacto
+      const d = el("i"), a = (i / 18) * Math.PI * 2, r = 180 + (i % 3) * 60;
+      Object.assign(d.style, { position: "absolute", left: `${W / 2}px`, top: "460px", width: "6px", height: "6px",
+                               borderRadius: "50%", background: "#cdbf9f", opacity: "0" });
+      palco.appendChild(d);
+      tl.fromTo(d, { opacity: 0.8, x: 0, y: 0 }, { opacity: 0, x: Math.cos(a) * r, y: Math.sin(a) * r * 0.6, duration: 0.9,
+                ease: "power2.out", immediateRender: false }, t0 + 0.35);
+    }
+    for (const a of aneis) {
+      const L = 2 * Math.PI * Number(a.getAttribute("r"));
+      a.setAttribute("stroke-dasharray", L);
+      a.setAttribute("stroke-dashoffset", L);
+      tl.fromTo(a, { attr: { "stroke-dashoffset": L } }, { attr: { "stroke-dashoffset": 0 }, duration: 0.6, ease: "power2.inOut",
+                immediateRender: false }, t0 + 0.4);
+    }
+    tl.fromTo(marca, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.7, ease: "steps(9)",
+              immediateRender: false }, t0 + 0.9);
+    tl.fromTo(tit, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out", immediateRender: false }, t0 + 1.6);
+    tl.to(palco, { scale: 5, opacity: 0, duration: 0.5, ease: "power3.in", transformOrigin: "50% 42%" }, sai);
+    KIT.cue(t0 + 0.35, "carimbo");
+    KIT.cue(t0 + 0.9, "maquina");
+    KIT.cue(sai, "whoosh");
+    return t0 + 2.1;
+  });
+
+  // ---------- tela final (20 s): quadros-guia nas posições dos elementos finais do YouTube
+  KIT.tipo("telafinal", (c, cena) => {
+    iniciarFx();
+    const { tl } = c, t0 = c.ini + 0.2, D = window.__KIT_DADOS, tx = cena.textos || {};
+    const palco = el("div", "d-palco");
+    c.layer.appendChild(palco);
+    if (D.mapa) {
+      const m = el("div", "d-img");
+      Object.assign(m.style, { backgroundImage: `url("${D.mapa.arquivo}")`, filter: "blur(16px) sepia(.5) brightness(.32)",
+                               transform: "scale(1.1)" });
+      palco.appendChild(m);
+    }
+    const prox = texto(el("div", "d-prox t", tx.prox || ""));
+    const ins = el("div", "d-guia");
+    Object.assign(ins.style, { left: "330px", top: "330px", width: "340px", height: "340px", borderRadius: "50%" });
+    ins.appendChild(el("div", "g", tx.inscreva || ""));
+    const vid = el("div", "d-guia");
+    Object.assign(vid.style, { left: "870px", top: "320px", width: "720px", height: "405px" });
+    vid.appendChild(el("div", "g", tx.video || ""));
+    const tag = texto(el("div", "d-tag t", c.tema.tagline || ""));
+    palco.append(prox, ins, vid, tag);
+    [prox, ins, vid, tag].forEach((e, i) =>
+      tl.fromTo(e, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out", immediateRender: false }, t0 + i * 0.2));
+    KIT.cue(t0, "whoosh", -10);
+    return t0 + 1.4;
+  });
   // ---------- transições ligadas (entrada da cena nova; `ant` = camada da cena anterior)
   KIT.transicao("mergulho", (tl, cam, t, d, tema, ant) => {
     const meio = t + d * 0.45, flash = iniciarFx().flash;
