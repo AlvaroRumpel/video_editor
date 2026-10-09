@@ -118,10 +118,13 @@ def gasto_projeto(proj: Path, ano_mes: str | None = None) -> dict:
 
 def gasto_mes(root: Path, ano_mes: str | None = None) -> dict:
     ano_mes = ano_mes or _ano_mes_atual()
+    projs = [pipeline.project_dir(root, p["id"]) for p in pipeline.find_projects(root)]
+    for raiz in ler_budget(root).get("raizes_externas", []):   # projetos de outros repos (ex.: canal dark)
+        projs += [c.parent.parent for c in sorted(Path(raiz).glob("*/ui/costs.jsonl"))]
     usd = 0.0
     cred = 0
-    for p in pipeline.find_projects(root):
-        g = gasto_projeto(pipeline.project_dir(root, p["id"]), ano_mes)
+    for proj in projs:
+        g = gasto_projeto(proj, ano_mes)
         usd += g["usd"]
         cred += g["creditos"]
     return {"usd": round(usd, 4), "creditos": cred}
@@ -200,6 +203,13 @@ def _aprovacao_valida(root: Path, proj: Path, aprovacao) -> bool:
     return False
 
 
+def _pid(root: Path, proj: Path) -> str:
+    try:
+        return proj.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return proj.resolve().as_posix()   # projeto fora do repo (ex.: dark_videos/episodios/<ep>)
+
+
 def autorizar(root: Path, proj: Path, provedor: str, unidades: float,
               aprovacao=None, saldo="auto") -> dict:
     _existe(proj)
@@ -212,7 +222,7 @@ def autorizar(root: Path, proj: Path, provedor: str, unidades: float,
                             f"aprovação {aprovacao} não encontrada ou sem resposta", est)
         return _decisao("ok", f"aprovado pelo pedido {aprovacao}", est)
     b = ler_budget(root)
-    pid = proj.resolve().relative_to(root.resolve()).as_posix()
+    pid = _pid(root, proj)
     teto_proj = float(b["tetos_projeto"].get(pid, b["teto_projeto_usd"]))
     mes = gasto_mes(root)["usd"]
     if mes + est["usd"] > float(b["teto_mensal_usd"]):

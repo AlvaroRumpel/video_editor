@@ -295,3 +295,25 @@ def test_cli_erro_json(root):
                         str(_proj(root)), "fal_kling", "1", "--usd", "nan"],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "erro" in json.loads(r.stdout)
+
+
+def test_gasto_mes_soma_raizes_externas(tmp_path):
+    root = tmp_path / "ve"
+    (root / ".ui-runtime").mkdir(parents=True)
+    ext = tmp_path / "dark" / "episodios"
+    (root / ".ui-runtime" / "budget.json").write_text(
+        json.dumps({"raizes_externas": [str(ext)]}), encoding="utf-8")
+    ep = ext / "001-x"
+    ep.mkdir(parents=True)
+    budget.registrar(ep, "fal_quadro", 10, usd=0.06, root=root)
+    assert budget.gasto_mes(root)["usd"] == 0.06
+
+
+def test_autorizar_projeto_fora_da_raiz(tmp_path):
+    root = tmp_path / "ve"
+    (root / "ui").mkdir(parents=True)
+    (root / "ui" / "precos.json").write_text(
+        json.dumps({"fal_quadro": {"usd": 0.006, "creditos": 0}}), encoding="utf-8")
+    ep = tmp_path / "dark" / "001-x"
+    ep.mkdir(parents=True)
+    assert budget.autorizar(root, ep, "fal_quadro", 1)["status"] == "ok"
