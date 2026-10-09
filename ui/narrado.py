@@ -721,6 +721,9 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
 FONTE_THUMB = pipeline.ROOT / "motion" / "kit" / "fonts" / "Archivo.ttf"
 DIVULGACAO_IA = ("Divulgação: este vídeo usa imagens geradas por IA. "
                  "No YouTube Studio: \"Conteúdo alterado ou sintético\" = Sim.")
+DIVULGACAO_IA_EN = ("Disclosure: this video uses AI-generated images. "
+                    "YouTube Studio: \"Altered or synthetic content\" = Yes.")
+TITULOS_DESC = {"pt": ("Fontes:", "Imagens:", "Música:"), "en": ("Sources:", "Images:", "Music:")}
 
 
 def _quebra(draw, txt: str, fonte, largura: int) -> list:
@@ -764,7 +767,7 @@ def thumb(proj, lang: str, img: str) -> dict:
     return {"png": str(dst), "linhas": linhas, "tamanho": tam}
 
 
-def descricao(proj, lang: str) -> dict:
+def descricao(proj, lang: str, trilhas=None) -> dict:
     proj = Path(proj)
     ep = ler(proj)
     achados = {a["id"]: a for a in pesquisa.parse_pesquisa(
@@ -788,8 +791,17 @@ def descricao(proj, lang: str) -> dict:
             if b.get("faz") == "inserto":
                 credita(b)
     ia = any(c["visual"]["tipo"] == "ia" for c in ep["cenas"])
-    partes = [_loc(ep.get("descricao"), lang) or "", "Fontes:\n" + "\n".join(fontes),
-              "Imagens:\n" + "\n".join(creditos)] + ([DIVULGACAO_IA] if ia else [])
+    t_fontes, t_imagens, t_musica = TITULOS_DESC.get(lang, TITULOS_DESC["pt"])
+    musica = []
+    if trilhas:   # ponytail: lista todas as faixas; o render usa uma só
+        musica = [f["atribuicao"] for f in json.loads(Path(trilhas).read_text(encoding="utf-8-sig"))["faixas"]
+                  if f.get("atribuicao")]
+    partes = [_loc(ep.get("descricao"), lang) or "", t_fontes + "\n" + "\n".join(fontes),
+              t_imagens + "\n" + "\n".join(creditos)]
+    if ia:
+        partes.append(DIVULGACAO_IA_EN if lang == "en" else DIVULGACAO_IA)
+    if musica:
+        partes.append(t_musica + "\n" + "\n\n".join(musica))
     dst = _dir(proj, lang) / "descricao.md"
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text("\n\n".join(p for p in partes if p).strip() + "\n", encoding="utf-8")
@@ -817,7 +829,7 @@ def _cli(ns):
         return r, (0 if r.get("ok") else 1)
     if ns.cmd == "thumb":
         return thumb(p, ns.lang, ns.img), 0
-    return descricao(p, ns.lang), 0
+    return descricao(p, ns.lang, ns.trilhas), 0
 
 
 if __name__ == "__main__":
@@ -839,6 +851,8 @@ if __name__ == "__main__":
         if nome == "render":
             sp.add_argument("--rascunho", action="store_true")
             sp.add_argument("--trilha")
+        if nome == "descricao":
+            sp.add_argument("--trilhas", help="canal/trilhas.json: credita a atribuição das faixas")
         if nome == "thumb":
             sp.add_argument("--img", required=True)
     ns = ap.parse_args()

@@ -296,6 +296,23 @@ def test_descricao_fontes_creditos_e_ia(tmp_path):
     assert "Conteúdo alterado ou sintético" in md
 
 
+def test_descricao_en_titulos_e_trilha(tmp_path):
+    ep = _ep()
+    ep["cenas"].append({"id": "c03", "texto": {"pt": "x", "en": "x"}, "fontes": ["F1"],
+                        "visual": {"tipo": "ia", "src": "assets/ia.png", "prompt": "p"}})
+    p = _proj(tmp_path, ep)
+    Image.new("RGB", (1600, 1000)).save(p / "assets" / "ia.png")
+    tr = tmp_path / "trilhas.json"
+    tr.write_text('{"faixas": [{"arquivo": "a.mp3", "licenca": "CC BY 4.0", "atribuicao": "Track by Kevin"}, '
+                  '{"arquivo": "b.mp3"}]}', encoding="utf-8")
+    narrado.descricao(p, "en", tr)
+    md = (p / "en" / "descricao.md").read_text(encoding="utf-8")
+    assert "Sources:\n" in md and "Images:\n" in md and "Music:\nTrack by Kevin" in md
+    assert "Fontes:" not in md and "AI-generated images" in md
+    narrado.descricao(p, "pt")
+    assert "Música:" not in (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+
+
 def test_cli_validar_codigo_de_saida(tmp_path):
     ep = _ep()
     ep["cenas"][0]["visual"]["licenca"] = "ver página"
