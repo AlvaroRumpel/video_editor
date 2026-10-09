@@ -12,7 +12,7 @@
   },
   "assinatura": {"tipo": "ponto"},
   "fixos": {"wordmark": "", "wordmark_fonte": "display", "barra": false, "grao": 0.14},
-  "endcard": {"marca": "Arquivo", "tagline": "Histórias reais. Fontes reais.", "cta": "Inscreva-se", "url": "fontes na descrição"},
+  "endcard": {"marca": "Kryvantis", "tagline": "Histórias reais. Fontes reais.", "cta": "Inscreva-se", "url": "fontes na descrição"},
   "pill": {"borda": "#B8862B", "texto": "#16140F"},
   "transicao_padrao": {"transicao": "fade", "dur": 0.45},
   "regras": {"numero_mono": true}
