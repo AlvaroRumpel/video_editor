@@ -547,3 +547,17 @@ def test_resolver_beats_em_frase_palavras_e_ocorrencia():
 def test_ritmo_aponta_trecho_parado():
     assert narrado.ritmo("c01", [{"s": 1.0}, {"s": 3.0}], 12.0) == ["c01: 3.0–12.0 s sem beat"]
     assert narrado.ritmo("c01", [{"s": 1.0, "ts": [4.0, 7.0]}], 10.0) == []
+
+
+def test_validar_palavras_fora_de_ordem(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"].append({"faz": "palavras", "palavras": ["água", "havia"]})
+    p = _proj(tmp_path, ep)
+    assert any("na ordem do beat" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_resolver_beats_palavra_ausente_levanta():
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"] = [{"em": "baleia", "faz": "data", "t": {"pt": "x"}}]
+    with pytest.raises(ValueError, match="não encontrada"):
+        narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))

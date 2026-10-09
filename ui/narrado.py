@@ -132,9 +132,16 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
             if nome is not None and nome not in pontos:
                 e(q, f"ponto {nome!r} não existe no mapa")
         sub = [x for x in (b.get("itens") or []) + (b.get("marcos") or []) if isinstance(x, dict)]
-        for w in [b.get("em")] + [x.get("em") for x in sub] + list(b.get("palavras") or []):
+        for w in [b.get("em")] + [x.get("em") for x in sub]:
             if w and _acha(ws, w) is None:
                 e(q, f"palavra {w!r} não está no texto da cena")
+        d = (_acha(ws, b["em"]) if b.get("em") else 0) or 0
+        for w in b.get("palavras") or []:
+            d = _acha(ws, w, d)
+            if d is None:
+                e(q, f"palavra {w!r} não está no texto da cena (na ordem do beat)")
+                break
+            d += 1
         if b["faz"] == "contador" and b.get("pontos") and not (
                 isinstance(b.get("valor"), int) and not isinstance(b["valor"], bool) and 0 < b["valor"] <= 500):
             e(q, "pontos só com valor inteiro entre 1 e 500")
@@ -211,6 +218,13 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
     return erros
 
 
+def _ach(ws, w, c, depois=0):
+    k = _acha(ws, w, depois)
+    if k is None:
+        raise ValueError(f"{c['id']}: palavra {w!r} não encontrada no texto (rode validar)")
+    return k
+
+
 def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
     """Beats da cena localizados, com "s" = segundos desde o início da fala da cena.
     Sem "em": início da frase seguinte à do beat anterior (1º beat: início da fala)."""
@@ -222,7 +236,7 @@ def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
     for b in c.get("beats", []):
         b = _loc(copy.deepcopy(b), lang)
         if b.get("em"):
-            k = _acha(ws, b["em"])
+            k = _ach(ws, b["em"], c)
         elif ult < 0:
             k = 0
         else:
@@ -231,14 +245,14 @@ def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
         if b["faz"] == "palavras":
             ts, d = [], k
             for w in b["palavras"]:
-                d = _acha(ws, w, d)
+                d = _ach(ws, w, c, d)
                 ts.append(pal[d]["s"])
                 d += 1
             b["ts"] = ts
         for lst in ("itens", "marcos"):
             for it in b.get(lst) or []:
                 if isinstance(it, dict) and it.get("em"):
-                    it["s"] = pal[_acha(ws, it["em"])]["s"]
+                    it["s"] = pal[_ach(ws, it["em"], c)]["s"]
         out.append(b)
     return out
 
