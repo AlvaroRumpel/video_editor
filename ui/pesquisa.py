@@ -35,8 +35,8 @@ def classificar(url: str, fontes: dict) -> str:
     host = (urlparse(url).hostname or "").lower()
     if not host:
         return "inspiracao"
-    for tipo in ("oficial", "doutrina"):
-        if any(_casa(host, p) for p in fontes.get(tipo, [])):
+    for tipo, padroes in fontes.items():
+        if isinstance(padroes, list) and any(_casa(host, p) for p in padroes):
             return tipo
     return "inspiracao"
 
@@ -101,8 +101,10 @@ def _refs(path: Path) -> set[str]:
 
 
 def validar(md_path: Path, roteiro: Path | None = None, fatos: Path | None = None,
-            root: Path = ROOT, hoje: str | None = None, _fetch=None) -> dict:
-    fontes = carregar_fontes(root)
+            root: Path = ROOT, hoje: str | None = None, fontes_path: Path | None = None,
+            _fetch=None) -> dict:
+    fontes = pipeline.read_json(fontes_path, {}) if fontes_path else carregar_fontes(root)
+    camadas = "/".join(k for k, v in fontes.items() if isinstance(v, list)) or "oficial/doutrina"
     bruto = _fetch or _fetch_url
     cache: dict = {}
 
@@ -126,7 +128,7 @@ def validar(md_path: Path, roteiro: Path | None = None, fatos: Path | None = Non
             erros.append(f"{a['id']}: sem URL")
             continue
         if classificar(a["url"], fontes) == "inspiracao":
-            erros.append(f"{a['id']}: fonte classificada como inspiracao ({a['url']}) — fato exige oficial/doutrina")
+            erros.append(f"{a['id']}: fonte classificada como inspiracao ({a['url']}) — fato exige {camadas}")
         status, _ = fetch(a["url"])
         if not (200 <= status < 400):
             motivo = (f"sem resposta ({ULTIMO_ERRO.get(a['url'], 'sem detalhe')})" if status == 0
@@ -202,7 +204,8 @@ def _cli(ns, root: Path):
     if ns.cmd == "validar":
         fetch = (lambda u, *a: (200, b"")) if ns.sem_rede else None
         r = validar(Path(ns.md), roteiro=Path(ns.roteiro) if ns.roteiro else None,
-                    fatos=Path(ns.fatos) if ns.fatos else None, root=root, _fetch=fetch)
+                    fatos=Path(ns.fatos) if ns.fatos else None, root=root,
+                    fontes_path=Path(ns.fontes) if ns.fontes else None, _fetch=fetch)
         return r, (0 if r["ok"] else 1)
     if ns.cmd == "snapshot":
         return snapshot(Path(ns.md), Path(ns.dir)), 0
@@ -218,7 +221,7 @@ if __name__ == "__main__":
     ap.add_argument("--root", default=str(ROOT))
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("validar"); p.add_argument("md"); p.add_argument("--roteiro"); p.add_argument("--fatos")
-    p.add_argument("--sem-rede", action="store_true")
+    p.add_argument("--sem-rede", action="store_true"); p.add_argument("--fontes")
     p = sub.add_parser("snapshot"); p.add_argument("md"); p.add_argument("dir")
     p = sub.add_parser("extrair-fatos"); p.add_argument("transcript")
     ns = ap.parse_args()

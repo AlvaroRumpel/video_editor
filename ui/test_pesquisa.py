@@ -263,3 +263,21 @@ def test_snapshot_nao_sobrescreve_com_falha(md, tmp_path):
     out = pesquisa.snapshot(md, d, _fetch=lambda u: (0, b""))
     assert (d / "F1.html").read_bytes() == b"bom"
     assert out[0]["salvo"] is False and out[0]["status"] == 0
+
+
+def test_classificar_camadas_do_canal():
+    f = {"primaria": ["loc.gov", "*.jus.br"], "secundaria": ["bbc.com"]}
+    assert pesquisa.classificar("https://chroniclingamerica.loc.gov/x", f) == "primaria"
+    assert pesquisa.classificar("https://www.tjsp.jus.br/a", f) == "primaria"
+    assert pesquisa.classificar("https://www.bbc.com/a", f) == "secundaria"
+    assert pesquisa.classificar("https://www.reddit.com/r/TrueCrime/x", f) == "inspiracao"
+
+
+def test_validar_com_fontes_do_canal(tmp_path):
+    md = tmp_path / "pesquisa.md"
+    md.write_text("## Achados\n\n- [F1] Fato — fonte: Reddit (relato) — https://www.reddit.com/r/x — acesso 2026-10-08\n"
+                  "  > trecho\n", encoding="utf-8")
+    fj = tmp_path / "fontes.json"
+    fj.write_text(json.dumps({"primaria": ["loc.gov"], "secundaria": ["bbc.com"]}), encoding="utf-8")
+    r = pesquisa.validar(md, fontes_path=fj, _fetch=lambda u, *a: (200, b""), hoje="2026-10-08")
+    assert any("inspiracao" in e and "primaria/secundaria" in e for e in r["erros"])
