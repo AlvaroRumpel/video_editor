@@ -736,3 +736,42 @@ def test_doc_camera_move_entre_quadros(tmp_path):
         a, m, z = tr(0.1), tr(1.0), tr(2.5)
         b.close()
     assert a != m != z and "scale" in z
+
+
+BEATS_TODOS = [
+    {"faz": "data", "t": "Junho 1629", "s": 0.2},
+    {"faz": "rota", "de": "a", "para": "b", "navio": True, "km": 3000, "s": 0.4},
+    {"faz": "ponto", "ponto": "b", "rotulo": "Abrolhos", "s": 1.0},
+    {"faz": "contador", "valor": 300, "legenda": "sobreviventes", "pontos": True, "s": 1.2},
+    {"faz": "rotulo", "nome": "Jeronimus Cornelisz", "papel": "subcomerciante", "s": 1.4},
+    {"faz": "palavras", "palavras": ["ilhas", "sem", "água"], "risco": "água", "s": 1.6, "ts": [1.6, 1.8, 2.0]},
+    {"faz": "selo", "s": 2.4},
+]
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_todos_os_beats_montam_com_cues(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = BEATS_TODOS
+    d["cenas"][1]["beats"] = [
+        {"faz": "camera", "area": [0.5, 0.2, 0.3, 0.3], "s": 0.1},
+        {"faz": "citacao", "t": "Uma história incrível", "autor": "Kieran Hosty", "s": 0.3},
+        {"faz": "lista", "itens": [{"t": "Crânio", "s": 0.6}, {"t": "Clava"}], "s": 0.5},
+        {"faz": "linha_tempo", "marcos": [{"data": "1628", "t": "partida"}, {"data": "1629", "t": "naufrágio"}], "s": 1.0},
+        {"faz": "inserto", "arquivo": "assets/mapa.png", "s": 1.5}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r
+    sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
+    assert {"ping", "whoosh", "tique", "carimbo", "impacto"} <= sons
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_citacao_longa_estoura_safe_area(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][1]["beats"] = [{"faz": "citacao", "t": "palavra " * 120, "autor": "x", "s": 0.2}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert not r["ok"] and any("safe area" in e["motivo"] for e in r["erros"])

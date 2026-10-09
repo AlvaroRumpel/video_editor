@@ -48,13 +48,13 @@
 .d-rotulo .p{font:600 24px var(--k-corpo-familia);letter-spacing:.2em;color:var(--k-acento);text-transform:uppercase;margin-top:6px}
 .d-palavras{position:absolute;left:120px;right:120px;bottom:130px;text-align:center;font:800 110px var(--k-corpo-familia);text-transform:uppercase}
 .d-palavras span{display:inline-block;margin:0 20px;position:relative;opacity:0}
-.d-risco{position:absolute;left:-10px;right:-10px;top:52%;height:12px;background:#C0392B;transform:scaleX(0);transform-origin:left}
+.d-risco{position:absolute;left:0;right:0;top:52%;height:12px;background:#C0392B;transform:scaleX(0);transform-origin:left}
 .d-veu{position:absolute;inset:0;background:rgba(0,0,0,.55)}
 .d-citacao{position:absolute;left:240px;right:240px;top:300px;text-align:center}
 .d-citacao .q{font:italic 400 66px/1.25 var(--k-display-familia)}
 .d-citacao .a{font:600 26px var(--k-corpo-familia);letter-spacing:.2em;color:var(--k-acento);text-transform:uppercase;margin-top:28px}
 .d-lista{position:absolute;left:160px;top:220px;width:1100px}
-.d-lista .i{font:500 48px var(--k-corpo-familia);padding:14px 0 14px 24px;border-left:3px solid var(--k-acento);margin-bottom:14px;background:rgba(11,10,8,.6);opacity:0}
+.d-lista .i{font:500 48px var(--k-corpo-familia);padding:14px 0 14px 24px;box-shadow:inset 3px 0 0 var(--k-acento);margin-bottom:14px;background:rgba(11,10,8,.6);opacity:0}
 .d-linha{position:absolute;left:160px;right:160px;top:640px;height:3px;background:var(--k-acento)}
 .d-marco{position:absolute;top:-14px;width:30px;height:30px;margin-left:-15px;border-radius:50%;border:3px solid var(--k-acento);background:#0b0a08;opacity:0}
 .d-marco .d{position:absolute;top:-76px;left:50%;transform:translateX(-50%);font:500 40px var(--k-mono-familia);white-space:nowrap}
@@ -108,7 +108,243 @@
     return cam;
   }
 
-  const BEATS = { camera: (ctx, b) => b.at };
+  // ---------- beats: (ctx, b, i) -> instante em que a entrada termina
+  const SLOT = { data: "canto", contador: "painel", rotulo: "rotulo", palavras: "centro", citacao: "centro",
+                 lista: "centro", linha_tempo: "centro", selo: "centro" };
+  const fora = (ctx, b) => {   // sai quando o próximo beat do mesmo slot entra, ou no fim da cena
+    const prox = ctx.beats.find((o) => o.at > b.at + 0.01 && SLOT[o.faz] && SLOT[o.faz] === SLOT[b.faz]);
+    return Math.min(prox ? prox.at - 0.1 : ctx.fim, ctx.fim) - SAIDA;
+  };
+  const sai = (ctx, e, b) => ctx.c.tl.to(e, { opacity: 0, duration: SAIDA }, fora(ctx, b));
+  const IN = (tl, e, t, de = { y: 20 }) =>
+    tl.fromTo(e, { opacity: 0, ...de }, { opacity: 1, x: 0, y: 0, duration: 0.45, ease: "power3.out", immediateRender: false }, t);
+  const mostra = (tl, e, t) => tl.fromTo(e, { opacity: 0 }, { opacity: 1, duration: 0.01, immediateRender: false }, t);
+
+  function caminho(P) {
+    if (P.length === 2) {
+      const [[x1, y1], [x2, y2]] = P, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      return `M${x1} ${y1} Q${mx - (y2 - y1) * 0.2} ${my + (x2 - x1) * 0.2} ${x2} ${y2}`;
+    }
+    let d = `M${P[0][0]} ${P[0][1]}`;
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
+      d += ` C${p1[0] + (p2[0] - p0[0]) / 6} ${p1[1] + (p2[1] - p0[1]) / 6}` +
+           ` ${p2[0] - (p3[0] - p1[0]) / 6} ${p2[1] - (p3[1] - p1[1]) / 6} ${p2[0]} ${p2[1]}`;
+    }
+    return d;
+  }
+
+  function seloSvg(tam) {
+    const s = svg("svg", { viewBox: "0 0 240 240", width: tam, height: tam });
+    const a1 = svg("circle", { cx: 120, cy: 120, r: 112, fill: "none", stroke: "#8C2F1B", "stroke-width": 10 });
+    const a2 = svg("circle", { cx: 120, cy: 120, r: 96, fill: "none", stroke: "#8C2F1B", "stroke-width": 3 });
+    const k = svg("text", { x: 120, y: 162, "text-anchor": "middle", "font-family": "K Fraunces", "font-style": "italic",
+                            "font-weight": 600, "font-size": 132, fill: "#cdbf9f" });
+    k.textContent = "K";
+    s.append(a1, a2, k);
+    return { s, aneis: [a1, a2] };
+  }
+
+  const BEATS = {
+    camera: (ctx, b) => b.at,
+
+    ponto(ctx, b) {
+      const [x, y] = ctx.pts[b.ponto], { tl } = ctx.c, r = 13 / ctx.base;
+      const dot = svg("circle", { cx: x, cy: y, r, class: "d-ponto", opacity: 0 });
+      const ping = svg("circle", { cx: x, cy: y, r, class: "d-ping", opacity: 0, "vector-effect": "non-scaling-stroke" });
+      ctx.g.append(ping, dot);
+      tl.fromTo(dot, { attr: { opacity: 0 } }, { attr: { opacity: 1 }, duration: 0.1, immediateRender: false }, b.at);
+      for (const k of [0, 0.7])
+        tl.fromTo(ping, { attr: { r, opacity: 1 } }, { attr: { r: r * 6, opacity: 0 }, duration: 0.9, ease: "power2.out",
+                  immediateRender: false }, b.at + k);
+      if (b.rotulo) {
+        const chip = el("div", "d-chip t", b.rotulo);
+        ctx.hud.appendChild(chip);
+        ctx.ancoras.push([chip, x, y, -40, -70]);
+        IN(tl, chip, b.at + 0.1, { x: -16 });
+      }
+      KIT.cue(b.at, "ping");
+      return b.at + 0.6;
+    },
+
+    rota(ctx, b) {
+      const P = [b.de, ...(b.via || []), b.para].map((n) => ctx.pts[n]);
+      const path = svg("path", { d: caminho(P), class: "d-rota", "vector-effect": "non-scaling-stroke" });
+      ctx.g.insertBefore(path, ctx.g.firstChild);
+      const L = path.getTotalLength(), dur = b.dur || 2.0, t0 = b.at;
+      path.setAttribute("stroke-dasharray", `0 ${L}`);
+      const nav = b.navio ? svg("path", { d: "M-26 6 L26 6 L18 18 L-18 18 Z M-2 6 L-2 -30 L22 2 Z M-6 6 L-6 -22 L-24 2 Z",
+                                          fill: "#EDE6D6", opacity: 0 }) : null;
+      if (nav) ctx.g.appendChild(nav);
+      let km = null;
+      if (b.km) {
+        km = el("div", "d-chip t");
+        km.style.borderLeftColor = "var(--k-acento)";
+        ctx.hud.appendChild(km);
+        const meio = path.getPointAtLength(L / 2);
+        ctx.ancoras.push([km, meio.x, meio.y, 30, -24]);
+        IN(ctx.c.tl, km, t0, { x: 0 });
+      }
+      KIT.pintor((t) => {
+        const p = easeIO(clamp((t - t0) / dur, 0, 1));
+        path.setAttribute("stroke-dasharray", `${(p * L).toFixed(1)} ${L}`);
+        if (nav) {
+          const q = path.getPointAtLength(p * L);
+          nav.setAttribute("transform", `translate(${q.x},${q.y}) scale(${(1.4 / ctx.base).toFixed(3)})`);
+          nav.setAttribute("opacity", t >= t0 && p < 1 ? 1 : 0);
+        }
+        if (km) km.textContent = `${fmt.format(Math.round(p * b.km))} km`;
+      });
+      KIT.cue(t0, "whoosh", -10);
+      return t0 + 0.5;
+    },
+
+    contador(ctx, b) {
+      const { tl } = ctx.c, pn = el("div", "d-painel t"), dur = 0.9;
+      const v = texto(el("div", "v")), l = texto(el("div", "l", b.legenda || ""));
+      pn.append(v, l);
+      const dots = [];
+      if (b.pontos) {
+        const gr = el("div", "d-pontos");
+        for (let i = 0; i < b.valor; i++) dots.push(gr.appendChild(el("i")));
+        pn.appendChild(gr);
+      }
+      ctx.hud.appendChild(pn);
+      IN(tl, pn, b.at - 0.12, { x: 60 });
+      sai(ctx, pn, b);
+      const pre = b.prefixo || "", suf = b.sufixo || "";
+      KIT.pintor((t) => {
+        const p = easeOut(clamp((t - b.at) / dur, 0, 1)), n = Math.round(dots.length * p);
+        v.textContent = `${pre}${fmt.format(Math.round(b.valor * p))}${suf}`;
+        dots.forEach((d, i) => { d.style.opacity = i < n ? "1" : ".12"; });
+      });
+      v.textContent = `${pre}${fmt.format(b.valor)}${suf}`;
+      KIT.cue(b.at, "tique");
+      return b.at + dur;
+    },
+
+    data(ctx, b) {
+      const pal = String(b.t).trim().split(/\s+/), ano = pal.pop(), { tl } = ctx.c;
+      const box = el("div", "d-data t"), m = texto(el("div", "m", pal.join(" "))), a = texto(el("div", "a", ano));
+      box.append(m, a);
+      ctx.hud.appendChild(box);
+      mostra(tl, box, b.at);
+      tl.fromTo(m, { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, b.at);
+      tl.fromTo(a, { opacity: 0, scale: 1.35, transformOrigin: "left center" },
+                { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)", immediateRender: false }, b.at + 0.3);
+      sai(ctx, box, b);
+      KIT.cue(b.at + 0.3, "carimbo");
+      return b.at + 0.65;
+    },
+
+    rotulo(ctx, b) {
+      const box = el("div", "d-rotulo t");
+      box.appendChild(texto(el("div", "n", b.nome)));
+      if (b.papel) box.appendChild(texto(el("div", "p", b.papel)));
+      ctx.hud.appendChild(box);
+      IN(ctx.c.tl, box, b.at, { x: -30 });
+      sai(ctx, box, b);
+      KIT.cue(b.at, "whoosh", -12);
+      return b.at + 0.45;
+    },
+
+    palavras(ctx, b) {
+      const box = el("div", "d-palavras t"), { tl } = ctx.c;
+      const ats = b.ats.length ? b.ats : b.palavras.map((_, i) => b.at + i * 0.3);
+      const limpa = (w) => String(w).replace(/#\d+$/, "");
+      mostra(tl, box, b.at);
+      b.palavras.forEach((w, i) => {
+        const s = texto(el("span", null, limpa(w)));
+        box.appendChild(s);
+        tl.fromTo(s, { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.22, ease: "back.out(2.5)", immediateRender: false }, ats[i]);
+        KIT.cue(ats[i], "tique", -12);
+        if (b.risco && limpa(b.risco) === limpa(w)) {
+          const r = el("b", "d-risco");
+          s.appendChild(r);
+          const tr = ats[ats.length - 1] + 0.3;
+          tl.fromTo(r, { scaleX: 0 }, { scaleX: 1, duration: 0.25, ease: "power2.out", immediateRender: false }, tr);
+          KIT.cue(tr, "impacto", -8);
+        }
+      });
+      ctx.hud.appendChild(box);
+      sai(ctx, box, b);
+      return ats[ats.length - 1] + 0.25;
+    },
+
+    citacao(ctx, b) {
+      const veu = el("div", "d-veu"), box = el("div", "d-citacao t"), { tl } = ctx.c;
+      box.append(texto(el("div", "q", `“${b.t}”`)), texto(el("div", "a", b.autor)));
+      ctx.hud.append(veu, box);
+      tl.fromTo(veu, { opacity: 0 }, { opacity: 1, duration: 0.4, immediateRender: false }, b.at);
+      IN(tl, box, b.at + 0.1);
+      sai(ctx, veu, b);
+      sai(ctx, box, b);
+      KIT.cue(b.at, "whoosh", -10);
+      return b.at + 0.55;
+    },
+
+    lista(ctx, b) {
+      const box = el("div", "d-lista t"), { tl } = ctx.c;
+      mostra(tl, box, b.at);
+      let fim = b.at;
+      b.itens.forEach((it, i) => {
+        const r = texto(el("div", "i", it.t));
+        box.appendChild(r);
+        const t = it.at != null ? it.at : b.at + i * 0.5;
+        tl.fromTo(r, { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, t);
+        KIT.cue(t, "tique", -10);
+        fim = Math.max(fim, t + 0.35);
+      });
+      ctx.hud.appendChild(box);
+      sai(ctx, box, b);
+      return fim;
+    },
+
+    linha_tempo(ctx, b) {
+      const ln = el("div", "d-linha t"), cur = el("div", "d-cursor"), { tl } = ctx.c, n = b.marcos.length;
+      ln.appendChild(cur);
+      tl.fromTo(ln, { opacity: 0, scaleX: 0, transformOrigin: "left center" },
+                { opacity: 1, scaleX: 1, duration: 0.6, ease: "power3.inOut", immediateRender: false }, b.at);
+      let fim = b.at + 0.6;
+      b.marcos.forEach((m, i) => {
+        const x = n === 1 ? 50 : 8 + (i / (n - 1)) * 84;   // 8–92%: rótulos das pontas dentro da safe area
+        const mk = el("div", "d-marco");
+        mk.style.left = `${x}%`;
+        mk.append(texto(el("div", "d", m.data)), texto(el("div", "x", m.t || "")));
+        ln.appendChild(mk);
+        const t = m.at != null ? m.at : b.at + 0.6 + i * 0.8;
+        tl.fromTo(mk, { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.3, immediateRender: false }, t);
+        tl.to(cur, { left: `${x}%`, duration: 0.4, ease: "power2.inOut" }, t - 0.1);
+        KIT.cue(t, "tique", -10);
+        fim = Math.max(fim, t + 0.3);
+      });
+      ctx.hud.appendChild(ln);
+      sai(ctx, ln, b);
+      return fim;
+    },
+
+    inserto(ctx, b) {
+      const im = el("div", "d-inserto"), { tl } = ctx.c;
+      im.style.backgroundImage = `url("${b.arquivo}")`;
+      ctx.palco.appendChild(im);
+      tl.fromTo(im, { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1.04, duration: 0.6, ease: "power2.out", immediateRender: false }, b.at);
+      tl.to(im, { scale: 1.0, duration: Math.max(0.1, ctx.fim - b.at - 0.6), ease: "none" }, b.at + 0.6);
+      KIT.cue(b.at, "whoosh", -10);
+      return b.at + 0.6;
+    },
+
+    selo(ctx, b) {
+      const box = el("div", "d-selo"), { tl } = ctx.c;
+      Object.assign(box.style, { left: `${W / 2 - 130}px`, top: "300px", width: "260px", height: "260px" });
+      box.appendChild(seloSvg(260).s);
+      ctx.hud.appendChild(box);
+      tl.fromTo(box, { opacity: 0, scale: 1.8 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power4.in", immediateRender: false }, b.at);
+      tl.to(box, { scale: 1.08, duration: 0.25, yoyo: true, repeat: 3, ease: "sine.inOut" }, b.at + 0.5);
+      sai(ctx, box, b);
+      KIT.cue(b.at + 0.35, "carimbo");
+      return b.at + 0.6;
+    },
+  };
 
   KIT.tipo("doc", (c, cena) => {
     iniciarFx();
