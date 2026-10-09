@@ -717,3 +717,22 @@ def test_montar_sem_modo_doc_nao_carrega_doc_js(tmp_path):
     p = _proj(tmp_path, _cenas())
     assert motion.montar(p)["ok"]
     assert "doc.js" not in (p / "motion" / "index.html").read_text(encoding="utf-8")
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_camera_move_entre_quadros(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = [{"faz": "camera", "para": "b", "zoom": 2.0, "s": 0.5}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        tr = lambda t: pg.evaluate("t => { __kit.ir(t); return document.querySelector('#c01 .d-cam').style.transform; }", t)
+        a, m, z = tr(0.1), tr(1.0), tr(2.5)
+        b.close()
+    assert a != m != z and "scale" in z
