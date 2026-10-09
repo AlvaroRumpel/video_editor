@@ -100,6 +100,30 @@ def _acha(ws: list[str], palavra: str, depois: int = 0) -> int | None:
     return None
 
 
+def _inicios(c: dict, lang: str) -> list:
+    """Token de início de cada beat (regra única de validar e resolver_beats): `em` → _acha;
+    sem `em`: 1º beat = 0, depois início da frase seguinte ao beat anterior (ou o mesmo token).
+    None quando `em` não está no texto ou o beat é inválido."""
+    toks = alinhar.tokens(_loc(c.get("texto"), lang) or "")
+    ws = [t["w"] for t in toks]
+    frases = [k for k, t in enumerate(toks) if t["frase"]]
+    out, ult = [], -1
+    for b in c.get("beats") or []:
+        if not isinstance(b, dict):
+            out.append(None)
+            continue
+        if b.get("em"):
+            k = _acha(ws, _loc(b["em"], lang) if isinstance(b["em"], dict) else b["em"])
+        elif ult < 0:
+            k = 0
+        else:
+            k = next((f for f in frases if f > ult), ult)
+        if k is not None:
+            ult = k
+        out.append(k)
+    return out
+
+
 def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
     mapa = ep.get("mapa") if isinstance(ep.get("mapa"), dict) else {}
     pontos = mapa.get("pontos") if isinstance(mapa.get("pontos"), dict) else {}
@@ -120,6 +144,7 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
     if not isinstance(beats, list):
         e(i, "beats precisa ser lista")
         return
+    ini = _inicios(c, lang)
     for k, b in enumerate(beats, 1):
         q = f"{i} beat {k}"
         if not isinstance(b, dict) or b.get("faz") not in FAZ:
@@ -135,8 +160,8 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
         for w in [b.get("em")] + [x.get("em") for x in sub]:
             if w and _acha(ws, w) is None:
                 e(q, f"palavra {w!r} não está no texto da cena")
-        d = (_acha(ws, b["em"]) if b.get("em") else 0) or 0
-        for w in b.get("palavras") or []:
+        d = ini[k - 1]
+        for w in (b.get("palavras") or []) if d is not None else []:
             d = _acha(ws, w, d)
             if d is None:
                 e(q, f"palavra {w!r} não está no texto da cena (na ordem do beat)")
@@ -228,20 +253,14 @@ def _ach(ws, w, c, depois=0):
 def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
     """Beats da cena localizados, com "s" = segundos desde o início da fala da cena.
     Sem "em": início da frase seguinte à do beat anterior (1º beat: início da fala)."""
-    toks = alinhar.tokens(_loc(c["texto"], lang))
-    ws = [t["w"] for t in toks]
+    ws = [t["w"] for t in alinhar.tokens(_loc(c["texto"], lang))]
     pal = palavras[c["id"]]["palavras"]
-    frases = [k for k, t in enumerate(toks) if t["frase"]]
-    out, ult = [], -1
-    for b in c.get("beats", []):
+    out = []
+    for b, k in zip(c.get("beats", []), _inicios(c, lang)):
         b = _loc(copy.deepcopy(b), lang)
-        if b.get("em"):
-            k = _ach(ws, b["em"], c)
-        elif ult < 0:
-            k = 0
-        else:
-            k = next((f for f in frases if f > ult), ult)
-        b["s"], ult = pal[k]["s"], k
+        if k is None:
+            raise ValueError(f"{c['id']}: palavra {b.get('em')!r} não encontrada no texto (rode validar)")
+        b["s"] = pal[k]["s"]
         if b["faz"] == "palavras":
             ts, d = [], k
             for w in b["palavras"]:

@@ -561,3 +561,11 @@ def test_resolver_beats_palavra_ausente_levanta():
     ep["cenas"][0]["beats"] = [{"em": "baleia", "faz": "data", "t": {"pt": "x"}}]
     with pytest.raises(ValueError, match="não encontrada"):
         narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
+
+
+def test_validar_palavras_sem_em_usa_inicio_da_frase(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["beats"] = [{"em": "junho", "faz": "data", "t": {"pt": "x"}},
+                               {"faz": "palavras", "palavras": ["chegaram"]}]
+    p = _proj(tmp_path, ep)
+    assert any("na ordem do beat" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
