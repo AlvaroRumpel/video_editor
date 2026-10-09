@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -263,3 +264,43 @@ def test_render_rascunho_nao_sobrescreve_final(tmp_path, root, mp3, monkeypatch)
     monkeypatch.setattr(motion, "render", _fake_render)
     r = narrado.render(p, "pt", rascunho=True)
     assert Path(r["video"]).name == "final_rascunho.mp4" and not (p / "pt" / "final.mp4").exists()
+
+
+def test_thumb_1280x720_com_acentos(tmp_path):
+    ep = _ep()
+    ep["thumb_texto"] = {"pt": "A explosão que ninguém viu — Sibéria, 1908"}
+    p = _proj(tmp_path, ep)
+    r = narrado.thumb(p, "pt", "assets/foto.png")
+    im = Image.open(r["png"])
+    assert im.size == (1280, 720) and len(r["linhas"]) <= 3
+
+
+def test_thumb_imagem_fora_do_projeto(tmp_path):
+    p = _proj(tmp_path)
+    with pytest.raises(ValueError, match="imagem"):
+        narrado.thumb(p, "pt", "../fora.png")
+
+
+def test_descricao_fontes_creditos_e_ia(tmp_path):
+    ep = _ep()
+    ep["descricao"] = {"pt": "Em 1908, uma explosão derrubou uma floresta inteira."}
+    ep["cenas"].append({"id": "c03", "texto": {"pt": "Imagine a cena."}, "fontes": ["F1"],
+                        "visual": {"tipo": "ia", "src": "assets/ia.png", "prompt": "floresta caída"}})
+    p = _proj(tmp_path, ep)
+    Image.new("RGB", (1600, 1000)).save(p / "assets" / "ia.png")
+    r = narrado.descricao(p, "pt")
+    md = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+    assert r == {"fontes": 1, "creditos": 1, "ia": True}
+    assert md.startswith("Em 1908") and "[F1] Smithsonian Magazine — https://www.smithsonianmag.com/x" in md
+    assert "Leonid Kulik, 1927 — https://commons.wikimedia.org/wiki/File:X.jpg (Public domain)" in md
+    assert "Conteúdo alterado ou sintético" in md
+
+
+def test_cli_validar_codigo_de_saida(tmp_path):
+    ep = _ep()
+    ep["cenas"][0]["visual"]["licenca"] = "ver página"
+    p = _proj(tmp_path, ep)
+    script = Path(narrado.__file__)
+    r = subprocess.run([sys.executable, str(script), "validar", str(p)], capture_output=True, text=True,
+                       encoding="utf-8")
+    assert r.returncode == 1 and "licença não aceita" in r.stdout

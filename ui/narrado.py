@@ -285,3 +285,120 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     legenda = out.with_suffix(".srt")
     legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
     return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"]}
+
+
+FONTE_THUMB = pipeline.ROOT / "motion" / "kit" / "fonts" / "Archivo.ttf"
+DIVULGACAO_IA = ("Divulgação: este vídeo usa imagens geradas por IA. "
+                 "No YouTube Studio: \"Conteúdo alterado ou sintético\" = Sim.")
+
+
+def _quebra(draw, txt: str, fonte, largura: int) -> list:
+    linhas, cur = [], ""
+    for p in txt.split():
+        teste = f"{cur} {p}".strip()
+        if cur and draw.textlength(teste, font=fonte) > largura:
+            linhas.append(cur)
+            cur = p
+        else:
+            cur = teste
+    return linhas + ([cur] if cur else [])
+
+
+def thumb(proj, lang: str, img: str) -> dict:
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    proj = Path(proj)
+    ep = ler(proj)
+    src = motion._dentro(proj, img)
+    if src is None:
+        raise ValueError(f"imagem não encontrada no projeto: {img!r}")
+    txt = _loc(ep.get("thumb_texto"), lang) or _loc(ep.get("titulo"), lang) or ""
+    base = ImageOps.fit(Image.open(src).convert("RGB"), (1280, 720))
+    sombra = Image.linear_gradient("L").resize((1280, 720)).point(lambda v: int(v * 0.85))
+    base.paste(Image.new("RGB", (1280, 720), "black"), (0, 0), sombra)   # escurece para baixo, onde vai o texto
+    d = ImageDraw.Draw(base)
+    tam = 104
+    while True:                                   # diminui até caber em 3 linhas
+        fonte = ImageFont.truetype(str(FONTE_THUMB), tam)
+        linhas = _quebra(d, txt.upper(), fonte, 1160)
+        if len(linhas) <= 3 or tam <= 56:
+            break
+        tam -= 8
+    y = 720 - 60 - len(linhas) * int(tam * 1.05)
+    for ln in linhas:
+        d.text((60, y), ln, font=fonte, fill="#EDE6D6", stroke_width=6, stroke_fill="black")
+        y += int(tam * 1.05)
+    dst = _dir(proj, lang) / "thumb.png"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    base.save(dst)
+    return {"png": str(dst), "linhas": linhas, "tamanho": tam}
+
+
+def descricao(proj, lang: str) -> dict:
+    proj = Path(proj)
+    ep = ler(proj)
+    achados = {a["id"]: a for a in pesquisa.parse_pesquisa(
+        (proj / "pesquisa.md").read_text(encoding="utf-8-sig"))["achados"]}
+    usadas = sorted({str(f) for c in ep["cenas"] for f in c.get("fontes", [])},
+                    key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
+    fontes = [f"[{i}] {achados[i]['fonte']} — {achados[i]['url']}" for i in usadas if i in achados]
+    creditos, vistos = [], set()
+    for c in ep["cenas"]:
+        v = c["visual"]
+        if v["tipo"] == "arquivo" and v["src"] not in vistos:
+            vistos.add(v["src"])
+            creditos.append(f"{v['credito']} — {v['fonte_url']} ({v['licenca']})")
+    ia = any(c["visual"]["tipo"] == "ia" for c in ep["cenas"])
+    partes = [_loc(ep.get("descricao"), lang) or "", "Fontes:\n" + "\n".join(fontes),
+              "Imagens:\n" + "\n".join(creditos)] + ([DIVULGACAO_IA] if ia else [])
+    dst = _dir(proj, lang) / "descricao.md"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text("\n\n".join(p for p in partes if p).strip() + "\n", encoding="utf-8")
+    return {"fontes": len(fontes), "creditos": len(creditos), "ia": ia}
+
+
+EXIT = {"ok": 0, "invalido": 1, "precisa_aprovacao": 2, "bloqueado": 3}
+
+
+def _cli(ns):
+    p = Path(ns.proj)
+    if ns.cmd == "validar":
+        erros = validar(ler(p), p, ns.lang)
+        return {"ok": not erros, "erros": erros}, (0 if not erros else 1)
+    if ns.cmd == "tts":
+        r = tts(p, ns.lang, ns.voz, root=Path(ns.root), aprovacao=ns.aprovacao)
+        return r, EXIT.get(r["status"], 4)
+    if ns.cmd == "render":
+        r = render(p, ns.lang, ns.rascunho, ns.trilha)
+        return r, (0 if r.get("ok") else 1)
+    if ns.cmd == "thumb":
+        return thumb(p, ns.lang, ns.img), 0
+    return descricao(p, ns.lang), 0
+
+
+if __name__ == "__main__":
+    import argparse
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="vídeo narrado: episodio.json → TTS por cena → motion 16:9")
+    ap.add_argument("--root", default=str(pipeline.ROOT))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for nome in ("validar", "tts", "render", "thumb", "descricao"):
+        sp = sub.add_parser(nome)
+        sp.add_argument("proj")
+        sp.add_argument("--lang", default="pt")
+        if nome == "tts":
+            sp.add_argument("--voz", required=True)
+            sp.add_argument("--aprovacao", type=int)
+        if nome == "render":
+            sp.add_argument("--rascunho", action="store_true")
+            sp.add_argument("--trilha")
+        if nome == "thumb":
+            sp.add_argument("--img", required=True)
+    ns = ap.parse_args()
+    try:
+        out, code = _cli(ns)
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
+        print(json.dumps({"erro": f"{type(e).__name__}: {e}"}, ensure_ascii=False))
+        sys.exit(4)
+    print(json.dumps(out, ensure_ascii=False))
+    sys.exit(code)
