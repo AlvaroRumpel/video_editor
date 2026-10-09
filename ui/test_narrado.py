@@ -861,3 +861,56 @@ def test_validar_em_localizado_em_itens(tmp_path):
     assert narrado.validar(narrado.ler(p), p, "pt") == []
     b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
     assert b[-1]["itens"][0]["s"] == 7.0                            # "doce" = token 14
+
+
+def _ep_acoes():
+    ep = _ep_doc()
+    ep["atores"] = {"kendall": {"traje": "capitao", "nome": {"pt": "Capitão Kendall"}},
+                    "casal": {"traje": ["medico", "menino"]}}
+    ep["cenas"][0]["beats"].append(
+        {"em": "chegaram", "faz": "acao", "modelo": "olha", "ator": "kendall", "alvo": "casal"})
+    return ep
+
+
+def test_validar_acao_ok(tmp_path):
+    p = _proj(tmp_path, _ep_acoes())
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("mut, trecho", [
+    (lambda b: b.update(modelo="explodir"), "modelo desconhecido"),
+    (lambda b: b.update(ator="fulano"), "ator 'fulano' não existe em atores"),
+    (lambda b: b.pop("alvo"), "olha precisa de alvo"),
+    (lambda b: b.update(lado="cima"), "lado"),
+    (lambda b: b.update(escala=2), "escala"),
+    (lambda b: b.update(dur=20), "dur"),
+    (lambda b: b.update(texto={"pt": "x" * 41}), "40 caracteres"),
+])
+def test_validar_acao_erros(tmp_path, mut, trecho):
+    ep = _ep_acoes()
+    mut(ep["cenas"][0]["beats"][-1])
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_acao_sem_atores_no_episodio(tmp_path):
+    ep = _ep_acoes()
+    del ep["atores"]
+    p = _proj(tmp_path, ep)
+    assert any("ator 'kendall' não existe em atores" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_anda_de_igual_a_para(tmp_path):
+    ep = _ep_acoes()
+    ep["cenas"][0]["beats"][-1].update(modelo="anda", de="esq", para="esq")
+    del ep["cenas"][0]["beats"][-1]["alvo"]
+    p = _proj(tmp_path, ep)
+    assert any("de e para iguais" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+@pytest.mark.parametrize("traje", ["pirata", [], ["civil"] * 4, 7])
+def test_validar_atores_traje_invalido(tmp_path, traje):
+    ep = _ep_acoes()
+    ep["atores"]["kendall"]["traje"] = traje
+    p = _proj(tmp_path, ep)
+    assert any("traje" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))

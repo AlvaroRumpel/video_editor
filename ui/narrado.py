@@ -33,8 +33,13 @@ MAX_CHARS_CENA = 5000  # acima disso é erro de colagem, não cena
 VISUAIS = ("arquivo", "motion", "ia")
 FAZ = {"camera": (), "rota": ("de", "para"), "ponto": ("ponto",), "contador": ("valor",), "data": ("t",),
        "rotulo": ("nome",), "palavras": ("palavras",), "citacao": ("t", "autor"), "lista": ("itens",),
-       "linha_tempo": ("marcos",), "inserto": ("src", "fonte_url", "licenca", "credito"), "selo": ()}
+       "linha_tempo": ("marcos",), "inserto": ("src", "fonte_url", "licenca", "credito"), "selo": (),
+       "acao": ("modelo",)}
 FUNDOS_DOC = ("mapa", "imagem", "escuro")
+MODELOS_ACAO = {"olha": ("ator", "alvo"), "fala": ("ator", "alvo"), "telegrama": (), "le": ("ator",),
+                "aponta": ("ator", "alvo"), "sobe_a_bordo": ("ator",), "anda": ("ator", "para")}
+TRAJES = ("capitao", "inspetor", "medico", "secretaria", "menino", "marinheiro", "civil")
+LADOS_ACAO = ("esq", "centro", "dir")
 RITMO_MAX = 6.0   # s de fala sem beat nem troca de cena
 GOOGLE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 GOOGLE_MAX_BYTES = 5000           # limite do Google por requisição (texto em UTF-8)
@@ -131,6 +136,35 @@ def _inicios(c: dict, lang: str) -> list:
     return out
 
 
+def _v_acao(b: dict, ep: dict, lang: str, e) -> None:
+    m = b.get("modelo")
+    if m not in MODELOS_ACAO:
+        return e(f"modelo desconhecido: {m!r} ({'|'.join(MODELOS_ACAO)})")
+    atores = ep.get("atores") if isinstance(ep.get("atores"), dict) else {}
+    for campo in MODELOS_ACAO[m]:
+        if campo not in b:
+            e(f"{m} precisa de {campo}")
+    for campo in ("ator", "alvo"):
+        if campo in b and b[campo] not in atores:
+            e(f"{campo} {b[campo]!r} não existe em atores")
+    if b.get("lado", "dir") not in LADOS_ACAO:
+        e(f"lado inválido: {b.get('lado')!r} ({'|'.join(LADOS_ACAO)})")
+    for campo in ("de", "para"):
+        if campo in b and b[campo] not in LADOS_ACAO:
+            e(f"{campo} precisa ser {'|'.join(LADOS_ACAO)}")
+    if b.get("de") is not None and b.get("de") == b.get("para"):
+        e("anda com de e para iguais")
+    esc = b.get("escala", 1)
+    if isinstance(esc, bool) or not isinstance(esc, (int, float)) or not 0.6 <= esc <= 1.2:
+        e("escala precisa estar entre 0,6 e 1,2")
+    d = b.get("dur")
+    if d is not None and (isinstance(d, bool) or not isinstance(d, (int, float)) or not 1 <= d <= 8):
+        e("dur precisa estar entre 1 e 8 s")
+    t = _loc(b.get("texto"), lang)
+    if isinstance(t, str) and len(t) > 40:
+        e("texto da ação com até 40 caracteres")
+
+
 def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
     mapa = ep.get("mapa") if isinstance(ep.get("mapa"), dict) else {}
     pontos = mapa.get("pontos") if isinstance(mapa.get("pontos"), dict) else {}
@@ -163,6 +197,8 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
         for campo in FAZ[b["faz"]]:
             if campo not in b:
                 e(q, f"{b['faz']} precisa de {campo}")
+        if b["faz"] == "acao":
+            _v_acao(b, ep, lang, lambda m, q=q: e(q, m))
         tipo_ruim = [x for x in ("itens", "marcos", "palavras", "via") if x in b and not isinstance(b[x], list)]
         tipo_ruim += [x for x in ("de", "para", "ponto") if x in b and not isinstance(b[x], str)]
         tipo_ruim += [x for x in ("palavras", "via") if isinstance(b.get(x), list) and not all(isinstance(w, str) for w in b[x])]
@@ -174,7 +210,7 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
             continue
         if (b["faz"] in ("rota", "ponto") or (b["faz"] == "camera" and "para" in b)) and not no_mapa:
             e(q, f"{b['faz']} só em cena com fundo mapa")
-        for nome in [b.get(x) for x in ("de", "para", "ponto")] + b.get("via", []):
+        for nome in ([] if b["faz"] == "acao" else [b.get(x) for x in ("de", "para", "ponto")] + b.get("via", [])):
             if nome is not None and nome not in pontos:
                 e(q, f"ponto {nome!r} não existe no mapa")
         sub = [x for x in (b.get("itens") or []) + (b.get("marcos") or []) if isinstance(x, dict)]
@@ -221,6 +257,16 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
             e("mapa", "mapa precisa de pontos {nome: [x, y]} em pixels do arquivo")
         if isinstance(m, dict):
             _v_arquivo(m, proj, lambda msg: e("mapa", msg))
+    at = ep.get("atores")
+    if at is not None:
+        if not isinstance(at, dict):
+            e("atores", "atores precisa ser objeto {nome: {traje}}")
+        else:
+            for nome, a in at.items():
+                tj = a.get("traje") if isinstance(a, dict) else None
+                lista = tj if isinstance(tj, list) else [tj]
+                if not 1 <= len(lista) <= 3 or not all(x in TRAJES for x in lista):
+                    e("atores", f"{nome}: traje inválido {tj!r} ({'|'.join(TRAJES)}; lista de até 3)")
     ids = {c.get("id") for c in cenas if isinstance(c, dict)}
     if "vinheta_apos" in ep and ep["vinheta_apos"] not in ids:
         e("raiz", f"vinheta_apos aponta para cena inexistente: {ep['vinheta_apos']!r}")
