@@ -556,6 +556,31 @@ def test_validar_palavras_fora_de_ordem(tmp_path):
     assert any("na ordem do beat" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
 
 
+def _ep_doc_en(pal_en):
+    ep = _ep_doc()
+    ep["titulo"]["en"] = "The Tunguska mystery"
+    ep["cenas"][0]["texto"]["en"] = "In June 1629, about 300 people arrived. There was no water. Not even fresh water."
+    ep["cenas"][1]["texto"]["en"] = "Nobody saw the explosion up close."
+    ep["cenas"][0]["beats"] = [{"faz": "palavras", "palavras": {"pt": ["não", "havia", "água"], "en": pal_en},
+                                "risco": {"pt": "água", "en": "water"}}]
+    return ep
+
+
+def test_validar_palavras_localizadas(tmp_path):
+    p = _proj(tmp_path, _ep_doc_en(["no", "water"]))
+    ep = narrado.ler(p)
+    assert narrado.validar(ep, p, "pt") == []
+    assert narrado.validar(ep, p, "en") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "en", _palavras(ep, "en"))[0]
+    assert b["palavras"] == ["no", "water"] and b["risco"] == "water"
+
+
+def test_validar_palavras_localizadas_ausente_em_en(tmp_path):
+    p = _proj(tmp_path, _ep_doc_en(["no", "baleia"]))
+    erros = narrado.validar(narrado.ler(p), p, "en")
+    assert any("'baleia'" in e["motivo"] for e in erros)
+
+
 def test_resolver_beats_palavra_ausente_levanta():
     ep = _ep_doc()
     ep["cenas"][0]["beats"] = [{"em": "baleia", "faz": "data", "t": {"pt": "x"}}]

@@ -158,6 +158,8 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
         if not isinstance(b, dict) or b.get("faz") not in FAZ:
             e(q, f"faz desconhecido: {(b.get('faz') if isinstance(b, dict) else b)!r} ({'|'.join(FAZ)})")
             continue
+        if isinstance(b.get("palavras"), dict):     # {"pt": [...], "en": [...]}, como em resolver_beats
+            b = {**b, "palavras": _loc(b["palavras"], lang)}
         for campo in FAZ[b["faz"]]:
             if campo not in b:
                 e(q, f"{b['faz']} precisa de {campo}")
