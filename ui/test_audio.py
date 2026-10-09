@@ -148,6 +148,22 @@ def test_mix_sfx_video_com_audio_e_cues_em_arquivo(video, sfx_dir, tmp_path):
     assert audio.rms_db(dst, 1.0, 2.0) > -40        # voz original preservada (ligada em 1-2 s)
 
 
+def test_mix_sfx_muitos_cues(video, sfx_dir, tmp_path, monkeypatch):
+    """300 cues, 2 sons: uma entrada por som e grafo em arquivo (limite de ~32k do Windows)."""
+    _ff("-f", "lavfi", "-i", "sine=f=2000:r=48000:d=0.2", "-ac", "2", "-c:a", "pcm_s16le", str(sfx_dir / "tic.wav"))
+    cues = [{"t": 4.0 + i * 0.0125, "som": ("pop", "tic")[i % 2], "ganho_db": -20} for i in range(300)]
+    capturado = []
+    orig = audio._atomico
+    monkeypatch.setattr(audio, "_atomico", lambda dst, args: (capturado.append(list(args)), orig(dst, args))[1])
+    dst = tmp_path / "muitos.mp4"
+    audio.mix_sfx(video, cues, sfx_dir, dst)
+    args = capturado[0]
+    assert args.count("-i") <= 2 + 2 and "-/filter_complex" in args
+    assert sum(len(a) for a in args) < 8000
+    assert abs(audio.duracao(dst) - 8.0) < 0.1
+    assert audio.rms_db(dst, 5.0, 5.4, BP2K) > audio.rms_db(dst, 0.2, 0.6, BP2K) + 20
+
+
 def test_mix_sfx_som_inexistente(video_mudo, sfx_dir, tmp_path, monkeypatch):
     chamado = []
     monkeypatch.setattr(audio, "_ff", lambda args: chamado.append(args))

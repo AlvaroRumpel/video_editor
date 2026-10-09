@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import sys
 import urllib.error
 import urllib.request
@@ -166,16 +167,36 @@ def mix_sfx(video: Path, cues, sfx_dir: Path, dst: Path) -> Path:
         args += ["-f", "lavfi", "-t", f"{dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
         n_inputs += 1
         partes.append(f"[1:a]{fmt}[base]")
+    por_som: dict[Path, list[tuple[float, float]]] = {}
+    for p, t, g in entradas:
+        por_som.setdefault(p, []).append((t, g))
     rotulos = ["[base]"]
-    for i, (p, t, g) in enumerate(entradas):
+    i = 0
+    for p, lista in por_som.items():
         args += ["-i", str(p)]
-        ms = int(round(t * 1000))
-        partes.append(f"[{n_inputs}:a]{fmt},adelay={ms}|{ms},volume={g}dB[s{i}]")
+        k = len(lista)
+        if k == 1:
+            fontes = [f"[{n_inputs}:a]"]
+        else:
+            fontes = [f"[x{n_inputs}_{j}]" for j in range(k)]
+            partes.append(f"[{n_inputs}:a]{fmt},asplit={k}{''.join(fontes)}")
+        for src, (t, g) in zip(fontes, lista):
+            ms = int(round(t * 1000))
+            pre = "" if k > 1 else f"{fmt},"
+            partes.append(f"{src}{pre}adelay={ms}|{ms},volume={g}dB[s{i}]")
+            rotulos.append(f"[s{i}]")
+            i += 1
         n_inputs += 1
-        rotulos.append(f"[s{i}]")
+    # ponytail: amix único (testado com 300 entradas); em lotes de 64 se o ffmpeg reclamar.
     partes.append("".join(rotulos) + f"amix=inputs={len(rotulos)}:duration=first:normalize=0[out]")
-    return _atomico(dst, [*args, "-filter_complex", ";".join(partes), "-map", "0:v", "-map", "[out]",
-                          "-c:v", "copy", *AAC, "-movflags", "+faststart"])
+    fd, nome = tempfile.mkstemp(suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(";".join(partes))
+        return _atomico(dst, [*args, "-/filter_complex", nome, "-map", "0:v", "-map", "[out]",
+                              "-c:v", "copy", *AAC, "-movflags", "+faststart"])
+    finally:
+        Path(nome).unlink(missing_ok=True)
 
 
 ELEVEN_SFX_URL = "https://api.elevenlabs.io/v1/sound-generation"
