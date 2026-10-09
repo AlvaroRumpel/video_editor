@@ -60,7 +60,8 @@
 .d-rotulo{position:absolute;left:120px;bottom:120px;padding-left:22px;border-left:4px solid var(--k-acento)}
 .d-rotulo .n{font:600 56px var(--k-display-familia)}
 .d-rotulo .p{font:600 24px var(--k-corpo-familia);letter-spacing:.2em;color:var(--k-acento);text-transform:uppercase;margin-top:6px}
-.d-palavras{position:absolute;left:120px;right:120px;bottom:130px;text-align:center;font:800 110px var(--k-corpo-familia);text-transform:uppercase}
+.d-palavras{position:absolute;left:120px;right:120px;top:430px;text-align:center;font:800 110px var(--k-corpo-familia);text-transform:uppercase}
+.d-palavras.c{right:700px}  /* cena com contador: fica à esquerda do painel (x>=1240) */
 .d-palavras span{display:inline-block;margin:0 20px;position:relative;opacity:0}
 .d-risco{position:absolute;left:0;right:0;top:52%;height:12px;background:#C0392B;transform:scaleX(0);transform-origin:left}
 .d-veu{position:absolute;inset:0;background:rgba(0,0,0,.55)}
@@ -270,7 +271,7 @@
     },
 
     palavras(ctx, b) {
-      const box = el("div", "d-palavras t"), { tl } = ctx.c;
+      const box = el("div", "d-palavras t" + (ctx.beats.some((o) => o.faz === "contador") ? " c" : "")), { tl } = ctx.c;
       const ats = b.ats.length ? b.ats : b.palavras.map((_, i) => b.at + i * 0.3);
       const limpa = (w) => String(w).replace(/#\d+$/, "");
       mostra(tl, box, b.at);

@@ -11,3 +11,7 @@ fora do repo).
 
 Mídia (vídeos brutos, trilhas, exports, sessões de edição) fica fora do Git —
 ver `.gitignore`.
+
+## Requisitos
+
+- ffmpeg >= 7 (`audio.mix_sfx` usa `-/filter_complex <arquivo>`)

@@ -751,6 +751,34 @@ BEATS_TODOS = [
 
 @pw
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+@pytest.mark.parametrize("com_contador", [False, True])
+def test_doc_rotulo_e_palavras_nao_se_sobrepoem(tmp_path, com_contador):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    beats = [{"faz": "rotulo", "nome": "Kieran Hosty", "papel": "mergulhador", "s": 0.2},
+             {"faz": "palavras", "palavras": ["naufrágio", "notável"], "s": 0.3, "ts": [0.3, 0.5]}]
+    if com_contador:
+        beats.append({"faz": "contador", "valor": 300, "legenda": "sobreviventes", "pontos": True, "s": 0.2})
+    d["cenas"][0]["beats"] = beats
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        sels = [".d-rotulo", ".d-palavras"] + ([".d-painel"] if com_contador else [])
+        rs = pg.evaluate("""([t, sels]) => { __kit.ir(t); return sels.map(s => {
+            const r = document.querySelector('#c01 ' + s).getBoundingClientRect();
+            return [r.left, r.top, r.right, r.bottom]; }); }""", [1.0, sels])
+        b.close()
+    for i, a in enumerate(rs):
+        for c in rs[i + 1:]:
+            assert a[2] <= c[0] or c[2] <= a[0] or a[3] <= c[1] or c[3] <= a[1], (sels, rs)
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
 def test_doc_todos_os_beats_montam_com_cues(tmp_path):
     p, d = _doc(tmp_path)
     d["cenas"][0]["beats"] = BEATS_TODOS

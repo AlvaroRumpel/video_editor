@@ -13,7 +13,7 @@ from pathlib import Path
 import budget
 import pipeline
 
-FFMPEG = "ffmpeg"
+FFMPEG = "ffmpeg"  # exige ffmpeg >= 7: mix_sfx usa -/filter_complex <arquivo>
 FFPROBE = "ffprobe"
 ROOT = pipeline.ROOT
 
