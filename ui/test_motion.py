@@ -775,3 +775,23 @@ def test_doc_citacao_longa_estoura_safe_area(tmp_path):
     (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     r = motion.montar(p)
     assert not r["ok"] and any("safe area" in e["motivo"] for e in r["erros"])
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_beats_estado_no_tempo(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = BEATS_TODOS
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        op = lambda t, sel: float(pg.evaluate(
+            "([t, s]) => { __kit.ir(t); return getComputedStyle(document.querySelector('#c01 ' + s)).opacity; }", [t, sel]))
+        ano, pal, rota = op(0.3, ".d-data .a"), op(2.4, ".d-palavras"), op(0.3, ".d-rota")
+        b.close()
+    assert ano == 0 and pal > 0.9 and rota == 0

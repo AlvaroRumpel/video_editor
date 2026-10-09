@@ -37,6 +37,7 @@
 .d-chip{position:absolute;padding:10px 20px;background:rgba(11,10,8,.85);border-left:4px solid #C0392B;font:600 26px var(--k-corpo-familia);letter-spacing:.08em;white-space:nowrap;text-transform:uppercase}
 .d-data{position:absolute;left:120px;top:90px}
 .d-data .m{font:600 32px var(--k-corpo-familia);letter-spacing:.4em;color:var(--k-acento);text-transform:uppercase}
+.d-data .m,.d-data .a{opacity:0}
 .d-data .a{font:600 140px/1 var(--k-display-familia)}
 .d-painel{position:absolute;right:120px;top:200px;width:560px;padding:32px 36px;background:rgba(11,10,8,.88);border-top:4px solid var(--k-acento)}
 .d-painel .v{font:500 140px/1 var(--k-mono-familia)}
@@ -112,10 +113,11 @@
   const SLOT = { data: "canto", contador: "painel", rotulo: "rotulo", palavras: "centro", citacao: "centro",
                  lista: "centro", linha_tempo: "centro", selo: "centro" };
   const fora = (ctx, b) => {   // sai quando o próximo beat do mesmo slot entra, ou no fim da cena
-    const prox = ctx.beats.find((o) => o.at > b.at + 0.01 && SLOT[o.faz] && SLOT[o.faz] === SLOT[b.faz]);
+    const prox = ctx.beats.filter((o) => o.at > b.at + 0.01 && SLOT[o.faz] && SLOT[o.faz] === SLOT[b.faz])
+      .sort((x, y) => x.at - y.at)[0];
     return Math.min(prox ? prox.at - 0.1 : ctx.fim, ctx.fim) - SAIDA;
   };
-  const sai = (ctx, e, b) => ctx.c.tl.to(e, { opacity: 0, duration: SAIDA }, fora(ctx, b));
+  const sai = (ctx, e, b, minimo) => ctx.c.tl.to(e, { opacity: 0, duration: SAIDA }, Math.max(fora(ctx, b), minimo));
   const IN = (tl, e, t, de = { y: 20 }) =>
     tl.fromTo(e, { opacity: 0, ...de }, { opacity: 1, x: 0, y: 0, duration: 0.45, ease: "power3.out", immediateRender: false }, t);
   const mostra = (tl, e, t) => tl.fromTo(e, { opacity: 0 }, { opacity: 1, duration: 0.01, immediateRender: false }, t);
@@ -188,6 +190,7 @@
       KIT.pintor((t) => {
         const p = easeIO(clamp((t - t0) / dur, 0, 1));
         path.setAttribute("stroke-dasharray", `${(p * L).toFixed(1)} ${L}`);
+        path.setAttribute("opacity", t >= t0 ? 1 : 0);
         if (nav) {
           const q = path.getPointAtLength(p * L);
           nav.setAttribute("transform", `translate(${q.x},${q.y}) scale(${(1.4 / ctx.base).toFixed(3)})`);
@@ -211,7 +214,7 @@
       }
       ctx.hud.appendChild(pn);
       IN(tl, pn, b.at - 0.12, { x: 60 });
-      sai(ctx, pn, b);
+      sai(ctx, pn, b, b.at + dur);
       const pre = b.prefixo || "", suf = b.sufixo || "";
       KIT.pintor((t) => {
         const p = easeOut(clamp((t - b.at) / dur, 0, 1)), n = Math.round(dots.length * p);
@@ -232,7 +235,7 @@
       tl.fromTo(m, { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.35, ease: "power3.out", immediateRender: false }, b.at);
       tl.fromTo(a, { opacity: 0, scale: 1.35, transformOrigin: "left center" },
                 { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)", immediateRender: false }, b.at + 0.3);
-      sai(ctx, box, b);
+      sai(ctx, box, b, b.at + 0.65);
       KIT.cue(b.at + 0.3, "carimbo");
       return b.at + 0.65;
     },
@@ -243,7 +246,7 @@
       if (b.papel) box.appendChild(texto(el("div", "p", b.papel)));
       ctx.hud.appendChild(box);
       IN(ctx.c.tl, box, b.at, { x: -30 });
-      sai(ctx, box, b);
+      sai(ctx, box, b, b.at + 0.45);
       KIT.cue(b.at, "whoosh", -12);
       return b.at + 0.45;
     },
@@ -267,7 +270,8 @@
         }
       });
       ctx.hud.appendChild(box);
-      sai(ctx, box, b);
+      const fimP = ats[ats.length - 1] + (b.risco ? 0.55 : 0.25);
+      sai(ctx, box, b, fimP);
       return ats[ats.length - 1] + 0.25;
     },
 
@@ -277,8 +281,8 @@
       ctx.hud.append(veu, box);
       tl.fromTo(veu, { opacity: 0 }, { opacity: 1, duration: 0.4, immediateRender: false }, b.at);
       IN(tl, box, b.at + 0.1);
-      sai(ctx, veu, b);
-      sai(ctx, box, b);
+      sai(ctx, veu, b, b.at + 0.55);
+      sai(ctx, box, b, b.at + 0.55);
       KIT.cue(b.at, "whoosh", -10);
       return b.at + 0.55;
     },
@@ -296,7 +300,7 @@
         fim = Math.max(fim, t + 0.35);
       });
       ctx.hud.appendChild(box);
-      sai(ctx, box, b);
+      sai(ctx, box, b, fim);
       return fim;
     },
 
@@ -319,7 +323,7 @@
         fim = Math.max(fim, t + 0.3);
       });
       ctx.hud.appendChild(ln);
-      sai(ctx, ln, b);
+      sai(ctx, ln, b, fim);
       return fim;
     },
 
@@ -340,7 +344,7 @@
       ctx.hud.appendChild(box);
       tl.fromTo(box, { opacity: 0, scale: 1.8 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power4.in", immediateRender: false }, b.at);
       tl.to(box, { scale: 1.08, duration: 0.25, yoyo: true, repeat: 3, ease: "sine.inOut" }, b.at + 0.5);
-      sai(ctx, box, b);
+      sai(ctx, box, b, b.at + 1.5);
       KIT.cue(b.at + 0.35, "carimbo");
       return b.at + 0.6;
     },
