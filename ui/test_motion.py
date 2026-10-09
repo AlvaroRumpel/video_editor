@@ -946,3 +946,10 @@ def test_doc_palco_contain_sobre_copia_desfocada(tmp_path):
     got = _abrir(p / "motion" / "index.html", medir, 1920, 1080)
     assert sorted(got) == [["d-img", "contain", False], ["d-img", "cover", True],
                            ["d-inserto", "contain", False], ["d-inserto", "cover", True]]
+
+
+def test_html_carrega_acoes_js_so_com_acao():
+    com = {"modo": "doc", "cenas": [{"id": "c01", "tipo": "doc", "beats": [{"faz": "acao", "modelo": "telegrama", "s": 1}]}]}
+    sem = {"modo": "doc", "cenas": [{"id": "c01", "tipo": "doc", "beats": [{"faz": "data", "t": "x", "s": 1}]}]}
+    assert "kit/acoes.js" in motion._tem_acoes_js(com) and "kit/acoes.js" not in motion._tem_acoes_js(sem)
+    assert "kit/doc.js" in motion._tem_acoes_js(sem) and motion._tem_acoes_js({"cenas": []}) == ""

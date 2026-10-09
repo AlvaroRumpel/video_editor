@@ -451,6 +451,8 @@ def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
     d = {"marca": ep["marca"], "aspecto": "16:9", "modo": "doc", "cenas": lista}
     if ep.get("mapa"):
         d["mapa"] = {"arquivo": ep["mapa"]["src"], "pontos": ep["mapa"]["pontos"]}
+    if ep.get("atores"):
+        d["atores"] = _loc(copy.deepcopy(ep["atores"]), lang)
     return d
 
 

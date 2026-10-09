@@ -396,6 +396,16 @@ def _attrs(t: dict, track: int) -> str:
     return f'data-start="{t["ini"]:.3f}" data-duration="{t["dur"]:.3f}" data-track-index="{track}"'
 
 
+def _tem_acoes_js(d: dict) -> str:
+    """<script> extra do kit para o modo doc: doc.js sempre, acoes.js só com beats `acao`."""
+    if d.get("modo") != "doc":
+        return ""
+    s = "\n" + '<script src="kit/doc.js"></script>'
+    if any(b.get("faz") == "acao" for c in d["cenas"] for b in c.get("beats", [])):
+        s += "\n" + '<script src="kit/acoes.js"></script>'
+    return s
+
+
 def _html(d: dict, tema: dict, customs: dict, tempos: dict | None) -> str:
     por_id = {c["id"]: c for c in (tempos or {}).get("cenas", [])}
     total = (tempos or {}).get("duracao", 1)
@@ -415,8 +425,8 @@ def _html(d: dict, tema: dict, customs: dict, tempos: dict | None) -> str:
     cenas_js = [{k: v for k, v in c.items() if not k.startswith("_")} for c in d["cenas"]]
     a = ASPECTOS[d["aspecto"]]
     dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js, "largura": a["w"], "altura": a["h"],
-                        "mapa": d.get("mapa")}, ensure_ascii=False).replace("</", "<\\/")
-    extra = '\n<script src="kit/doc.js"></script>' if d.get("modo") == "doc" else ""
+                        "mapa": d.get("mapa"), "atores": d.get("atores")}, ensure_ascii=False).replace("</", "<\\/")
+    extra = _tem_acoes_js(d)
     return HTML.format(css=_css_vars(tema), dur=f"{total:.3f}", cenas="\n".join(partes), dados=dados,
                        w=a["w"], h=a["h"], asp=d["aspecto"], res="landscape" if a["w"] > a["h"] else "portrait",
                        extra=extra)
@@ -474,11 +484,12 @@ def _medir(index: Path, aspecto: str = "9:16") -> dict:
                 raise RuntimeError("kit não montou: " + ("; ".join(js) or "sem erro de JS (timeout)")) from None
             pg.evaluate("document.fonts.ready.then(() => true)")
             kit = pg.evaluate("({duracao: __kit.duracao, cenas: __kit.cenas, cues: __kit.cues, erros: __kit.erros})")
+            marcas = pg.evaluate("window.__marcas || []")
             layout = []
             for c in kit["cenas"]:
                 pg.evaluate("t => __kit.ir(t)", max(c["ini"], c["ini"] + c["dur"] - c["saida"] - 0.02))
                 layout += [{"id": c["id"], "motivo": m} for m in pg.evaluate(JS_MEDIR, [c["id"], list(a["safe"])])]
-            return {**kit, "layout": layout, "js": js}
+            return {**kit, "layout": layout, "js": js, "marcas": marcas}
         finally:
             b.close()
 
@@ -509,7 +520,8 @@ def montar(proj: Path, lang: str | None = None, motion_dir: Path = MOTION) -> di
     if erros:
         return {"ok": False, "erros": erros}
     index.write_text(_html(d, tema, customs, m), encoding="utf-8")
-    pipeline.atomic_write_json(comp / "tempos.json", {"duracao": m["duracao"], "aspecto": d["aspecto"], "cenas": m["cenas"]})
+    pipeline.atomic_write_json(comp / "tempos.json", {"duracao": m["duracao"], "aspecto": d["aspecto"], "cenas": m["cenas"],
+                                         "marcas": m["marcas"]})
     cues = proj / f"cues{suf}.json"
     pipeline.atomic_write_json(cues, m["cues"])
     return {"ok": True, "duracao": m["duracao"], "erros": [], "index": str(index), "cues": str(cues),
@@ -703,6 +715,8 @@ def folha(proj: Path, lang: str | None = None) -> dict:
         pontos.append((c["id"], "final", c["ini"] + c["dur"] - c["saida"] - 0.1))
         if c["saida"]:
             pontos.append((c["id"], "saida", c["ini"] + c["dur"] - c["saida"] / 2))
+    for mk in tempos.get("marcas", []):
+        pontos.append((mk["id"], mk["rotulo"], mk["t"]))
     pontos = [(i, r, max(0.0, min(t, fim))) for i, r, t in pontos]
     tmpd = proj / "qc" / f".folha{suf}"
     shutil.rmtree(tmpd, ignore_errors=True)

@@ -961,3 +961,10 @@ def test_aviso_palavras_soltas():
     assert len(narrado.avisos_direcao(ep, "pt")) == 2
     ok = _com_beat(_ep_doc(), {"faz": "palavras", "frase": "Não havia água"})
     assert len(narrado.avisos_direcao(ok, "pt")) == 1                      # só a lista original
+
+
+def test_cenas_doc_leva_atores_localizados():
+    ep = _ep_acoes()
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
+    assert d["atores"]["kendall"]["nome"] == "Capitão Kendall" and d["atores"]["casal"]["traje"] == ["medico", "menino"]
+    assert any(b["faz"] == "acao" for b in d["cenas"][0]["beats"])
