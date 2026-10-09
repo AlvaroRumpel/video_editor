@@ -624,3 +624,39 @@ def test_render_16x9_confere_dimensao(tmp_path, sem_hf, monkeypatch):
     monkeypatch.setattr(motion, "_executar", _fake_hf(2.0))           # retrato com tempos 16:9 = erro
     with pytest.raises(RuntimeError, match="dimensão 1080x1920"):
         motion.render(p)
+
+
+@pw
+def test_dur_piso_estica_ate_o_minimo(tmp_path):
+    d = _cenas()
+    d["cenas"][0].update(dur=0.5, dur_piso=True)
+    r = motion.montar(_proj(tmp_path, d))
+    assert r["ok"], r["erros"]
+    assert r["cenas"][0]["dur"] > 0.5
+
+
+def test_validar_dur_piso_e_ajuste(tmp_path):
+    d = _cenas()
+    d["cenas"][0]["dur_piso"] = "sim"
+    d["cenas"].insert(1, {"id": "c09", "tipo": "tela", "arquivo": "x.png", "ajuste": "esticar"})
+    (tmp_path / "x.png").write_bytes(b"\x89PNG")
+    motivos = [e["motivo"] for e in motion.validar(d, tmp_path)]
+    assert "dur_piso precisa ser true/false" in motivos and any("ajuste inválido" in m for m in motivos)
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_tela_contain_com_fundo_desfocado(tmp_path):
+    d = {"marca": "dark-historia", "aspecto": "16:9", "cenas": [
+        {"id": "c01", "tipo": "tela", "arquivo": "jornal.png", "moldura": "nenhuma", "ajuste": "contain", "dur": 3.0}]}
+    p = _proj(tmp_path, d)
+    _ff("-f", "lavfi", "-i", "testsrc2=s=800x1200:d=1", "-frames:v", "1", str(p / "jornal.png"))
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+
+    def medir(pg):
+        pg.evaluate("t => __kit.ir(t)", 2.0)
+        return pg.evaluate("""(() => { const cx = document.querySelector('#c01 .k-midia-caixa');
+          return {fit: getComputedStyle(cx.querySelector('img.k-midia:not(.k-midia-fundo)')).objectFit,
+                  fundo: cx.querySelectorAll('img.k-midia-fundo').length}; })()""")
+    assert _abrir(p / "motion" / "index.html", medir, 1920, 1080) == {"fit": "contain", "fundo": 1}

@@ -231,6 +231,13 @@
       alvo.appendChild(m);
       Object.assign(m.style, { left: "0", top: "0", width: "100%", height: "100%" });
       px(alvo, MOLDURA[cena.moldura] || [0, 0, c.W, c.H]);
+      if (cena.ajuste === "contain") {   // imagem inteira (retrato, jornal) sobre cópia desfocada dela mesma
+        m.style.objectFit = "contain";
+        const fundo = m.cloneNode();
+        fundo.classList.add("k-midia-fundo");
+        Object.assign(fundo.style, { objectFit: "cover", filter: "blur(40px) brightness(.45)", transform: "scale(1.1)" });
+        alvo.insertBefore(fundo, m);
+      }
     } else {
       px(m, MOLDURA[cena.moldura] || [0, 0, c.W, c.H]);
       m.style.borderRadius = raio;
@@ -405,7 +412,10 @@
       let dur = min;
       if (cena.dur != null) {
         dur = quadro(cena.dur);
-        if (dur + 1e-6 < min) erros.push({ id: cena.id, motivo: `dur ${cena.dur}s abaixo do mínimo ${min.toFixed(2)}s` });
+        if (dur + 1e-6 < min) {
+          if (cena.dur_piso) dur = min;   // dur é piso (vídeo narrado): estica até caber a animação
+          else erros.push({ id: cena.id, motivo: `dur ${cena.dur}s abaixo do mínimo ${min.toFixed(2)}s` });
+        }
       }
       tl.set(layer, { visibility: "visible" }, ini).set(layer, { visibility: "hidden" }, ini + dur);
       if (entra) TRANS[entra.transicao](tl, layer, ini, entra.dur, tema);

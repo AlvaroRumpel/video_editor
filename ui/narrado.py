@@ -61,7 +61,8 @@ def _achados(proj: Path) -> set | None:
     return {a["id"] for a in pesquisa.parse_pesquisa(p.read_text(encoding="utf-8-sig"))["achados"]}
 
 
-def validar(ep: dict, proj: Path, lang: str) -> list[dict]:
+def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]:
+    """visuais=False: só texto e fontes (TTS roda antes de escolher as imagens)."""
     erros = []
 
     def e(i, m):
@@ -98,6 +99,8 @@ def validar(ep: dict, proj: Path, lang: str) -> list[dict]:
         elif achados is not None:
             for x in sorted(set(map(str, f)) - achados):
                 e(i, f"fonte [{x}] não existe no pesquisa.md")
+        if not visuais:
+            continue
         v = c.get("visual") if isinstance(c.get("visual"), dict) else {}
         t = v.get("tipo")
         if t in ("arquivo", "ia"):
@@ -132,6 +135,7 @@ def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict) -> dict:
         k = {"id": c["id"], **k}
         saida = 0.0 if n == len(cenas) - 1 else (k.get("saida") or tema["transicao_padrao"])["dur"]
         k["dur"] = round(entra + duracoes[c["id"]] + PAUSA + saida, 3)
+        k["dur_piso"] = True     # fala curta: o kit estica até o mínimo da animação; a voz segue os tempos medidos
         out.append(k)
         entra = saida
     return {"marca": ep["marca"], "aspecto": "16:9", "cenas": out}
@@ -155,7 +159,7 @@ def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None) -> dict:
     if not motion._str(voice_id):
         raise ValueError("voice_id vazio: configurar canal/idiomas.json")
     ep = ler(proj)
-    erros = validar(ep, proj, lang)
+    erros = validar(ep, proj, lang, visuais=False)
     if erros:
         return {"status": "invalido", "erros": erros}
     st = estado(proj, lang)
@@ -190,7 +194,7 @@ def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None) -> dict:
             usados += len(txt)          # crédito gasto no fetch: conta antes de gravar
             (pasta / f"{cid}.mp3").write_bytes(dados)
             rel = f"{lang}/audio/{cid}.mp3"
-            st[cid] = {"hash": h, "audio": rel, "dur": round(audio.duracao(proj / rel), 3)}
+            st[cid] = {"hash": h, "voz": voice_id, "audio": rel, "dur": round(audio.duracao(proj / rel), 3)}
             geradas.append(cid)
     finally:
         try:
@@ -232,11 +236,26 @@ def srt(ep: dict, lang: str, tempos: dict, st: dict) -> str:
 def escrever_cenas(proj: Path, lang: str) -> Path:
     proj = Path(proj)
     ep = ler(proj)
+    erros = validar(ep, proj, lang)
+    if erros:
+        raise ValueError("episódio inválido: " + "; ".join(f"{e['id']}: {e['motivo']}" for e in erros))
     st = estado(proj, lang)
-    faltam = [c["id"] for c in ep["cenas"] if c["id"] not in st or not (proj / st[c["id"]]["audio"]).is_file()]
+
+    def em_dia(c) -> bool:          # áudio existe e é do texto/voz atuais
+        s = st.get(c["id"])
+        return (bool(s) and (proj / s.get("audio", "-")).is_file()
+                and s.get("hash") == dublagem._hash(s.get("voz", ""), _loc(c["texto"], lang).strip()))
+    faltam = [c["id"] for c in ep["cenas"] if not em_dia(c)]
     if faltam:
-        raise ValueError(f"rode tts antes: sem áudio em {', '.join(faltam)}")
+        raise ValueError(f"rode tts antes: áudio ausente ou desatualizado em {', '.join(faltam)}")
     d = cenas_motion(ep, lang, {k: v["dur"] for k, v in st.items()}, motion.carregar_tema(ep["marca"]))
+    from PIL import Image
+    for k in d["cenas"]:
+        if k["tipo"] == "tela" and Path(k["arquivo"]).suffix.lower() in motion.EXT_IMG:
+            with Image.open(proj / k["arquivo"]) as im:
+                w, h = im.size
+            if w / h < 1.2:
+                k["ajuste"] = "contain"     # retrato/jornal: inteiro sobre fundo desfocado, sem corte
     dst = proj / f"cenas.{lang}.json"
     pipeline.atomic_write_json(dst, d)
     return dst

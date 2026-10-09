@@ -100,7 +100,7 @@ def test_cenas_motion_duracoes_e_tipos():
     assert d["marca"] == "dark-historia" and d["aspecto"] == "16:9"
     c1, c2 = d["cenas"]
     assert c1 == {"id": "c01", "tipo": "tela", "arquivo": "assets/foto.png", "moldura": "nenhuma",
-                  "kenburns": True, "label": "Sibéria, 1908", "dur": 3.85}     # 0 + 3.0 + 0.4 + 0.45
+                  "kenburns": True, "label": "Sibéria, 1908", "dur": 3.85, "dur_piso": True}     # 0 + 3.0 + 0.4 + 0.45
     assert c2["tipo"] == "frase" and c2["linhas"][0]["t"] == "Ninguém viu."
     assert c2["dur"] == 2.85                                                    # 0.45 + 2.0 + 0.4 + 0
 
@@ -165,7 +165,7 @@ def test_tts_regenera_so_a_cena_editada(tmp_path, root, mp3):
 
 def test_tts_invalido_nao_gasta(tmp_path, root, mp3):
     ep = _ep()
-    ep["cenas"][0]["visual"]["licenca"] = "CC BY-NC 4.0"
+    ep["cenas"][0]["fontes"] = ["F9"]                       # erro de texto/fonte bloqueia TTS
     p, ch = _proj(tmp_path, ep), []
     r = narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, ch))
     assert r["status"] == "invalido" and ch == []
@@ -304,3 +304,48 @@ def test_cli_validar_codigo_de_saida(tmp_path):
     r = subprocess.run([sys.executable, str(script), "validar", str(p)], capture_output=True, text=True,
                        encoding="utf-8")
     assert r.returncode == 1 and "licença não aceita" in r.stdout
+
+
+# --- revisão final ---
+
+@ffmpeg
+def test_tts_antes_dos_visuais(tmp_path, root, mp3):
+    ep = _ep()
+    ep["cenas"][0]["visual"] = {"tipo": "arquivo"}          # só sugestão: imagem ainda não escolhida
+    p = _proj(tmp_path, ep)
+    r = narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    assert r["status"] == "ok" and r["geradas"] == ["c01", "c02"]
+
+
+@ffmpeg
+def test_render_recusa_audio_velho_apos_editar_texto(tmp_path, root, mp3):
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    ep = narrado.ler(p)
+    ep["cenas"][1]["texto"]["pt"] = "Texto novo depois do gate."
+    (p / "episodio.json").write_text(json.dumps(ep, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="rode tts.*c02"):
+        narrado.escrever_cenas(p, "pt")
+
+
+@ffmpeg
+def test_render_revalida_visuais(tmp_path, root, mp3):
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    ep = narrado.ler(p)
+    ep["cenas"][0]["visual"]["licenca"] = "CC BY-NC 4.0"
+    (p / "episodio.json").write_text(json.dumps(ep, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="licença não aceita"):
+        narrado.escrever_cenas(p, "pt")
+
+
+@ffmpeg
+def test_escrever_cenas_retrato_usa_contain(tmp_path, root, mp3):
+    p = _proj(tmp_path)
+    Image.new("RGB", (800, 1200), "gray").save(p / "assets" / "foto.png")      # jornal em pé
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    d = json.loads(narrado.escrever_cenas(p, "pt").read_text(encoding="utf-8"))
+    assert d["cenas"][0]["ajuste"] == "contain" and d["cenas"][0]["dur_piso"] is True
+    Image.new("RGB", (1600, 1000), "gray").save(p / "assets" / "foto.png")     # paisagem
+    d = json.loads(narrado.escrever_cenas(p, "pt").read_text(encoding="utf-8"))
+    assert "ajuste" not in d["cenas"][0]

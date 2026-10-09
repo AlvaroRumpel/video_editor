@@ -35,6 +35,7 @@ DESTAQUES = ("marca-texto", "risco", "assinatura")
 TRANSICOES = ("fade", "wipe", "iris")
 MOLDURAS = ("celular", "browser", "nenhuma")
 MARCADORES = ("numero", "assinatura", "check")
+AJUSTES = ("cover", "contain")
 EXT_IMG = (".png", ".jpg", ".jpeg")
 EXT_VID = (".mp4",)
 ID_RE = re.compile(r"c[0-9]{2,}")
@@ -145,6 +146,8 @@ def _v_tela(c, proj, e):
         e("label precisa ser texto")
     if "kenburns" in c and not isinstance(c["kenburns"], bool):
         e("kenburns precisa ser true/false")
+    if c.get("ajuste", "cover") not in AJUSTES:
+        e(f"ajuste inválido: {c['ajuste']!r} (cover|contain)")
 
 def _v_endcard(c, proj, e, lang=None):
     for k in ("cta", "tagline", "url"):
@@ -200,6 +203,8 @@ def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
             e(i, "dur precisa ser número > 0")
         if "fixos" in c and not isinstance(c["fixos"], bool):
             e(i, "fixos precisa ser true/false")
+        if "dur_piso" in c and not isinstance(c["dur_piso"], bool):
+            e(i, "dur_piso precisa ser true/false")
         if "saida" in c:
             s = c["saida"]
             if n == len(cenas) - 1:
