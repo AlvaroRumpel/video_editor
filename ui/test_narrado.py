@@ -292,7 +292,7 @@ def test_descricao_fontes_creditos_e_ia(tmp_path):
     md = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
     assert r == {"fontes": 1, "creditos": 1, "ia": True}
     assert md.startswith("Em 1908") and "[F1] Smithsonian Magazine — https://www.smithsonianmag.com/x" in md
-    assert "Leonid Kulik, 1927 — https://commons.wikimedia.org/wiki/File:X.jpg (Public domain)" in md
+    assert "Leonid Kulik, 1927 (Public domain) — https://commons.wikimedia.org/wiki/File:X.jpg" in md
     assert "Conteúdo alterado ou sintético" in md
 
 
@@ -311,6 +311,30 @@ def test_descricao_en_titulos_e_trilha(tmp_path):
     assert "Fontes:" not in md and "AI-generated images" in md
     narrado.descricao(p, "pt")
     assert "Música:" not in (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+
+
+def test_ids_compactos():
+    assert narrado._ids(["F1", "F2", "F3", "F7", "F9", "F10"]) == "F1–F3, F7, F9–F10"
+    assert narrado._ids(["F4"]) == "F4"
+
+
+def test_descricao_agrupa_fontes_sem_licenca_duplicada_e_cabe_no_youtube(tmp_path, monkeypatch):
+    ep = _ep()
+    ep["cenas"][0]["fontes"] = ["F1", "F2", "F3", "F5"]
+    for k in range(25):
+        ep["cenas"].append({"id": f"x{k}", "texto": {"pt": "x"}, "fontes": [], "visual": {
+            "tipo": "arquivo", "src": "assets/foto.png", "licenca": "CC BY-SA 4.0",
+            "fonte_url": f"https://commons.wikimedia.org/wiki/File:Um_nome_bem_comprido_de_arquivo_{k}_Batavia_wreck.jpg",
+            "credito": "Guy de la Bedoyere — CC BY-SA 4.0" if k % 2 else "Vunz"}})
+    p = _proj(tmp_path, ep)
+    a = lambda i: {"id": f"F{i}", "fonte": "Smithsonian", "url": "https://s/x"}
+    monkeypatch.setattr(narrado.pesquisa, "parse_pesquisa", lambda _t: {"achados": [a(i) for i in (1, 2, 3, 5)]})
+    narrado.descricao(p, "pt")
+    md = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+    assert md.count("https://s/x") == 1 and "[F1–F3, F5] Smithsonian — https://s/x" in md
+    assert "CC BY-SA 4.0 — CC BY-SA 4.0" not in md and "(CC BY-SA 4.0) — " in md   # Vunz: licença só 1x
+    assert "Guy de la Bedoyere — CC BY-SA 4.0 — " in md and "CC BY-SA 4.0 (CC BY-SA 4.0)" not in md
+    assert len(md.encode("utf-8")) < 5000
 
 
 def test_cli_validar_codigo_de_saida(tmp_path):
@@ -717,7 +741,7 @@ def test_descricao_inclui_creditos_de_mapa_fundo_e_inserto(tmp_path):
     p = _proj(tmp_path, ep)
     narrado.descricao(p, "pt")
     txt = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
-    assert "Blaeu, 1650" in txt and "Museu — https://ins (CC BY 4.0)" in txt
+    assert "Blaeu, 1650" in txt and "Museu (CC BY 4.0) — https://ins" in txt
 
 
 @ffmpeg

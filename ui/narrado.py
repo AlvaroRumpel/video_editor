@@ -767,6 +767,18 @@ def thumb(proj, lang: str, img: str) -> dict:
     return {"png": str(dst), "linhas": linhas, "tamanho": tam}
 
 
+def _ids(ids: list) -> str:
+    """["F1","F2","F3","F7"] -> "F1–F3, F7" (runs consecutivas viram intervalo)."""
+    runs = []   # [id inicial, último nº, nº inicial]
+    for i in ids:
+        n = int(i[1:]) if i[1:].isdigit() else None
+        if runs and n is not None and runs[-1][1] == n - 1:
+            runs[-1][1] = n
+        else:
+            runs.append([i, n, n])
+    return ", ".join(r[0] if r[1] == r[2] else f"{r[0]}–F{r[1]}" for r in runs)
+
+
 def descricao(proj, lang: str, trilhas=None) -> dict:
     proj = Path(proj)
     ep = ler(proj)
@@ -774,12 +786,18 @@ def descricao(proj, lang: str, trilhas=None) -> dict:
         (proj / "pesquisa.md").read_text(encoding="utf-8-sig"))["achados"]}
     usadas = sorted({str(f) for c in ep["cenas"] for f in c.get("fontes", [])},
                     key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
-    fontes = [f"[{i}] {achados[i]['fonte']} — {achados[i]['url']}" for i in usadas if i in achados]
+    grupos = {}   # (fonte, url) -> ids; uma linha por URL
+    for i in usadas:
+        if i in achados:
+            grupos.setdefault((achados[i]["fonte"], achados[i]["url"]), []).append(i)
+    fontes = [f"[{_ids(ids)}] {f} — {u}" for (f, u), ids in grupos.items()]
     creditos = []
 
     def credita(d):
         if d and d.get("src") and d.get("credito"):
-            linha = f"{d['credito']} — {d['fonte_url']} ({d['licenca']})"
+            lic = d["licenca"]
+            linha = (f"{d['credito']} — {d['fonte_url']}" if lic in d["credito"]
+                     else f"{d['credito']} ({lic}) — {d['fonte_url']}")
             if linha not in creditos:
                 creditos.append(linha)
     credita(ep.get("mapa"))
@@ -804,7 +822,10 @@ def descricao(proj, lang: str, trilhas=None) -> dict:
         partes.append(t_musica + "\n" + "\n\n".join(musica))
     dst = _dir(proj, lang) / "descricao.md"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text("\n\n".join(p for p in partes if p).strip() + "\n", encoding="utf-8")
+    txt = "\n\n".join(p for p in partes if p).strip() + "\n"
+    if len(txt.encode("utf-8")) > 5000:   # limite do YouTube; último recurso: URL do Commons vira "commons: File:x"
+        txt = re.sub(r"https://commons\.wikimedia\.org/wiki/(File:\S+)", r"commons: \1", txt)
+    dst.write_text(txt, encoding="utf-8")
     return {"fontes": len(fontes), "creditos": len(creditos), "ia": ia}
 
 
