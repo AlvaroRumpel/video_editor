@@ -34,3 +34,9 @@ ui/cache/
 
 # Kit de motion: dependências Node (npm ci em motion/)
 motion/node_modules/
+
+# Saída gerada pelo motion.py montar nas amostras
+motion/amostras/*/motion/
+motion/amostras/*/cues.json
+motion/amostras/*/qc/
+motion/amostras/*/video*.mp4
