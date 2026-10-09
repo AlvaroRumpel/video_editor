@@ -61,8 +61,8 @@ Gate 1 continua só texto + fontes. A direção visual é avaliada no Gate 2.
   tokens; palavras do roteiro sem par herdam tempo interpolado entre vizinhas
   casadas. Saída: tempo de **cada palavra do roteiro**, não da transcrição.
 - Grava `<proj>/<lang>/palavras.json`:
-  `{"cNN": [{"w": "trezentas", "i": 7, "s": 4.34, "e": 4.66}, ...]}`
-  (tempos relativos ao início do áudio da cena; `i` = índice do token no texto).
+  `{"cNN": {"hash": "<hash do tts>", "palavras": [{"w": "300", "s": 4.34, "e": 4.66}, ...]}}`
+  (um item por token de `alinhar.tokens(texto)`, na mesma ordem; tempos relativos ao início do áudio da cena).
 - Cache por hash do mp3: só realinha cena cujo áudio mudou.
 - CLI: `python ui/narrado.py alinhar <proj> [--lang pt]`.
 - Dependência: `faster-whisper` em `requirements.txt`; primeira execução baixa
@@ -115,6 +115,7 @@ Feita pela sessão depois do Gate 1. Campos novos (todos opcionais; cena sem
 | `lista` | `itens` [{`t`, `em`}] | cada item entra na sua palavra |
 | `linha_tempo` | `marcos` [{`data`, `t`, `em`}] | datas numa linha, marcador anda |
 | `inserto` | `src` + licença | troca a imagem de fundo dentro da cena |
+| `selo` | — | selo K da marca pulsando (chamada final) |
 
 Câmera nunca parada: entre beats, deriva lenta contínua (escala e posição).
 
