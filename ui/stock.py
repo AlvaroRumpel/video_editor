@@ -218,7 +218,7 @@ def _wikimedia(termo, tipo, n, k, fetch):
         for info in pg.get("imageinfo", []):
             if not info.get("url"):
                 continue
-            ext = info["url"].rsplit(".", 1)[-1].lower()
+            ext = urllib.parse.urlparse(info["url"]).path.rsplit(".", 1)[-1].lower()   # Commons anexa ?utm_...
             em = info.get("extmetadata", {})
             out.append({"fonte": "wikimedia", "id": pg["title"].replace("File:", ""), "autor": html.unescape(re.sub(r"<[^>]+>", "", em.get("Artist", {}).get("value", ""))).strip() or "(autor não informado)",
                         "url": info.get("descriptionurl", ""), "licenca": em.get("LicenseShortName", {}).get("value", "ver página"),
