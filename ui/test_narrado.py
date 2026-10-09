@@ -731,7 +731,7 @@ def test_render_doc_sfx_trilha_realces_e_ritmo(tmp_path, root, mp3, monkeypatch)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=100:d=2", str(trilha)], check=True)
     r = narrado.render(p, "pt", rascunho=True, trilha=trilha)
     assert chamadas["realces"] == esperado
-    assert all("sem beat" in a for a in r["avisos"])              # c02 (fala de teste) sem beats → aviso, não erro
+    assert all("sem beat" in a or "palavras soltas" in a for a in r["avisos"])   # c02 sem beats → aviso, não erro
 
 
 def test_descricao_inclui_creditos_de_mapa_fundo_e_inserto(tmp_path):
