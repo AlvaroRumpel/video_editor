@@ -569,3 +569,110 @@ def test_validar_palavras_sem_em_usa_inicio_da_frase(tmp_path):
                                {"faz": "palavras", "palavras": ["chegaram"]}]
     p = _proj(tmp_path, ep)
     assert any("na ordem do beat" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_cenas_motion_doc_vinheta_telafinal_transicoes():
+    ep = _ep_doc()
+    ep["cenas"][1]["fundo"] = {"tipo": "imagem", "src": "assets/foto.png", "fonte_url": "https://x", "licenca": "CC0",
+                               "credito": "x"}
+    ep["cenas"][1]["beats"] = [{"faz": "rotulo", "nome": {"pt": "Pelsaert"}}]
+    tema = motion.carregar_tema("dark-historia")
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))
+    assert d["modo"] == "doc" and d["mapa"] == {"arquivo": "assets/foto.png", "pontos": ep["mapa"]["pontos"]}
+    assert [c["id"] for c in d["cenas"]] == ["c01", "c900", "c02", "c901"]
+    c01, vin, c02, fim = d["cenas"]
+    assert c01["tipo"] == "doc" and c01["palco"] == {"tipo": "mapa"} and c01["beats"][2]["s"] == 3.0
+    assert vin["tipo"] == "vinheta" and vin["titulo"] == ep["titulo"]["pt"]
+    assert c02["palco"] == {"tipo": "imagem", "arquivo": "assets/foto.png"}
+    assert fim["tipo"] == "telafinal" and fim["textos"]["inscreva"] == "inscreva-se" and "saida" not in fim
+    assert c01["saida"]["transicao"] == "fade" and vin["saida"] == {"transicao": "fade", "dur": 0.6}
+    assert c01["dur"] == round(9.0 + narrado.PAUSA + 0.3, 3)               # sem entrada, saída 0.3
+    assert vin["dur"] == round(0.3 + narrado.VINHETA_DUR + 0.6, 3) and fim["dur"] == round(0.3 + narrado.TELAFINAL_DUR, 3)
+
+
+def test_transicao_automatica():
+    k = lambda t: {"tipo": "doc", "palco": {"tipo": t}}
+    assert narrado._transicao(k("mapa"), k("imagem"))["transicao"] == "mergulho"
+    assert narrado._transicao(k("imagem"), k("mapa"))["transicao"] == "recuo"
+    assert narrado._transicao(k("imagem"), k("imagem"))["transicao"] == "corte"
+    assert narrado._transicao(k("escuro"), {"tipo": "vinheta"})["transicao"] == "fade"
+    assert narrado._transicao({"tipo": "vinheta"}, k("imagem")) == {"transicao": "fade", "dur": 0.6}
+
+
+def test_cenas_motion_doc_sem_vinheta_nem_mapa():
+    ep = _ep_doc()
+    ep.pop("vinheta_apos")
+    ep.pop("mapa")
+    ep["cenas"][0]["fundo"] = {"tipo": "escuro"}
+    ep["cenas"][0]["beats"] = [{"faz": "rotulo", "nome": {"pt": "x"}}]
+    d = narrado.cenas_motion(ep, "pt", {"c01": 2.0, "c02": 2.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
+    assert [c["id"] for c in d["cenas"]] == ["c01", "c02", "c901"] and "mapa" not in d
+
+
+def test_cena_motion_antiga_segue_no_modo_doc():
+    ep = _ep_doc()
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
+    c02 = next(c for c in d["cenas"] if c["id"] == "c02")
+    assert c02["tipo"] == "frase"           # cena motion antiga, sem beats, segue como era
+
+
+def test_escrever_cenas_doc_exige_alinhar_em_dia(tmp_path, root, mp3):
+    p = _proj(tmp_path, _ep_doc())
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    with pytest.raises(ValueError, match="rode alinhar"):
+        narrado.escrever_cenas(p, "pt")
+    st = narrado.estado(p, "pt")
+    pal = _palavras(narrado.ler(p))
+    for cid in pal:
+        pal[cid]["hash"] = st[cid]["hash"]
+    pal["c02"]["hash"] = "velho"                       # texto mudou depois do alinhar
+    (p / "pt" / "palavras.json").write_text(json.dumps(pal), encoding="utf-8")
+    with pytest.raises(ValueError, match="rode alinhar.*c02"):
+        narrado.escrever_cenas(p, "pt")
+
+
+def _alinhado(p):
+    st = narrado.estado(p, "pt")
+    pal = _palavras(narrado.ler(p))
+    for cid in pal:
+        pal[cid]["hash"] = st[cid]["hash"]
+    (p / "pt" / "palavras.json").write_text(json.dumps(pal), encoding="utf-8")
+
+
+@ffmpeg
+def test_render_doc_sfx_trilha_realces_e_ritmo(tmp_path, root, mp3, monkeypatch):
+    p = _proj(tmp_path, _ep_doc())
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    _alinhado(p)
+    chamadas = {}
+
+    def fake_render(proj, rascunho=False, lang=None, motion_dir=None):
+        r = _fake_render(proj, rascunho, lang, motion_dir)
+        (proj / f"cues.{lang}.json").write_text(json.dumps([{"t": 0.5, "som": "ping", "ganho_db": -6}]), encoding="utf-8")
+        return r
+    monkeypatch.setattr(motion, "render", fake_render)
+    monkeypatch.setattr(audio, "sfx_kit", lambda d: [], raising=False)   # existe só após o Task 9
+    monkeypatch.setattr(audio, "mix_sfx", lambda v, cues, d, dst: (chamadas.setdefault("sfx", cues), shutil.copy2(v, dst))[1])
+    monkeypatch.setattr(audio, "mix_trilha", lambda v, t, dst, realces=(): (chamadas.setdefault("realces", realces),
+                                                                            shutil.copy2(v, dst))[1])
+    with pytest.raises(ValueError, match="trilha"):
+        narrado.render(p, "pt")                                   # final sem trilha
+    r = narrado.render(p, "pt", rascunho=True)
+    assert r["ok"] and Path(chamadas["sfx"]).name == "cues.pt.json"
+    tempos = json.loads((p / "motion.pt" / "tempos.json").read_text(encoding="utf-8"))
+    esperado = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
+    trilha = tmp_path / "t.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=100:d=2", str(trilha)], check=True)
+    r = narrado.render(p, "pt", rascunho=True, trilha=trilha)
+    assert chamadas["realces"] == esperado
+    assert all("sem beat" in a for a in r["avisos"])              # c02 (fala de teste) sem beats → aviso, não erro
+
+
+def test_descricao_inclui_creditos_de_mapa_fundo_e_inserto(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][1]["beats"] = [{"faz": "inserto", "src": "assets/foto.png", "fonte_url": "https://ins",
+                                "licenca": "CC BY 4.0", "credito": "Museu"}]
+    p = _proj(tmp_path, ep)
+    narrado.descricao(p, "pt")
+    txt = (p / "pt" / "descricao.md").read_text(encoding="utf-8")
+    assert "Blaeu, 1650" in txt and "Museu — https://ins (CC BY 4.0)" in txt

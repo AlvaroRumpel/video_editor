@@ -24,6 +24,11 @@ import alinhar  # noqa: E402
 
 LANG_RE = re.compile(r"[a-z]{2}")
 PAUSA = 0.4            # respiro depois da fala de cada cena
+VINHETA_DUR = 4.0
+TELAFINAL_DUR = 20.0
+TEXTOS_FIM = {"pt": {"prox": "Próxima história", "inscreva": "inscreva-se", "video": "próximo vídeo"},
+              "en": {"prox": "Next story", "inscreva": "subscribe", "video": "next video"}}
+SFX_DIR = pipeline.ROOT / "motion" / "sfx"
 MAX_CHARS_CENA = 5000  # acima disso é erro de colagem, não cena
 VISUAIS = ("arquivo", "motion", "ia")
 FAZ = {"camera": (), "rota": ("de", "para"), "ponto": ("ponto",), "contador": ("valor",), "data": ("t",),
@@ -281,8 +286,82 @@ def ritmo(cid: str, beats: list[dict], dur: float) -> list[str]:
     return [f"{cid}: {a:.1f}–{b:.1f} s sem beat" for a, b in zip(ts, ts[1:]) if b - a > RITMO_MAX]
 
 
-def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict) -> dict:
+def modo_doc(ep: dict) -> bool:
+    return any(c.get("beats") for c in ep.get("cenas", []))
+
+
+def _palco(c: dict) -> dict | None:
+    f = c.get("fundo")
+    if f:
+        return {"tipo": "imagem", "arquivo": f["src"]} if f["tipo"] == "imagem" else {"tipo": f["tipo"]}
+    v = c["visual"]
+    return {"tipo": "imagem", "arquivo": v["src"]} if v["tipo"] in ("arquivo", "ia") else None
+
+
+def _beat_kit(b: dict) -> dict:
+    k = {key: v for key, v in b.items() if key != "em"}
+    if k["faz"] == "inserto":
+        k["arquivo"] = k.pop("src")
+        for x in ("fonte_url", "licenca", "credito"):
+            k.pop(x, None)
+    for lst in ("itens", "marcos"):
+        if lst in k:
+            k[lst] = [{"t": x} if isinstance(x, str) else {kk: vv for kk, vv in x.items() if kk != "em"} for x in k[lst]]
+    return k
+
+
+def _transicao(a: dict, b: dict) -> dict:
+    if a["tipo"] == "vinheta":          # a saída em zoom da vinheta pede 0.6 s de sobreposição
+        return {"transicao": "fade", "dur": 0.6}
+    pa = a.get("palco", {}).get("tipo") if a["tipo"] == "doc" else a["tipo"]
+    pb = b.get("palco", {}).get("tipo") if b["tipo"] == "doc" else b["tipo"]
+    if pa == "mapa" and pb == "imagem":
+        return {"transicao": "mergulho", "dur": 0.6}
+    if pa == "imagem" and pb == "mapa":
+        return {"transicao": "recuo", "dur": 0.6}
+    if pa == pb == "imagem":
+        return {"transicao": "corte", "dur": 0.1}
+    return {"transicao": "fade", "dur": 0.3}
+
+
+def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
+    lista = []
+    for c in ep["cenas"]:
+        p = _palco(c)
+        if p is None and not c.get("beats"):
+            k = _loc(copy.deepcopy(c["visual"]["cena"]), lang)          # cartão motion antigo
+        else:
+            beats = [_beat_kit(b) for b in resolver_beats(c, lang, palavras)] if c.get("beats") else []
+            label = _loc(c.get("overlay"), lang)
+            if label and not any(b["faz"] == "rotulo" for b in beats):
+                beats.append({"faz": "rotulo", "nome": label, "s": 0.3})
+            k = {"tipo": "doc", "fundo": "escuro", "palco": p or {"tipo": "escuro"}, "beats": beats}
+        k = {"id": c["id"], **k, "_fala": duracoes[c["id"]], "_saida": c.get("saida")}
+        lista.append(k)
+        if c["id"] == ep.get("vinheta_apos"):
+            titulo = _loc(ep.get("titulo_curto"), lang) or _loc(ep.get("titulo"), lang) or ""
+            lista.append({"id": "c900", "tipo": "vinheta", "fundo": "escuro", "titulo": titulo, "_fala": None})
+    lista.append({"id": "c901", "tipo": "telafinal", "fundo": "escuro",
+                  "textos": TEXTOS_FIM.get(lang, TEXTOS_FIM["pt"]), "_fala": None})
+    for n, k in enumerate(lista[:-1]):
+        k["saida"] = k.get("_saida") or _transicao(k, lista[n + 1])
+    for n, k in enumerate(lista):
+        entra = lista[n - 1]["saida"]["dur"] if n else 0.0
+        sai = k["saida"]["dur"] if "saida" in k else 0.0
+        fala = k.pop("_fala")
+        k.pop("_saida", None)
+        corpo = fala + PAUSA if fala is not None else (VINHETA_DUR if k["tipo"] == "vinheta" else TELAFINAL_DUR)
+        k["dur"], k["dur_piso"] = round(entra + corpo + sai, 3), True
+    d = {"marca": ep["marca"], "aspecto": "16:9", "modo": "doc", "cenas": lista}
+    if ep.get("mapa"):
+        d["mapa"] = {"arquivo": ep["mapa"]["src"], "pontos": ep["mapa"]["pontos"]}
+    return d
+
+
+def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict, palavras: dict | None = None) -> dict:
     """dur de cada cena = entrada (saída da anterior) + fala + PAUSA + própria saída: voz nunca acelera."""
+    if modo_doc(ep):
+        return _cenas_doc(ep, lang, duracoes, palavras or {})
     out, entra = [], 0.0
     cenas = ep["cenas"]
     for n, c in enumerate(cenas):
@@ -312,6 +391,14 @@ def _dir(proj: Path, lang: str) -> Path:
 def estado(proj: Path, lang: str) -> dict:
     st = pipeline.read_json(_dir(proj, lang) / "narracao.json", {})
     return st if isinstance(st, dict) else {}
+
+
+def _palavras(proj: Path, lang: str, ep: dict, st: dict) -> dict:
+    pal = pipeline.read_json(_dir(proj, lang) / "palavras.json", {})
+    velhas = [c["id"] for c in ep["cenas"] if pal.get(c["id"], {}).get("hash") != st.get(c["id"], {}).get("hash")]
+    if velhas:
+        raise ValueError(f"rode alinhar antes: palavras ausentes ou desatualizadas em {', '.join(velhas)}")
+    return pal
 
 
 def _chave(nome: str) -> str:
@@ -507,8 +594,12 @@ def escrever_cenas(proj: Path, lang: str) -> Path:
     faltam = [c["id"] for c in ep["cenas"] if not em_dia(c)]
     if faltam:
         raise ValueError(f"rode tts antes: áudio ausente ou desatualizado em {', '.join(faltam)}")
-    d = cenas_motion(ep, lang, {k: v["dur"] for k, v in st.items()}, motion.carregar_tema(ep["marca"]))
+    pal = _palavras(proj, lang, ep, st) if modo_doc(ep) else None
+    d = cenas_motion(ep, lang, {k: v["dur"] for k, v in st.items()}, motion.carregar_tema(ep["marca"]), pal)
     from PIL import Image
+    if d.get("mapa"):
+        with Image.open(proj / d["mapa"]["arquivo"]) as im:
+            d["mapa"]["w"], d["mapa"]["h"] = im.size
     for k in d["cenas"]:
         if k["tipo"] == "tela" and Path(k["arquivo"]).suffix.lower() in motion.EXT_IMG:
             with Image.open(proj / k["arquivo"]) as im:
@@ -526,10 +617,11 @@ def _ff(args: list) -> None:
 
 def _voz(proj: Path, lang: str, tempos: dict, st: dict) -> Path:
     off, ins, fs = offsets(tempos), [], []
-    for k, c in enumerate(tempos["cenas"]):
+    cenas = [c for c in tempos["cenas"] if c["id"] in st]
+    for k, c in enumerate(cenas):
         ins += ["-i", str(proj / st[c["id"]]["audio"])]
         fs.append(f"[{k}:a]aresample=48000,adelay={int(round(off[c['id']] * 1000))}:all=1[a{k}]")
-    n = len(tempos["cenas"])
+    n = len(cenas)
     graph = (";".join(fs) + ";" + "".join(f"[a{k}]" for k in range(n))
              + f"amix=inputs={n}:normalize=0,apad,atrim=0:{tempos['duracao']:.3f}[out]")
     dst = _dir(proj, lang) / "narracao.wav"
@@ -540,6 +632,17 @@ def _voz(proj: Path, lang: str, tempos: dict, st: dict) -> Path:
 def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     proj = Path(proj)
     ep = ler(proj)
+    doc, avisos = modo_doc(ep), []
+    if doc:
+        st0 = estado(proj, lang)
+        pal = _palavras(proj, lang, ep, st0)
+        for c in ep["cenas"]:
+            beats = resolver_beats(c, lang, pal) if c.get("beats") else []
+            avisos += ritmo(c["id"], beats, st0[c["id"]]["dur"])
+        if avisos and not rascunho:
+            raise ValueError("ritmo: " + "; ".join(avisos))
+        if not trilha and not rascunho:
+            raise ValueError("render final do modo doc exige --trilha (canal/trilhas/)")
     escrever_cenas(proj, lang)
     r = motion.render(proj, rascunho, lang)
     if not r.get("ok"):
@@ -550,19 +653,29 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     st = estado(proj, lang)
     voz = _voz(proj, lang, tempos, st)
     out = _dir(proj, lang) / ("final_rascunho.mp4" if rascunho else "final.mp4")
-    if trilha:
-        tmp = out.with_name(f".{out.stem}.voz.mp4")
+    tmp = out.with_name(f".{out.stem}.voz.mp4")
+    tmp2 = out.with_name(f".{out.stem}.sfx.mp4")
+    try:
         _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
-        try:
-            audio.mix_trilha(tmp, Path(trilha), out)          # ducking + loudnorm −14
-        finally:
-            tmp.unlink(missing_ok=True)
-    else:
-        _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-             "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
+        base = tmp
+        cues = proj / f"cues.{lang}.json"
+        if doc and cues.is_file() and json.loads(cues.read_text(encoding="utf-8")):
+            if not SFX_DIR.is_dir():
+                audio.sfx_kit(SFX_DIR)
+            audio.mix_sfx(tmp, cues, SFX_DIR, tmp2)
+            base = tmp2
+        if trilha:
+            realces = [(c["ini"], round(c["ini"] + c["dur"], 3)) for c in tempos["cenas"] if c["id"] in ("c900", "c901")]
+            audio.mix_trilha(base, Path(trilha), out, realces=realces)        # ducking + realce + loudnorm −14
+        else:
+            _ff(["-i", str(base), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+                 "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
+    finally:
+        tmp.unlink(missing_ok=True)
+        tmp2.unlink(missing_ok=True)
     legenda = out.with_suffix(".srt")
     legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
-    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"]}
+    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"], "avisos": avisos}
 
 
 FONTE_THUMB = pipeline.ROOT / "motion" / "kit" / "fonts" / "Archivo.ttf"
@@ -619,12 +732,21 @@ def descricao(proj, lang: str) -> dict:
     usadas = sorted({str(f) for c in ep["cenas"] for f in c.get("fontes", [])},
                     key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
     fontes = [f"[{i}] {achados[i]['fonte']} — {achados[i]['url']}" for i in usadas if i in achados]
-    creditos, vistos = [], set()
+    creditos = []
+
+    def credita(d):
+        if d and d.get("src") and d.get("credito"):
+            linha = f"{d['credito']} — {d['fonte_url']} ({d['licenca']})"
+            if linha not in creditos:
+                creditos.append(linha)
+    credita(ep.get("mapa"))
     for c in ep["cenas"]:
-        v = c["visual"]
-        if v["tipo"] == "arquivo" and v["src"] not in vistos:
-            vistos.add(v["src"])
-            creditos.append(f"{v['credito']} — {v['fonte_url']} ({v['licenca']})")
+        if c["visual"]["tipo"] == "arquivo":
+            credita(c["visual"])
+        credita(c.get("fundo") if isinstance(c.get("fundo"), dict) and c["fundo"].get("tipo") == "imagem" else None)
+        for b in c.get("beats") or []:
+            if b.get("faz") == "inserto":
+                credita(b)
     ia = any(c["visual"]["tipo"] == "ia" for c in ep["cenas"])
     partes = [_loc(ep.get("descricao"), lang) or "", "Fontes:\n" + "\n".join(fontes),
               "Imagens:\n" + "\n".join(creditos)] + ([DIVULGACAO_IA] if ia else [])
@@ -648,6 +770,8 @@ def _cli(ns):
             raise ValueError("informe --perfil canal/idiomas.json ou --voz")
         r = tts(p, ns.lang, root=Path(ns.root), aprovacao=ns.aprovacao, **cfg)
         return r, EXIT.get(r["status"], 4)
+    if ns.cmd == "alinhar":
+        return alinhar.alinhar(p, ns.lang), 0
     if ns.cmd == "render":
         r = render(p, ns.lang, ns.rascunho, ns.trilha)
         return r, (0 if r.get("ok") else 1)
@@ -663,7 +787,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="vídeo narrado: episodio.json → TTS por cena → motion 16:9")
     ap.add_argument("--root", default=str(pipeline.ROOT))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for nome in ("validar", "tts", "render", "thumb", "descricao"):
+    for nome in ("validar", "tts", "alinhar", "render", "thumb", "descricao"):
         sp = sub.add_parser(nome)
         sp.add_argument("proj")
         sp.add_argument("--lang", default="pt")
