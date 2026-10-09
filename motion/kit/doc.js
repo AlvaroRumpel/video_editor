@@ -213,7 +213,12 @@
         pn.appendChild(gr);
       }
       ctx.hud.appendChild(pn);
-      IN(tl, pn, b.at - 0.12, { x: 60 });
+      // painel vai para a esquerda quando o ponto em foco cairia debaixo dele
+      const ref = ctx.beats.filter((o) => o.at <= b.at && [o.ponto, o.para, o.de].some((n) => n && ctx.pts[n])).pop();
+      const nome = ref && [ref.ponto, ref.para, ref.de].find((n) => n && ctx.pts[n]);
+      const esq = nome && ctx.tela(...ctx.pts[nome], b.at + 0.5)[0] > W / 2;
+      if (esq) Object.assign(pn.style, { left: "120px", right: "auto", top: "300px" });
+      IN(tl, pn, b.at - 0.12, { x: esq ? -60 : 60 });
       sai(ctx, pn, b, b.at + dur);
       const pre = b.prefixo || "", suf = b.sufixo || "";
       KIT.pintor((t) => {
@@ -407,10 +412,14 @@
     }
     const camera = construirCam(ini, moves, c.ini);
     const ancoras = [];   // [elemento, x, y, dx, dy]: overlay preso a um ponto do palco
+    const pose = (t) => {   // posição do palco na tela no instante t (pintor e ctx.tela usam a mesma conta)
+      const st = camAt(camera, t), sc = dims.base * st.s;
+      return { sc, tx: clamp(W / 2 - st.x * sc, W - dims.mw * sc, 0), ty: clamp(H / 2 - st.y * sc, H - dims.mh * sc, 0) };
+    };
+    const tela = (x, y, t) => { const q = pose(t); return [q.tx + x * q.sc, q.ty + y * q.sc]; };
     KIT.pintor((t) => {
       if (t < c.ini - 0.05 || t > c.ini + cena.dur + 0.05) return;
-      const st = camAt(camera, t), sc = dims.base * st.s;
-      const tx = clamp(W / 2 - st.x * sc, W - dims.mw * sc, 0), ty = clamp(H / 2 - st.y * sc, H - dims.mh * sc, 0);
+      const { tx, ty, sc } = pose(t);
       cam.style.transform = `translate(${tx.toFixed(2)}px,${ty.toFixed(2)}px) scale(${sc.toFixed(5)})`;
       for (const [e, x, y, dx, dy] of ancoras) {
         e.style.left = `${(tx + x * sc + dx).toFixed(1)}px`;
@@ -424,7 +433,7 @@
         camera.ms.push({ t, d, x, y, s: de.s * 4, de });
       },
     };
-    const ctx = { c, cena, hud, g, pts, base: dims.base, beats, fim, ancoras, palco, cam };
+    const ctx = { c, cena, hud, g, pts, base: dims.base, beats, fim, ancoras, palco, cam, tela };
     let ultimo = c.t0;
     beats.forEach((b, i) => {
       const f = BEATS[b.faz];

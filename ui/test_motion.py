@@ -846,3 +846,26 @@ def test_doc_vinheta_e_tela_final(tmp_path):
     assert zoom < 0.5 and tit > 0.9 and guias > 0.9 and textos == ["inscreva-se", "próximo vídeo"]
     sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
     assert {"carimbo", "maquina"} <= sons
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_chip_do_ponto_nao_fica_sob_o_painel(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["beats"] = BEATS_TODOS
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert motion.montar(p)["ok"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1920, "height": 1080})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        r = pg.evaluate("""() => { __kit.ir(2.0);
+            const q = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; };
+            const chip = [...document.querySelectorAll('#c01 .d-chip')].find((e) => e.textContent.includes('Abrolhos'));
+            return { chip: q(chip), painel: q(document.querySelector('#c01 .d-painel')) }; }""")
+        b.close()
+    c, q = r["chip"], r["painel"]
+    assert c[2] <= q[0] or c[0] >= q[2] or c[3] <= q[1] or c[1] >= q[3], r
+    assert q[0] >= 120 and q[2] <= 1800 and q[3] <= 1000, r
