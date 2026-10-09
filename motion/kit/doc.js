@@ -63,6 +63,9 @@
 .d-palavras{position:absolute;left:120px;right:120px;top:430px;text-align:center;font:800 110px var(--k-corpo-familia);text-transform:uppercase}
 .d-palavras.c{right:700px}  /* cena com contador: fica à esquerda do painel (x>=1240) */
 .d-palavras span{display:inline-block;margin:0 20px;position:relative;opacity:0}
+.d-palavras.f{left:200px;right:200px;top:50%;transform:translateY(-55%);line-height:1.12}
+.d-palavras.f span{margin:0 12px}
+.d-palavras.f span.hl{color:var(--k-acento)}
 .d-risco{position:absolute;left:0;right:0;top:52%;height:12px;background:#C0392B;transform:scaleX(0);transform-origin:left}
 .d-veu{position:absolute;inset:0;background:rgba(0,0,0,.55)}
 .d-citacao{position:absolute;left:240px;right:240px;top:300px;text-align:center}
@@ -271,12 +274,16 @@
     },
 
     palavras(ctx, b) {
-      const box = el("div", "d-palavras t" + (ctx.beats.some((o) => o.faz === "contador") ? " c" : "")), { tl } = ctx.c;
+      const frase = typeof b.frase === "string";
+      const box = el("div", "d-palavras t" + (frase ? " f" : "") + (ctx.beats.some((o) => o.faz === "contador") ? " c" : "")), { tl } = ctx.c;
+      if (frase) box.style.fontSize = `${b.palavras.length <= 4 ? 120 : b.palavras.length <= 7 ? 100 : 84}px`;
       const ats = b.ats.length ? b.ats : b.palavras.map((_, i) => b.at + i * 0.3);
-      const limpa = (w) => String(w).replace(/#\d+$/, "");
+      const limpa = (w) => String(w).replace(/#\d+$/, "").replace(/[^\p{L}\p{N}']/gu, "").toLowerCase();
+      const marca = new Set([b.risco, ...(b.destaque || [])].filter(Boolean).map(limpa));
       mostra(tl, box, b.at);
       b.palavras.forEach((w, i) => {
-        const s = texto(el("span", null, limpa(w)));
+        const s = texto(el("span", null, String(w).replace(/#\d+$/, "")));
+        if (frase && marca.has(limpa(w))) s.classList.add("hl");
         box.appendChild(s);
         tl.fromTo(s, { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.22, ease: "back.out(2.5)", immediateRender: false }, ats[i]);
         KIT.cue(ats[i], "tique", -12);
