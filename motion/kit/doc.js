@@ -21,11 +21,24 @@
     return e;
   };
   const texto = (e) => { e.dataset.kTexto = ""; return e; };
+  // imagem do palco/inserto; ajuste "contain" (retrato, jornal, panorama): inteira sobre cópia desfocada dela mesma
+  const foto = (cls, arq, ajuste) => {
+    const m = el("div", cls);
+    if (ajuste !== "contain") { m.style.backgroundImage = `url("${arq}")`; return m; }
+    for (const [tam, filtro] of [["cover", "blur(40px) brightness(.45)"], ["contain", "none"]]) {
+      const f = el("div", "d-foto");
+      Object.assign(f.style, { backgroundImage: `url("${arq}")`, backgroundSize: tam, filter: filtro,
+                               transform: tam === "cover" ? "scale(1.1)" : "none" });
+      m.appendChild(f);
+    }
+    return m;
+  };
 
   const CSS = `
 .d-palco{position:absolute;inset:0;overflow:hidden;transform-origin:50% 50%}
 .d-cam{position:absolute;left:0;top:0;transform-origin:0 0}
 .d-img{position:absolute;inset:0;background-size:cover;background-position:center;filter:sepia(.35) contrast(1.1) brightness(.8)}
+.d-foto{position:absolute;inset:0;background-position:center;background-repeat:no-repeat}
 .d-mapa{position:absolute;inset:0;background-size:100% 100%;filter:sepia(.45) saturate(.55) contrast(1.05) brightness(.62)}
 .d-cam svg{position:absolute;left:0;top:0;overflow:visible}
 .d-rota{fill:none;stroke:var(--k-acento);stroke-width:6;stroke-linecap:round}
@@ -333,8 +346,7 @@
     },
 
     inserto(ctx, b) {
-      const im = el("div", "d-inserto"), { tl } = ctx.c;
-      im.style.backgroundImage = `url("${b.arquivo}")`;
+      const im = foto("d-inserto", b.arquivo, b.ajuste), { tl } = ctx.c;
       ctx.palco.appendChild(im);
       tl.fromTo(im, { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1.04, duration: 0.6, ease: "power2.out", immediateRender: false }, b.at);
       tl.to(im, { scale: 1.0, duration: Math.max(0.1, ctx.fim - b.at - 0.6), ease: "none" }, b.at + 0.6);
@@ -371,9 +383,7 @@
     } else {
       dims = { mw: W, mh: H, base: 1 };
       if (p.tipo === "imagem") {
-        const m = el("div", "d-img");
-        m.style.backgroundImage = `url("${p.arquivo}")`;
-        cam.appendChild(m);
+        cam.appendChild(foto("d-img", p.arquivo, p.ajuste));
       }
     }
     Object.assign(cam.style, { width: `${dims.mw}px`, height: `${dims.mh}px` });

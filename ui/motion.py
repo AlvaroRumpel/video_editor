@@ -84,6 +84,11 @@ def _dentro(proj: Path, rel) -> Path | None:
     p = (Path(proj) / rel).resolve()
     return p if p.is_relative_to(Path(proj).resolve()) and p.is_file() else None
 
+def _rel_ok(rel) -> bool:
+    """Caminho relativo sem '..' nem raiz/drive: copiado para dentro da composição no mesmo caminho."""
+    p = Path(rel) if isinstance(rel, str) and rel else None
+    return p is not None and not p.is_absolute() and not p.drive and not p.root and ".." not in p.parts
+
 def _num(v, minimo=0.0) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= minimo
 
@@ -170,13 +175,20 @@ def _v_doc(c, proj, e):
     p = c.get("palco")
     if not isinstance(p, dict) or p.get("tipo") not in PALCOS:
         return e(f"palco inválido: {p!r} ({'|'.join(PALCOS)})")
-    if p["tipo"] == "imagem" and _dentro(proj, p.get("arquivo")) is None:
-        e(f"palco: arquivo não encontrado no projeto: {p.get('arquivo')!r}")
+    if p["tipo"] == "imagem":
+        _v_doc_arq("palco", p.get("arquivo"), proj, e)
     if not isinstance(c.get("beats", []), list):
-        e("beats precisa ser lista")
+        return e("beats precisa ser lista")
     for b in c.get("beats", []):
-        if isinstance(b, dict) and b.get("faz") == "inserto" and _dentro(proj, b.get("arquivo")) is None:
-            e(f"inserto: arquivo não encontrado no projeto: {b.get('arquivo')!r}")
+        if isinstance(b, dict) and b.get("faz") == "inserto":
+            _v_doc_arq("inserto", b.get("arquivo"), proj, e)
+
+
+def _v_doc_arq(nome, rel, proj, e):
+    if not _rel_ok(rel):
+        e(f"{nome}: arquivo precisa ser caminho relativo sem '..': {rel!r}")
+    elif _dentro(proj, rel) is None:
+        e(f"{nome}: arquivo não encontrado no projeto: {rel!r}")
 
 
 def _v_vinheta(c, proj, e):
@@ -209,7 +221,9 @@ def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
         usa_mapa = any(isinstance(c, dict) and isinstance(c.get("palco"), dict) and c["palco"].get("tipo") == "mapa"
                        for c in dados.get("cenas") or [])
         m = dados.get("mapa")
-        if usa_mapa and (not isinstance(m, dict) or _dentro(proj, m.get("arquivo")) is None
+        if isinstance(m, dict) and "arquivo" in m and not _rel_ok(m["arquivo"]):
+            e("raiz", f"mapa: arquivo precisa ser caminho relativo sem '..': {m['arquivo']!r}")
+        elif (usa_mapa or m is not None) and (not isinstance(m, dict) or _dentro(proj, m.get("arquivo")) is None
                          or not isinstance(m.get("pontos"), dict) or not _num(m.get("w")) or not _num(m.get("h"))):
             e("raiz", "palco mapa precisa de mapa {arquivo, pontos, w, h} com arquivo no projeto")
     cenas = dados.get("cenas")
@@ -437,6 +451,8 @@ def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> 
             rels |= {b["arquivo"] for b in c.get("beats", []) if b.get("faz") == "inserto"}
         for rel in rels:
             dst = comp / rel
+            if not _rel_ok(rel) or not dst.resolve().is_relative_to(comp.resolve()):
+                raise ValueError(f"caminho fora da composição: {rel!r}")
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(_dentro(proj, rel), dst)
 

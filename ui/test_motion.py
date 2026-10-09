@@ -869,3 +869,52 @@ def test_doc_chip_do_ponto_nao_fica_sob_o_painel(tmp_path):
     c, q = r["chip"], r["painel"]
     assert c[2] <= q[0] or c[0] >= q[2] or c[3] <= q[1] or c[1] >= q[3], r
     assert q[0] >= 120 and q[2] <= 1800 and q[3] <= 1000, r
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+@pytest.mark.parametrize("rel", ["../doc/assets/mapa.png", "assets/../assets/mapa.png", "ABS"])
+def test_validar_doc_recusa_caminho_fora(tmp_path, rel):
+    p, d = _doc(tmp_path)
+    rel = str((p / "assets" / "mapa.png").resolve()) if rel == "ABS" else rel
+    d["cenas"][1]["palco"]["arquivo"] = rel
+    d["cenas"][1]["beats"] = [{"faz": "inserto", "arquivo": rel, "s": 0.5}]
+    motivos = [x["motivo"] for x in motion.validar(d, p)]
+    assert sum("relativo" in m for m in motivos) == 2, motivos
+    d = _doc(tmp_path / "b")[1]
+    d["mapa"]["arquivo"] = rel
+    assert any("relativo" in x["motivo"] for x in motion.validar(d, tmp_path / "b" / "doc"))
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_validar_doc_mapa_presente_exige_arquivo(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][0]["palco"] = {"tipo": "escuro"}       # nenhuma cena usa o mapa, mas ele vai para a vinheta/tela final
+    d["mapa"]["arquivo"] = "assets/nao.png"
+    assert any("mapa" in x["motivo"] for x in motion.validar(d, p))
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_preparar_doc_nao_copia_fora_da_pasta(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][1]["palco"]["arquivo"] = "../doc/assets/mapa.png"
+    with pytest.raises(ValueError, match="fora"):
+        motion._preparar(p / "motion", p, d, motion.carregar_tema("dark-historia"), motion.MOTION)
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_palco_contain_sobre_copia_desfocada(tmp_path):
+    p, d = _doc(tmp_path)
+    d["cenas"][1]["palco"]["ajuste"] = "contain"
+    d["cenas"][1]["beats"] = [{"faz": "inserto", "arquivo": "assets/mapa.png", "ajuste": "contain", "s": 0.5}]
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert r["ok"], r
+
+    def medir(pg):
+        pg.evaluate("t => __kit.ir(t)", r["cenas"][1]["ini"] + 1.5)
+        return pg.evaluate("""(() => [...document.querySelectorAll('#c02 .d-foto')].map((e) => [
+          e.parentElement.className, getComputedStyle(e).backgroundSize, getComputedStyle(e).filter.includes('blur')]))()""")
+    got = _abrir(p / "motion" / "index.html", medir, 1920, 1080)
+    assert sorted(got) == [["d-img", "contain", False], ["d-img", "cover", True],
+                           ["d-inserto", "contain", False], ["d-inserto", "cover", True]]
