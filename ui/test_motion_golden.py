@@ -100,3 +100,32 @@ def test_golden(tmp_path, marca):
             if (val := _psnr(png, ref)) < 35:
                 ruins.append(f"{png.name}: {val:.1f} dB")
     assert not ruins, ruins
+
+
+def test_golden_doc(tmp_path):
+    p = tmp_path / "doc"
+    shutil.copytree(AMOSTRAS / "doc", p)
+    r = motion.render(p)
+    assert r["ok"], r
+    video = p / "video.mp4"
+    tempos = json.loads((p / "motion" / "tempos.json").read_text(encoding="utf-8"))
+    cenas = {c["id"]: c for c in tempos["cenas"]}
+    # câmera nunca parada: dois quadros de c01 no mesmo trecho sem beat diferem além do grão
+    c1 = cenas["c01"]
+    a = _frame(video, c1["ini"] + 4.4, tmp_path / "cam-a.png")
+    b = _frame(video, c1["ini"] + 5.3, tmp_path / "cam-b.png")
+    print("psnr camera c01:", _psnr(a, b))
+    assert _psnr(a, b) < 32, "câmera parada em c01"
+    REF.mkdir(parents=True, exist_ok=True)
+    ruins = []
+    marcos = [("c01", 1.5), ("c01", 4.0), ("c02", 0.6), ("c02", 2.2), ("c03", 2.0), ("c900", 2.5), ("c901", 2.0)]
+    for cid, dt in marcos:
+        png = _frame(video, cenas[cid]["ini"] + dt, tmp_path / f"doc-{cid}-{dt}.png")
+        ref = REF / png.name
+        if MODO == "atualizar":
+            shutil.copy2(png, ref)
+            continue
+        assert ref.exists(), f"sem referência {ref.name}: rodar MOTION_GOLDEN=atualizar"
+        if (val := _psnr(png, ref)) < 35:
+            ruins.append(f"{png.name}: {val:.1f} dB")
+    assert not ruins, ruins
