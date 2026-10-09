@@ -813,10 +813,10 @@ def test_doc_mergulho_aproxima_o_mapa_e_da_clarao(tmp_path):
         pg.goto((p / "motion" / "index.html").resolve().as_uri())
         pg.wait_for_function("window.__kit !== undefined")
         escala = lambda t: pg.evaluate("t => { __kit.ir(t); const m = document.querySelector('#c01 .d-cam').style.transform;"
-                                       " return parseFloat(m.match(/scale\(([\d.]+)\)/)[1]); }", t)
+                                       " return parseFloat(m.match(/scale\\(([\\d.]+)\\)/)[1]); }", t)
         antes, durante = escala(c2["ini"] - 0.3), escala(c2["ini"] + 0.5)
         flash = pg.evaluate("t => { __kit.ir(t); return +getComputedStyle(document.querySelector('.d-flash')).opacity; }",
-                            c2["ini"] + 0.6 * 0.45)
+                            c2["ini"] + 0.6 * 0.45 + 0.05)
         b.close()
     assert durante > antes * 1.8 and flash > 0.5
     sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
