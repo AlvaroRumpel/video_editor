@@ -1,0 +1,19 @@
+{
+  "cores": {
+    "tinta": "#EDE6D6", "acento": "#B8862B", "sobre": "#EDE6D6",
+    "marca_texto": "rgba(184,134,43,.45)", "risco": "#8C2F1B", "manchas": "#2A2620",
+    "fundo": {"claro": "#16140F", "escuro": "#0E0D0B", "marca": "#1E1A14"}
+  },
+  "fontes": {
+    "display": {"familia": "K Fraunces", "peso": 600, "estilo": "italic", "tamanho": 150},
+    "punch": {"familia": "K Fraunces", "peso": 700},
+    "corpo": {"familia": "K Inter", "peso": 500},
+    "mono": {"familia": "K Plex Mono", "peso": 500}
+  },
+  "assinatura": {"tipo": "ponto"},
+  "fixos": {"wordmark": "", "wordmark_fonte": "display", "barra": false, "grao": 0.14},
+  "endcard": {"marca": "Arquivo", "tagline": "Histórias reais. Fontes reais.", "cta": "Inscreva-se", "url": "fontes na descrição"},
+  "pill": {"borda": "#B8862B", "texto": "#16140F"},
+  "transicao_padrao": {"transicao": "fade", "dur": 0.45},
+  "regras": {"numero_mono": true}
+}

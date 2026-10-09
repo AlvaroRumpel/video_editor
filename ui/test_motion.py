@@ -62,7 +62,7 @@ def test_validar_ok(tmp_path):
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "tela", "arquivo": "../fora.png"}), "c09", "arquivo não encontrado"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "lista", "itens": ["a"] * 7}), "c09", "no máximo 6"),
     (lambda d: d["cenas"].insert(1, {"id": "c09", "tipo": "numero", "valor": "mil"}), "c09", "valor precisa"),
-    (lambda d: d.update(aspecto="16:9"), "raiz", "aspecto"),
+    (lambda d: d.update(aspecto="4:3"), "raiz", "aspecto"),
 ])
 def test_validar_erros(tmp_path, mut, cid, trecho):
     d = _cenas()
@@ -240,7 +240,7 @@ def _todos(marca):
 
 @pw
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
-@pytest.mark.parametrize("marca", ["anotus", "campeio"])
+@pytest.mark.parametrize("marca", ["anotus", "campeio", "dark-historia"])
 def test_todos_os_tipos_montam(tmp_path, marca):
     p = _proj(tmp_path, _todos(marca))
     _midia(p)
@@ -290,13 +290,13 @@ def test_custom_registrado_duas_vezes_vira_erro(tmp_path):
     assert any(e["id"] == "c05" and "2x" in e["motivo"] for e in r["erros"])
 
 
-def _abrir(index, fn):
+def _abrir(index, fn, w=1080, h=1920):
     """Abre o index.html com os args padrão do Chromium e roda fn(pagina)."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         b = p.chromium.launch(args=["--allow-file-access-from-files"])
         try:
-            pg = b.new_page(viewport={"width": 1080, "height": 1920})
+            pg = b.new_page(viewport={"width": w, "height": h})
             pg.set_default_timeout(15000)
             pg.goto(index.resolve().as_uri())
             pg.wait_for_function("window.__kit !== undefined", timeout=20000)
@@ -374,7 +374,7 @@ def _montado(tmp_path, dur=2.0, suf=""):
     return p
 
 
-def _fake_hf(dur, pix="yuv420p", rng="tv", rc=0, cmds=None):
+def _fake_hf(dur, pix="yuv420p", rng="tv", rc=0, cmds=None, tam="1080x1920"):
     def run(cmd, cwd, env, linha):
         if cmds is not None:
             cmds.append((cmd, env))
@@ -382,7 +382,7 @@ def _fake_hf(dur, pix="yuv420p", rng="tv", rc=0, cmds=None):
             return rc, ["boom: chrome caiu"]
         for i in (10, 50, 100):
             linha(f"\x1b[32mRendering\x1b[0m {i}%")
-        _ff("-f", "lavfi", "-i", f"color=c=gray:s=1080x1920:r=30:d={dur}", "-pix_fmt", pix,
+        _ff("-f", "lavfi", "-i", f"color=c=gray:s={tam}:r=30:d={dur}", "-pix_fmt", pix,
             "-color_range", rng, str(cmd[cmd.index("-o") + 1]))
         return 0, ["ok"]
     return run
@@ -579,3 +579,48 @@ def test_folha_usa_o_mais_novo_e_recusa_velho(tmp_path):
     os.utime(idx, (4000, 4000))                               # montar depois dos vídeos
     with pytest.raises(ValueError, match="mais velho"):
         motion.folha(p)
+
+
+def test_validar_aspecto(tmp_path):
+    assert motion.validar(_cenas(aspecto="16:9"), tmp_path) == []
+    erros = motion.validar(_cenas(aspecto="4:3"), tmp_path)
+    assert any(e["id"] == "raiz" and "aspecto" in e["motivo"] for e in erros)
+
+
+def test_tema_dark_historia_carrega():
+    t = motion.carregar_tema("dark-historia")
+    assert t["transicao_padrao"]["transicao"] == "fade"
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_montar_16x9_foto_tela_cheia_com_label(tmp_path):
+    d = {"marca": "dark-historia", "aspecto": "16:9", "cenas": [
+        {"id": "c01", "tipo": "tela", "arquivo": "foto.png", "moldura": "nenhuma", "label": "Sibéria, 1908", "dur": 4.0},
+        {"id": "c02", "tipo": "frase", "fundo": "escuro", "linhas": [{"t": "Ninguém viu a explosão."}]}]}
+    p = _proj(tmp_path, d)
+    _ff("-f", "lavfi", "-i", "testsrc2=s=1600x1000:d=1", "-frames:v", "1", str(p / "foto.png"))
+    r = motion.montar(p)
+    assert r["ok"], r["erros"]
+    html = (p / "motion" / "index.html").read_text(encoding="utf-8")
+    assert 'data-width="1920" data-height="1080"' in html and 'data-aspecto="16:9"' in html
+    assert json.loads((p / "motion" / "tempos.json").read_text(encoding="utf-8"))["aspecto"] == "16:9"
+
+    def medir(pg):
+        pg.evaluate("t => __kit.ir(t)", 3.0)
+        return pg.evaluate("""(() => { const r = document.querySelector('#c01 .k-midia-caixa').getBoundingClientRect();
+          return [r.left, r.top, r.width, r.height]; })()""")
+    assert _abrir(p / "motion" / "index.html", medir, 1920, 1080) == [0, 0, 1920, 1080]
+
+
+def test_render_16x9_confere_dimensao(tmp_path, sem_hf, monkeypatch):
+    p = _montado(tmp_path)
+    t = p / "motion" / "tempos.json"
+    d = json.loads(t.read_text(encoding="utf-8"))
+    d["aspecto"] = "16:9"
+    t.write_text(json.dumps(d), encoding="utf-8")
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0, tam="1920x1080"))
+    assert motion.render(p)["ok"]
+    monkeypatch.setattr(motion, "_executar", _fake_hf(2.0))           # retrato com tempos 16:9 = erro
+    with pytest.raises(RuntimeError, match="dimensão 1080x1920"):
+        motion.render(p)

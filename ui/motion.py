@@ -21,8 +21,10 @@ import pipeline  # noqa: E402
 ROOT = pipeline.ROOT
 MOTION = ROOT / "motion"
 FPS = 30
-W, H = 1080, 1920
-SAFE = (80, 180, 1000, 1660)  # x0, y0, x1, y1
+ASPECTOS = {"9:16": {"w": 1080, "h": 1920, "safe": (80, 180, 1000, 1660)},   # safe: x0, y0, x1, y1
+            "16:9": {"w": 1920, "h": 1080, "safe": (120, 80, 1800, 1000)}}
+W, H = ASPECTOS["9:16"]["w"], ASPECTOS["9:16"]["h"]
+SAFE = ASPECTOS["9:16"]["safe"]
 
 TIPOS = ("frase", "numero", "lista", "tela", "endcard", "custom")
 FUNDOS = ("claro", "escuro", "marca")
@@ -170,8 +172,8 @@ def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
     def e(i, m):
         erros.append({"id": i, "motivo": m})
 
-    if dados.get("aspecto", "9:16") != "9:16":
-        e("raiz", "aspecto: só 9:16 na v1")
+    if dados.get("aspecto", "9:16") not in ASPECTOS:
+        e("raiz", f"aspecto inválido: {dados.get('aspecto')!r} (9:16 ou 16:9)")
     cenas = dados.get("cenas")
     if not isinstance(cenas, list) or not cenas:
         e("raiz", "cenas vazio")
@@ -222,6 +224,7 @@ def _quadro(s: float) -> float:
 
 def resolver(dados: dict, tema: dict, proj: Path, lang: str | None = None) -> dict:
     d = copy.deepcopy(dados)
+    d.setdefault("aspecto", "9:16")
     cenas = d["cenas"]
     for n, c in enumerate(cenas):
         t = c["tipo"]
@@ -288,19 +291,19 @@ MARCADOR_DIR = ".motion"   # só pasta com este arquivo pode ser apagada pelo mo
 LANG_RE = re.compile(r"[a-z]{2,3}(-[A-Za-z]{2})?")
 
 HTML = """<!doctype html>
-<html lang="pt-BR" data-resolution="portrait">
+<html lang="pt-BR" data-resolution="{res}" data-aspecto="{asp}">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=1080, height=1920">
+<meta name="viewport" content="width={w}, height={h}">
 <link rel="stylesheet" href="kit/kit.css">
 <style>{css}</style>
 <script src="kit/vendor/gsap.min.js"></script>
 <script src="kit/kit.js"></script>
 </head>
 <body>
-<div id="root" data-composition-id="main" data-start="0" data-duration="{dur}" data-width="1080" data-height="1920" data-fps="30">
+<div id="root" data-composition-id="main" data-start="0" data-duration="{dur}" data-width="{w}" data-height="{h}" data-fps="30">
 {cenas}
-<canvas id="k-brilho" class="clip" width="1080" height="1920" data-start="0" data-duration="{dur}" data-track-index="900"></canvas>
+<canvas id="k-brilho" class="clip" width="{w}" height="{h}" data-start="0" data-duration="{dur}" data-track-index="900"></canvas>
 <div id="k-fixos" class="clip" data-start="0" data-duration="{dur}" data-track-index="901"><div id="k-grao"></div><div id="k-wm-claro" class="k-wordmark"></div><div id="k-wm-escuro" class="k-wordmark"></div><div id="k-barra"></div></div>
 </div>
 <script>window.__KIT_DADOS = {dados};</script>
@@ -355,8 +358,11 @@ def _html(d: dict, tema: dict, customs: dict, tempos: dict | None) -> str:
             inner += f'<script>KIT._cena="{c["id"]}"</script>' + customs[c["id"]]
         partes.append(f'<div id="{c["id"]}" class="clip cena" {_attrs(t, i)}>{inner}</div>')
     cenas_js = [{k: v for k, v in c.items() if not k.startswith("_")} for c in d["cenas"]]
-    dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js}, ensure_ascii=False).replace("</", "<\\/")
-    return HTML.format(css=_css_vars(tema), dur=f"{total:.3f}", cenas="\n".join(partes), dados=dados)
+    a = ASPECTOS[d["aspecto"]]
+    dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js, "largura": a["w"], "altura": a["h"]},
+                       ensure_ascii=False).replace("</", "<\\/")
+    return HTML.format(css=_css_vars(tema), dur=f"{total:.3f}", cenas="\n".join(partes), dados=dados,
+                       w=a["w"], h=a["h"], asp=d["aspecto"], res="landscape" if a["w"] > a["h"] else "portrait")
 
 
 def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> None:
@@ -382,13 +388,14 @@ def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> 
             shutil.copy2(src, comp / "midia" / f"{c['id']}{c['_ext']}")
 
 
-def _medir(index: Path) -> dict:
+def _medir(index: Path, aspecto: str = "9:16") -> dict:
+    a = ASPECTOS[aspecto]
     from playwright.sync_api import TimeoutError as PwTimeout
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         b = p.chromium.launch(args=["--allow-file-access-from-files"])
         try:
-            pg = b.new_page(viewport={"width": W, "height": H})
+            pg = b.new_page(viewport={"width": a["w"], "height": a["h"]})
             js = []
             pg.on("pageerror", lambda ex: js.append(str(ex)))
             pg.goto(index.resolve().as_uri())
@@ -401,7 +408,7 @@ def _medir(index: Path) -> dict:
             layout = []
             for c in kit["cenas"]:
                 pg.evaluate("t => __kit.ir(t)", max(c["ini"], c["ini"] + c["dur"] - c["saida"] - 0.02))
-                layout += [{"id": c["id"], "motivo": m} for m in pg.evaluate(JS_MEDIR, [c["id"], list(SAFE)])]
+                layout += [{"id": c["id"], "motivo": m} for m in pg.evaluate(JS_MEDIR, [c["id"], list(a["safe"])])]
             return {**kit, "layout": layout, "js": js}
         finally:
             b.close()
@@ -428,12 +435,12 @@ def montar(proj: Path, lang: str | None = None, motion_dir: Path = MOTION) -> di
                for c in d["cenas"] if c["tipo"] == "custom"}
     index = comp / "index.html"
     index.write_text(_html(d, tema, customs, None), encoding="utf-8")
-    m = _medir(index)
+    m = _medir(index, d["aspecto"])
     erros = [{"id": "kit", "motivo": j} for j in m["js"]] + m["erros"] + m["layout"]
     if erros:
         return {"ok": False, "erros": erros}
     index.write_text(_html(d, tema, customs, m), encoding="utf-8")
-    pipeline.atomic_write_json(comp / "tempos.json", {"duracao": m["duracao"], "cenas": m["cenas"]})
+    pipeline.atomic_write_json(comp / "tempos.json", {"duracao": m["duracao"], "aspecto": d["aspecto"], "cenas": m["cenas"]})
     cues = proj / f"cues{suf}.json"
     pipeline.atomic_write_json(cues, m["cues"])
     return {"ok": True, "duracao": m["duracao"], "erros": [], "index": str(index), "cues": str(cues),
@@ -519,7 +526,7 @@ def _probe(p: Path) -> dict:
             "range": s.get("color_range", "unknown"), "frames": int(s.get("nb_frames") or 0)}
 
 
-def _finalizar(tmp: Path, dst: Path, duracao: float) -> dict:
+def _finalizar(tmp: Path, dst: Path, duracao: float, aspecto: str = "9:16") -> dict:
     pr = _probe(tmp)
     if pr["pix_fmt"] == "yuvj420p" or pr["range"] == "pc":
         conv = tmp.with_name(tmp.stem + ".tv.mp4")
@@ -536,7 +543,8 @@ def _finalizar(tmp: Path, dst: Path, duracao: float) -> dict:
         pr = _probe(tmp)
     esperado = round(duracao * FPS)
     problemas = []
-    if (pr["w"], pr["h"]) != (W, H):
+    a = ASPECTOS[aspecto]
+    if (pr["w"], pr["h"]) != (a["w"], a["h"]):
         problemas.append(f"dimensão {pr['w']}x{pr['h']}")
     if abs(pr["fps"] - FPS) > 0.01:
         problemas.append(f"fps {pr['fps']:.3f}")
@@ -596,7 +604,7 @@ def render(proj: Path, rascunho: bool = False, lang: str | None = None, motion_d
         raise RuntimeError("hyperframes render falhou:\n" + "\n".join(ultimas))
     _progresso(proj, "conferindo", 100, 0)
     try:
-        _finalizar(tmp, dst, tempos["duracao"])
+        _finalizar(tmp, dst, tempos["duracao"], tempos.get("aspecto", "9:16"))
     except (RuntimeError, subprocess.CalledProcessError, OSError):
         tmp.unlink(missing_ok=True)
         _progresso(proj, "falha")
@@ -619,6 +627,7 @@ def folha(proj: Path, lang: str | None = None) -> dict:
     if not tempos:
         raise ValueError("tempos.json ausente: rodar montar")
     fim = tempos["duracao"] - 1 / FPS
+    tam = "480:270" if tempos.get("aspecto") == "16:9" else "270:480"
     pontos = []
     for c in tempos["cenas"]:
         pontos.append((c["id"], "entrada", c["ini"] + min(0.6, c["dur"] / 3)))
@@ -635,9 +644,9 @@ def folha(proj: Path, lang: str | None = None) -> dict:
         dst = str(tmpd / f"f_{k:03d}.png")
         if k < len(pontos):
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{pontos[k][2]:.3f}", "-i", str(video),
-                            "-frames:v", "1", "-vf", "scale=270:480", dst], check=True)
+                            "-frames:v", "1", "-vf", f"scale={tam}", dst], check=True)
         else:
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=270x480",
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=white:s={tam.replace(':', 'x')}",
                             "-frames:v", "1", dst], check=True)
     png = proj / "qc" / f"folha{suf}.png"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", "1", "-i", str(tmpd / "f_%03d.png"),

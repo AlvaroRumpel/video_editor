@@ -215,7 +215,7 @@
     return t + F(4);
   }
 
-  const MOLDURA = { celular: [100, 178, 880, 1564], browser: [60, 560, 960, 600], nenhuma: [0, 0, 1080, 1920] };
+  const MOLDURA = { celular: [100, 178, 880, 1564], browser: [60, 560, 960, 600], nenhuma: null };
   const px = (e, [x, y, w, h]) => Object.assign(e.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
 
   function tela(c, cena) {
@@ -230,9 +230,9 @@
       m.replaceWith(alvo);
       alvo.appendChild(m);
       Object.assign(m.style, { left: "0", top: "0", width: "100%", height: "100%" });
-      px(alvo, MOLDURA[cena.moldura]);
+      px(alvo, MOLDURA[cena.moldura] || [0, 0, c.W, c.H]);
     } else {
-      px(m, MOLDURA[cena.moldura]);
+      px(m, MOLDURA[cena.moldura] || [0, 0, c.W, c.H]);
       m.style.borderRadius = raio;
     }
     if (cena.moldura === "browser") m.style.objectPosition = "top";
@@ -286,7 +286,7 @@
       gl.attachShader(prog, sh("attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}", gl.VERTEX_SHADER));
       gl.attachShader(prog, sh(
         "precision highp float;uniform float r;uniform float env;uniform vec3 cor;" +
-        "void main(){float d=distance(gl_FragCoord.xy,vec2(540.,960.));" +
+        `void main(){float d=distance(gl_FragCoord.xy,vec2(${cv.width / 2}.,${cv.height / 2}.));` +
         "float a=(exp(-abs(d-r)/14.)+.45*exp(-abs(d-r-28.)/26.))*env*.85;a=clamp(a,0.,1.);" +
         "gl_FragColor=vec4(cor*a,a);}", gl.FRAGMENT_SHADER));
       gl.linkProgram(prog);
@@ -303,7 +303,7 @@
       const k = { lista: [] };
       cv._k = k;
       pintores.push((tempo) => {
-        gl.viewport(0, 0, 1080, 1920);
+        gl.viewport(0, 0, cv.width, cv.height);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         const b = k.lista.find((x) => tempo > x.t && tempo < x.t + x.d);
@@ -390,7 +390,7 @@
     D.cenas.forEach((cena, i) => {
       const layer = document.getElementById(cena.id);
       const entra = i > 0 ? D.cenas[i - 1].saida : null;
-      const c = { tl, layer, el: layer.querySelector(".k-conteudo"), tema, ini,
+      const c = { tl, layer, el: layer.querySelector(".k-conteudo"), tema, ini, W: D.largura || 1080, H: D.altura || 1920,
         t0: ini + (entra ? entra.dur : 0) + F(4), F, cue, C: COMP };
       fundo(c, cena);
       let fim;
