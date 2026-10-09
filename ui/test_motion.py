@@ -675,7 +675,7 @@ def _doc(tmp_path):
              {"id": "c02", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "imagem", "arquivo": "assets/mapa.png"},
               "beats": [], "dur": 3, "dur_piso": True, "saida": {"transicao": "fade", "dur": 0.3}},
              {"id": "c900", "tipo": "vinheta", "fundo": "escuro", "titulo": "Teste", "dur": 4, "dur_piso": True,
-              "saida": {"transicao": "corte", "dur": 0.1}},
+              "saida": {"transicao": "fade", "dur": 0.6}},
              {"id": "c901", "tipo": "telafinal", "fundo": "escuro", "dur": 3, "dur_piso": True,
               "textos": {"prox": "Próxima história", "inscreva": "inscreva-se", "video": "próximo vídeo"}}]}
     (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
@@ -839,9 +839,10 @@ def test_doc_vinheta_e_tela_final(tmp_path):
         pg.wait_for_function("window.__kit !== undefined")
         op = lambda t, sel: pg.evaluate("([t, s]) => { __kit.ir(t); return +getComputedStyle(document.querySelector(s)).opacity; }", [t, sel])
         tit = op(v["ini"] + 2.5, "#c900 .d-titulo")
+        zoom = op(v["ini"] + v["dur"] - 0.05, "#c900 .d-palco")
         guias = op(f["ini"] + 2.0, "#c901 .d-guia")
         textos = pg.evaluate("() => [...document.querySelectorAll('#c901 .g')].map(e => e.textContent)")
         b.close()
-    assert tit > 0.9 and guias > 0.9 and textos == ["inscreva-se", "próximo vídeo"]
+    assert zoom < 0.5 and tit > 0.9 and guias > 0.9 and textos == ["inscreva-se", "próximo vídeo"]
     sons = {c["som"] for c in json.loads((p / "cues.json").read_text(encoding="utf-8"))}
     assert {"carimbo", "maquina"} <= sons

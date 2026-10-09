@@ -437,7 +437,7 @@
   // ---------- abertura: selo K carimba no papel, anéis se desenham, marca datilografada, título
   KIT.tipo("vinheta", (c, cena) => {
     iniciarFx();
-    const { tl } = c, t0 = c.ini + 0.1, sai = c.ini + cena.dur - (cena.saida ? cena.saida.dur : 0) - 0.01;   // zoom de saída só depois do ponto de medição do layout (fim - 0.02)
+    const { tl } = c, t0 = c.ini + 0.1, saidaDur = cena.saida ? cena.saida.dur : 0, sai = c.ini + cena.dur - saidaDur - 0.01;   // zoom de saída só depois do ponto de medição do layout (fim - 0.02)
     const palco = el("div", "d-palco");
     palco.appendChild(el("div", "d-papel"));
     c.layer.appendChild(palco);
@@ -467,7 +467,7 @@
     tl.fromTo(marca, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.7, ease: "steps(9)",
               immediateRender: false }, t0 + 0.9);
     tl.fromTo(tit, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out", immediateRender: false }, t0 + 1.6);
-    tl.to(palco, { scale: 5, opacity: 0, duration: 0.5, ease: "power3.in", transformOrigin: "50% 42%" }, sai);
+    tl.to(palco, { scale: 5, opacity: 0, duration: Math.min(0.5, Math.max(0.1, saidaDur)), ease: "power3.in", transformOrigin: "50% 42%" }, sai);
     KIT.cue(t0 + 0.35, "carimbo");
     KIT.cue(t0 + 0.9, "maquina");
     KIT.cue(sai, "whoosh");
