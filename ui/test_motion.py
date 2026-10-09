@@ -660,3 +660,60 @@ def test_tela_contain_com_fundo_desfocado(tmp_path):
           return {fit: getComputedStyle(cx.querySelector('img.k-midia:not(.k-midia-fundo)')).objectFit,
                   fundo: cx.querySelectorAll('img.k-midia-fundo').length}; })()""")
     assert _abrir(p / "motion" / "index.html", medir, 1920, 1080) == {"fit": "contain", "fundo": 1}
+
+
+def _doc(tmp_path):
+    p = tmp_path / "doc"
+    (p / "assets").mkdir(parents=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=1600x1200:d=1",
+                    "-frames:v", "1", str(p / "assets" / "mapa.png")], check=True)
+    d = {"marca": "dark-historia", "aspecto": "16:9", "modo": "doc",
+         "mapa": {"arquivo": "assets/mapa.png", "pontos": {"a": [200, 900], "b": [1300, 500]}, "w": 1600, "h": 1200},
+         "cenas": [
+             {"id": "c01", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "mapa"}, "beats": [], "dur": 3,
+              "dur_piso": True, "saida": {"transicao": "mergulho", "dur": 0.6}},
+             {"id": "c02", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "imagem", "arquivo": "assets/mapa.png"},
+              "beats": [], "dur": 3, "dur_piso": True, "saida": {"transicao": "fade", "dur": 0.3}},
+             {"id": "c900", "tipo": "vinheta", "fundo": "escuro", "titulo": "Teste", "dur": 4, "dur_piso": True,
+              "saida": {"transicao": "corte", "dur": 0.1}},
+             {"id": "c901", "tipo": "telafinal", "fundo": "escuro", "dur": 3, "dur_piso": True,
+              "textos": {"prox": "Próxima história", "inscreva": "inscreva-se", "video": "próximo vídeo"}}]}
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return p, d
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_validar_doc(tmp_path):
+    p, d = _doc(tmp_path)
+    assert motion.validar(d, p) == []
+    d["cenas"][0]["palco"] = {"tipo": "imagem", "arquivo": "assets/nao.png"}
+    d["modo"] = "zz"
+    erros = {x["motivo"] for x in motion.validar(d, p)}
+    assert any("modo inválido" in m for m in erros) and any("palco" in m for m in erros)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_validar_doc_mapa_obrigatorio(tmp_path):
+    p, d = _doc(tmp_path)
+    d.pop("mapa")
+    assert any("mapa" in x["motivo"] for x in motion.validar(d, p))
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_montar_doc_copia_midias_e_carrega_doc_js(tmp_path):
+    p, _ = _doc(tmp_path)
+    r = motion.montar(p)
+    assert r["ok"], r
+    comp = p / "motion"
+    html = (comp / "index.html").read_text(encoding="utf-8")
+    assert '<script src="kit/doc.js"></script>' in html and (comp / "kit" / "doc.js").is_file()
+    assert (comp / "assets" / "mapa.png").is_file()
+    assert [c["id"] for c in r["cenas"]] == ["c01", "c02", "c900", "c901"]
+
+
+@pw
+def test_montar_sem_modo_doc_nao_carrega_doc_js(tmp_path):
+    p = _proj(tmp_path, _cenas())
+    assert motion.montar(p)["ok"]
+    assert "doc.js" not in (p / "motion" / "index.html").read_text(encoding="utf-8")

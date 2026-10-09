@@ -398,7 +398,8 @@
       const layer = document.getElementById(cena.id);
       const entra = i > 0 ? D.cenas[i - 1].saida : null;
       const c = { tl, layer, el: layer.querySelector(".k-conteudo"), tema, ini, W: D.largura || 1080, H: D.altura || 1920,
-        t0: ini + (entra ? entra.dur : 0) + F(4), F, cue, C: COMP };
+        t0: ini + (entra ? entra.dur : 0) + F(4), F, cue, C: COMP,
+        fala: ini + (entra ? entra.dur : 0), cena, entra: entra ? entra.transicao : null };
       fundo(c, cena);
       let fim;
       try {
@@ -418,7 +419,7 @@
         }
       }
       tl.set(layer, { visibility: "visible" }, ini).set(layer, { visibility: "hidden" }, ini + dur);
-      if (entra) TRANS[entra.transicao](tl, layer, ini, entra.dur, tema);
+      if (entra) TRANS[entra.transicao](tl, layer, ini, entra.dur, tema, i > 0 ? document.getElementById(D.cenas[i - 1].id) : null);
       const claro = cena.fundo === "claro";
       tl.set(wmClaro, { autoAlpha: cena.fixos && claro ? 0.55 : 0 }, ini);
       tl.set(wmEscuro, { autoAlpha: cena.fixos && !claro ? 0.55 : 0 }, ini);
@@ -451,6 +452,10 @@
       customs[id] = fn;
       customsVezes[id] = (customsVezes[id] || 0) + 1;
     },
+    tipo: (nome, fn) => { TIPOS[nome] = fn; },
+    transicao: (nome, fn) => { TRANS[nome] = fn; },
+    pintor: (fn) => { pintores.push(fn); },
+    cue,
     montar, F, FPS,
   };
 })();

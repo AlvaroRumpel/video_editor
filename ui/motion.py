@@ -26,13 +26,14 @@ ASPECTOS = {"9:16": {"w": 1080, "h": 1920, "safe": (80, 180, 1000, 1660)},   # s
 W, H = ASPECTOS["9:16"]["w"], ASPECTOS["9:16"]["h"]
 SAFE = ASPECTOS["9:16"]["safe"]
 
-TIPOS = ("frase", "numero", "lista", "tela", "endcard", "custom")
+TIPOS = ("frase", "numero", "lista", "tela", "endcard", "custom", "doc", "vinheta", "telafinal")
 FUNDOS = ("claro", "escuro", "marca")
 ESTILOS = ("display", "punch", "corpo", "mono")
 ANIMS = ("palavras", "letras", "mascara", "fade")
 CORES = ("tinta", "acento", "sobre")
 DESTAQUES = ("marca-texto", "risco", "assinatura")
-TRANSICOES = ("fade", "wipe", "iris")
+TRANSICOES = ("fade", "wipe", "iris", "mergulho", "recuo", "corte")
+PALCOS = ("mapa", "imagem", "escuro")
 MOLDURAS = ("celular", "browser", "nenhuma")
 MARCADORES = ("numero", "assinatura", "check")
 AJUSTES = ("cover", "contain")
@@ -41,7 +42,8 @@ EXT_VID = (".mp4",)
 ID_RE = re.compile(r"c[0-9]{2,}")
 MARCA_RE = re.compile(r"[a-z0-9-]+")
 FUNDO_PADRAO = {"frase": "claro", "numero": "claro", "lista": "claro", "tela": "claro",
-                "endcard": "marca", "custom": "claro"}
+                "endcard": "marca", "custom": "claro",
+                "doc": "escuro", "vinheta": "escuro", "telafinal": "escuro"}
 TEMA_CHAVES = (
     "cores.tinta", "cores.acento", "cores.sobre", "cores.marca_texto", "cores.risco", "cores.manchas",
     "cores.fundo.claro", "cores.fundo.escuro", "cores.fundo.marca",
@@ -164,7 +166,31 @@ def _v_custom(c, proj, e):
     if "dur" not in c:
         e("custom precisa de dur")
 
-VALIDA_TIPO = {"frase": _v_frase, "numero": _v_numero, "lista": _v_lista, "tela": _v_tela,
+def _v_doc(c, proj, e):
+    p = c.get("palco")
+    if not isinstance(p, dict) or p.get("tipo") not in PALCOS:
+        return e(f"palco inválido: {p!r} ({'|'.join(PALCOS)})")
+    if p["tipo"] == "imagem" and _dentro(proj, p.get("arquivo")) is None:
+        e(f"palco: arquivo não encontrado no projeto: {p.get('arquivo')!r}")
+    if not isinstance(c.get("beats", []), list):
+        e("beats precisa ser lista")
+    for b in c.get("beats", []):
+        if isinstance(b, dict) and b.get("faz") == "inserto" and _dentro(proj, b.get("arquivo")) is None:
+            e(f"inserto: arquivo não encontrado no projeto: {b.get('arquivo')!r}")
+
+
+def _v_vinheta(c, proj, e):
+    if not isinstance(c.get("titulo", ""), str):
+        e("titulo precisa ser texto")
+
+
+def _v_telafinal(c, proj, e):
+    t = c.get("textos", {})
+    if not isinstance(t, dict) or not all(isinstance(t.get(k, ""), str) for k in ("prox", "inscreva", "video")):
+        e("textos precisa de prox, inscreva e video (texto)")
+
+
+VALIDA_TIPO = {"doc": _v_doc, "vinheta": _v_vinheta, "telafinal": _v_telafinal, "frase": _v_frase, "numero": _v_numero, "lista": _v_lista, "tela": _v_tela,
                "endcard": _v_endcard, "custom": _v_custom}
 
 def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
@@ -177,6 +203,15 @@ def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
 
     if dados.get("aspecto", "9:16") not in ASPECTOS:
         e("raiz", f"aspecto inválido: {dados.get('aspecto')!r} (9:16 ou 16:9)")
+    if dados.get("modo") not in (None, "doc"):
+        e("raiz", f"modo inválido: {dados.get('modo')!r} (doc)")
+    if dados.get("modo") == "doc":
+        usa_mapa = any(isinstance(c, dict) and isinstance(c.get("palco"), dict) and c["palco"].get("tipo") == "mapa"
+                       for c in dados.get("cenas") or [])
+        m = dados.get("mapa")
+        if usa_mapa and (not isinstance(m, dict) or _dentro(proj, m.get("arquivo")) is None
+                         or not isinstance(m.get("pontos"), dict) or not _num(m.get("w")) or not _num(m.get("h"))):
+            e("raiz", "palco mapa precisa de mapa {arquivo, pontos, w, h} com arquivo no projeto")
     cenas = dados.get("cenas")
     if not isinstance(cenas, list) or not cenas:
         e("raiz", "cenas vazio")
@@ -211,7 +246,7 @@ def validar(dados, proj: Path, lang: str | None = None) -> list[dict]:
                 e(i, "última cena não tem saida")
             elif not isinstance(s, dict) or s.get("transicao") not in TRANSICOES \
                     or not (_num(s.get("dur")) and 0 < s["dur"] <= 2):
-                e(i, "saida precisa de transicao (fade|wipe|iris) e dur em (0, 2]")
+                e(i, "saida precisa de transicao ({'|'.join(TRANSICOES)}) e dur em (0, 2]")
         err = lambda m, i=i: e(i, m)
         if tipo == "endcard":
             _v_endcard(c, proj, err, lang)
@@ -289,7 +324,8 @@ def _tema_js(tema: dict) -> dict:
                            "src": f"kit/tema/{Path(a['arquivo']).name}" if a["tipo"] == "icone" else None},
             "wordmark": tema["fixos"]["wordmark"], "wordmark_fonte": tema["fixos"]["wordmark_fonte"],
             "barra": bool(tema["fixos"]["barra"]), "grao": float(tema["fixos"]["grao"]),
-            "endcard_marca": tema["endcard"]["marca"], "url": tema["endcard"]["url"]}
+            "endcard_marca": tema["endcard"]["marca"], "url": tema["endcard"]["url"],
+            "tagline": tema["endcard"]["tagline"]}
 
 
 MARCADOR_DIR = ".motion"   # só pasta com este arquivo pode ser apagada pelo montar
@@ -303,7 +339,7 @@ HTML = """<!doctype html>
 <link rel="stylesheet" href="kit/kit.css">
 <style>{css}</style>
 <script src="kit/vendor/gsap.min.js"></script>
-<script src="kit/kit.js"></script>
+<script src="kit/kit.js"></script>{extra}
 </head>
 <body>
 <div id="root" data-composition-id="main" data-start="0" data-duration="{dur}" data-width="{w}" data-height="{h}" data-fps="30">
@@ -364,10 +400,12 @@ def _html(d: dict, tema: dict, customs: dict, tempos: dict | None) -> str:
         partes.append(f'<div id="{c["id"]}" class="clip cena" {_attrs(t, i)}>{inner}</div>')
     cenas_js = [{k: v for k, v in c.items() if not k.startswith("_")} for c in d["cenas"]]
     a = ASPECTOS[d["aspecto"]]
-    dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js, "largura": a["w"], "altura": a["h"]},
-                       ensure_ascii=False).replace("</", "<\\/")
+    dados = json.dumps({"tema": _tema_js(tema), "cenas": cenas_js, "largura": a["w"], "altura": a["h"],
+                        "mapa": d.get("mapa")}, ensure_ascii=False).replace("</", "<\\/")
+    extra = '\n<script src="kit/doc.js"></script>' if d.get("modo") == "doc" else ""
     return HTML.format(css=_css_vars(tema), dur=f"{total:.3f}", cenas="\n".join(partes), dados=dados,
-                       w=a["w"], h=a["h"], asp=d["aspecto"], res="landscape" if a["w"] > a["h"] else "portrait")
+                       w=a["w"], h=a["h"], asp=d["aspecto"], res="landscape" if a["w"] > a["h"] else "portrait",
+                       extra=extra)
 
 
 def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> None:
@@ -391,6 +429,16 @@ def _preparar(comp: Path, proj: Path, d: dict, tema: dict, motion_dir: Path) -> 
             c["_ext"] = src.suffix.lower()
             (comp / "midia").mkdir(exist_ok=True)
             shutil.copy2(src, comp / "midia" / f"{c['id']}{c['_ext']}")
+    if d.get("modo") == "doc":   # mapa, palcos e insertos: copiados no mesmo caminho relativo
+        rels = {d["mapa"]["arquivo"]} if d.get("mapa") else set()
+        for c in d["cenas"]:
+            if isinstance(c.get("palco"), dict) and c["palco"].get("arquivo"):
+                rels.add(c["palco"]["arquivo"])
+            rels |= {b["arquivo"] for b in c.get("beats", []) if b.get("faz") == "inserto"}
+        for rel in rels:
+            dst = comp / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_dentro(proj, rel), dst)
 
 
 def _medir(index: Path, aspecto: str = "9:16") -> dict:
