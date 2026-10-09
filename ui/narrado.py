@@ -5,6 +5,7 @@ Substitui o fluxo bruto/*.mkv quando não há gravação."""
 import copy
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -201,3 +202,86 @@ def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None) -> dict:
     if erro:
         raise RuntimeError(f"TTS parou após {len(geradas)} cenas: {erro}")
     return {"status": "ok", "geradas": geradas, "caracteres": usados}
+
+
+def offsets(tempos: dict) -> dict:
+    """Fala de cada cena começa quando a transição de entrada termina."""
+    out, entra = {}, 0.0
+    for c in tempos["cenas"]:
+        out[c["id"]] = round(c["ini"] + entra, 3)
+        entra = c["saida"] or 0.0
+    return out
+
+
+def srt(ep: dict, lang: str, tempos: dict, st: dict) -> str:
+    """Blocos de até 2 linhas de 42 caracteres; tempo da fala da cena dividido pelo tamanho de cada bloco."""
+    off, blocos = offsets(tempos), []
+    for c in ep["cenas"]:
+        linhas = dublagem._linhas(" ".join(_loc(c["texto"], lang).split()))
+        partes = ["\n".join(linhas[k:k + 2]) for k in range(0, len(linhas), 2)]
+        total = sum(len(b) for b in partes)
+        t, dur = off[c["id"]], st[c["id"]]["dur"]
+        for b in partes:
+            d = dur * len(b) / total
+            blocos.append((t, t + d, b))
+            t += d
+    return "".join(f"{n}\n{dublagem._ts(a)} --> {dublagem._ts(b)}\n{txt}\n\n"
+                   for n, (a, b, txt) in enumerate(blocos, 1))
+
+
+def escrever_cenas(proj: Path, lang: str) -> Path:
+    proj = Path(proj)
+    ep = ler(proj)
+    st = estado(proj, lang)
+    faltam = [c["id"] for c in ep["cenas"] if c["id"] not in st or not (proj / st[c["id"]]["audio"]).is_file()]
+    if faltam:
+        raise ValueError(f"rode tts antes: sem áudio em {', '.join(faltam)}")
+    d = cenas_motion(ep, lang, {k: v["dur"] for k, v in st.items()}, motion.carregar_tema(ep["marca"]))
+    dst = proj / f"cenas.{lang}.json"
+    pipeline.atomic_write_json(dst, d)
+    return dst
+
+
+def _ff(args: list) -> None:
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
+
+
+def _voz(proj: Path, lang: str, tempos: dict, st: dict) -> Path:
+    off, ins, fs = offsets(tempos), [], []
+    for k, c in enumerate(tempos["cenas"]):
+        ins += ["-i", str(proj / st[c["id"]]["audio"])]
+        fs.append(f"[{k}:a]aresample=48000,adelay={int(round(off[c['id']] * 1000))}:all=1[a{k}]")
+    n = len(tempos["cenas"])
+    graph = (";".join(fs) + ";" + "".join(f"[a{k}]" for k in range(n))
+             + f"amix=inputs={n}:normalize=0,apad,atrim=0:{tempos['duracao']:.3f}[out]")
+    dst = _dir(proj, lang) / "narracao.wav"
+    _ff([*ins, "-filter_complex", graph, "-map", "[out]", "-ac", "2", str(dst)])
+    return dst
+
+
+def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
+    proj = Path(proj)
+    ep = ler(proj)
+    escrever_cenas(proj, lang)
+    r = motion.render(proj, rascunho, lang)
+    if not r.get("ok"):
+        return r
+    tempos = pipeline.read_json(proj / f"motion.{lang}" / "tempos.json", None)
+    if not tempos:
+        raise RuntimeError(f"motion.{lang}/tempos.json ilegível após render")
+    st = estado(proj, lang)
+    voz = _voz(proj, lang, tempos, st)
+    out = _dir(proj, lang) / ("final_rascunho.mp4" if rascunho else "final.mp4")
+    if trilha:
+        tmp = out.with_name(f".{out.stem}.voz.mp4")
+        _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy", *audio.AAC, str(tmp)])
+        try:
+            audio.mix_trilha(tmp, Path(trilha), out)          # ducking + loudnorm −14
+        finally:
+            tmp.unlink(missing_ok=True)
+    else:
+        _ff(["-i", r["video"], "-i", str(voz), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+             "-af", "loudnorm=I=-14:TP=-1:LRA=11", *audio.AAC, "-movflags", "+faststart", str(out)])
+    legenda = out.with_suffix(".srt")
+    legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
+    return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"]}

@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+import audio
 import budget
 import motion
 import narrado
+import pipeline
 
 ACHADO = ("- [F1] Explosão de 1908 derrubou 80 milhões de árvores — fonte: Smithsonian Magazine (secundaria)"
           " — https://www.smithsonianmag.com/x — acesso 2026-10-08\n  > trecho\n")
@@ -188,3 +190,76 @@ def test_tts_falha_no_meio_registra_o_gasto(tmp_path, root, mp3):
     with pytest.raises(RuntimeError, match="após 1 cenas"):
         narrado.tts(p, "pt", "voz1", root=root, _fetch=f)
     assert list(narrado.estado(p, "pt")) == ["c01"] and budget.gasto_projeto(p)["creditos"] > 0
+
+
+def _tempos():
+    return {"duracao": 6.4, "aspecto": "16:9", "cenas": [
+        {"id": "c01", "ini": 0.0, "dur": 4.0, "min": 1, "saida": 0.6},
+        {"id": "c02", "ini": 3.4, "dur": 3.0, "min": 1, "saida": 0}]}
+
+
+def test_offsets_comecam_depois_da_transicao():
+    assert narrado.offsets(_tempos()) == {"c01": 0.0, "c02": 4.0}
+
+
+def test_srt_divide_texto_no_tempo_da_fala_utf8():
+    ep = _ep()
+    ep["cenas"][1]["texto"]["pt"] = ("Ninguém viu a explosão — nem os caçadores evenques, "
+                                    "que só falariam dela anos depois, \"com medo\".")
+    st = {"c01": {"dur": 2.0}, "c02": {"dur": 3.0}}
+    s = narrado.srt(ep, "pt", _tempos(), st)
+    blocos = [b for b in s.strip().split("\n\n")]
+    assert blocos[0].startswith("1\n00:00:00,000 --> 00:00:02,000\nEm 1908")
+    assert "\n00:00:04,000 --> " in blocos[1] and "caçadores" in s and "\"com medo\"" in s
+    assert blocos[-1].split("\n")[1].endswith("00:00:07,000")             # 4.0 + 3.0
+    assert all(len(l) <= 42 for b in blocos for l in b.split("\n")[2:])
+
+
+def test_escrever_cenas_exige_tts_de_todas(tmp_path):
+    p = _proj(tmp_path)
+    (p / "pt").mkdir()
+    (p / "pt" / "narracao.json").write_text(json.dumps({"c01": {"dur": 2.0, "audio": "pt/audio/c01.mp3"}}),
+                                            encoding="utf-8")
+    with pytest.raises(ValueError, match="rode tts.*c02"):
+        narrado.escrever_cenas(p, "pt")
+
+
+def _fake_render(proj, rascunho=False, lang=None, motion_dir=None):
+    d = json.loads((proj / f"cenas.{lang}.json").read_text(encoding="utf-8"))
+    ini, cenas = 0.0, []
+    for k, c in enumerate(d["cenas"]):
+        s = 0.6 if k < len(d["cenas"]) - 1 else 0
+        cenas.append({"id": c["id"], "ini": round(ini, 3), "dur": c["dur"], "min": 1, "saida": s})
+        ini += c["dur"] - s
+    pipeline.atomic_write_json(proj / f"motion.{lang}" / "tempos.json",
+                               {"duracao": round(ini, 3), "aspecto": "16:9", "cenas": cenas})
+    v = proj / f"video{'_rascunho' if rascunho else ''}.{lang}.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=gray:s=1920x1080:r=30:d={ini:.3f}",
+                    "-pix_fmt", "yuv420p", str(v)], check=True)
+    return {"ok": True, "video": str(v), "duracao": round(ini, 3)}
+
+
+@ffmpeg
+def test_render_mixa_voz_e_gera_srt(tmp_path, root, mp3, monkeypatch):
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    monkeypatch.setattr(motion, "render", _fake_render)
+    r = narrado.render(p, "pt")
+    assert r["ok"] and Path(r["video"]) == p / "pt" / "final.mp4"
+    tempos = json.loads((p / "motion.pt" / "tempos.json").read_text(encoding="utf-8"))
+    assert abs(audio.duracao(Path(r["video"])) - tempos["duracao"]) < 0.1
+    streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height",
+                              "-of", "json", r["video"]], capture_output=True, text=True, check=True).stdout
+    s = json.loads(streams)["streams"]
+    assert {x["codec_type"] for x in s} == {"video", "audio"}
+    assert any(x.get("width") == 1920 and x.get("height") == 1080 for x in s)
+    assert (p / "pt" / "final.srt").read_text(encoding="utf-8").startswith("1\n00:00:00,000")
+
+
+@ffmpeg
+def test_render_rascunho_nao_sobrescreve_final(tmp_path, root, mp3, monkeypatch):
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", "voz1", root=root, _fetch=_fetch(mp3, []))
+    monkeypatch.setattr(motion, "render", _fake_render)
+    r = narrado.render(p, "pt", rascunho=True)
+    assert Path(r["video"]).name == "final_rascunho.mp4" and not (p / "pt" / "final.mp4").exists()
