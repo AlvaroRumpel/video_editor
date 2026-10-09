@@ -187,7 +187,48 @@ def _fetch_google(key: str, url: str, body: dict) -> bytes:
         raise RuntimeError(f"Google TTS falhou: {e}") from e
 
 
-def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None, provedor="elevenlabs") -> dict:
+TRATAMENTO_CHAVES = ("tom", "graves_db", "agudos_db")
+
+
+def _checa_tratamento(tr) -> None:
+    if tr is None:
+        return
+    if not isinstance(tr, dict):
+        raise ValueError("tratamento precisa ser objeto")
+    for k, v in tr.items():
+        if k not in TRATAMENTO_CHAVES:
+            raise ValueError(f"tratamento: chave desconhecida {k!r} ({', '.join(TRATAMENTO_CHAVES)})")
+        if not motion._num(v, float("-inf")) or abs(v) > (6 if k == "tom" else 12):
+            raise ValueError(f"tratamento: {k} inválido: {v!r} (tom ±6 semitons, dB ±12)")
+
+
+def _filtro(tr: dict) -> str:
+    """Voz de narrador: tom (semitons, sem mudar a duração), EQ e compressão leve."""
+    f = ["aresample=48000"]
+    tom = tr.get("tom", 0)
+    if tom:
+        r = 2 ** (tom / 12)
+        f += [f"asetrate=48000*{r:.6f}", "aresample=48000", f"atempo={1 / r:.6f}"]
+    if tr.get("graves_db"):
+        f.append(f"bass=g={tr['graves_db']}:f=140:w=0.8")
+    if tr.get("agudos_db"):
+        f.append(f"treble=g={tr['agudos_db']}:f=7000")
+    f.append("acompressor=threshold=-22dB:ratio=3:attack=8:release=180:makeup=2")
+    return ",".join(f)
+
+
+def perfil(path: Path, lang: str) -> dict:
+    """Configuração de voz do idioma no canal (canal/idiomas.json) → kwargs do tts."""
+    d = pipeline.read_json(Path(path), {})
+    c = d.get(lang) if isinstance(d, dict) else None
+    if not isinstance(c, dict) or not motion._str(c.get("voz")):
+        raise ValueError(f"{path}: idioma {lang} sem 'voz' configurada")
+    return {"voice_id": c["voz"], "provedor": c.get("provedor", "elevenlabs"),
+            "velocidade": c.get("velocidade"), "tratamento": c.get("tratamento")}
+
+
+def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None, provedor="elevenlabs",
+        velocidade=None, tratamento=None) -> dict:
     """mp3 por cena só onde texto, voz ou provedor mudou. Valida e autoriza antes; registra o gasto mesmo se parar no meio."""
     root = Path(root or pipeline.ROOT)
     proj = Path(proj)
@@ -195,7 +236,12 @@ def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None, provedor="
         raise ValueError(f"provedor desconhecido: {provedor!r} ({'|'.join(PROVEDORES)})")
     if not motion._str(voice_id):
         raise ValueError("voz vazia: configurar canal/idiomas.json")
+    if velocidade is not None and (provedor != "google" or not motion._num(velocidade) or not 0.25 <= velocidade <= 2):
+        raise ValueError(f"velocidade inválida: {velocidade!r} (só no google, entre 0.25 e 2)")
+    _checa_tratamento(tratamento)
     voz = voice_id if provedor == "elevenlabs" else f"{provedor}:{voice_id}"   # entra no hash do cache
+    if velocidade is not None or tratamento:
+        voz += "|" + json.dumps({"v": velocidade, "t": tratamento}, sort_keys=True)
     ep = ler(proj)
     erros = validar(ep, proj, lang, visuais=False)
     if provedor == "google":
@@ -223,7 +269,8 @@ def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None, provedor="
         fetch, url = _fetch or _fetch_google, GOOGLE_URL
         corpo = lambda txt: {"input": {"text": txt},     # noqa: E731
                              "voice": {"languageCode": "-".join(voice_id.split("-")[:2]), "name": voice_id},
-                             "audioConfig": {"audioEncoding": "MP3"}}
+                             "audioConfig": {"audioEncoding": "MP3",
+                                             **({"speakingRate": velocidade} if velocidade is not None else {})}}
     else:
         key, nome_chave = budget._chave_elevenlabs(), "ELEVENLABS_API_KEY"
         fetch, url = _fetch or audio._fetch_elevenlabs, dublagem.TTS_URL.format(voice_id=voice_id)
@@ -241,7 +288,16 @@ def tts(proj, lang, voice_id, root=None, aprovacao=None, _fetch=None, provedor="
                 erro = str(ex)
                 break
             usados += len(txt)          # crédito gasto no fetch: conta antes de gravar
-            (pasta / f"{cid}.mp3").write_bytes(dados)
+            if tratamento:
+                cru = pasta / f"{cid}.cru.mp3"
+                cru.write_bytes(dados)
+                try:
+                    _ff(["-i", str(cru), "-af", _filtro(tratamento), "-c:a", "libmp3lame", "-q:a", "2",
+                         str(pasta / f"{cid}.mp3")])
+                finally:
+                    cru.unlink(missing_ok=True)
+            else:
+                (pasta / f"{cid}.mp3").write_bytes(dados)
             rel = f"{lang}/audio/{cid}.mp3"
             st[cid] = {"hash": h, "voz": voz, "audio": rel, "dur": round(audio.duracao(proj / rel), 3)}
             geradas.append(cid)
@@ -433,7 +489,10 @@ def _cli(ns):
         erros = validar(ler(p), p, ns.lang)
         return {"ok": not erros, "erros": erros}, (0 if not erros else 1)
     if ns.cmd == "tts":
-        r = tts(p, ns.lang, ns.voz, root=Path(ns.root), aprovacao=ns.aprovacao, provedor=ns.provedor)
+        cfg = perfil(Path(ns.perfil), ns.lang) if ns.perfil else {"voice_id": ns.voz, "provedor": ns.provedor}
+        if not cfg["voice_id"]:
+            raise ValueError("informe --perfil canal/idiomas.json ou --voz")
+        r = tts(p, ns.lang, root=Path(ns.root), aprovacao=ns.aprovacao, **cfg)
         return r, EXIT.get(r["status"], 4)
     if ns.cmd == "render":
         r = render(p, ns.lang, ns.rascunho, ns.trilha)
@@ -455,7 +514,8 @@ if __name__ == "__main__":
         sp.add_argument("proj")
         sp.add_argument("--lang", default="pt")
         if nome == "tts":
-            sp.add_argument("--voz", required=True)
+            sp.add_argument("--perfil", help="canal/idiomas.json: provedor, voz, velocidade e tratamento do idioma")
+            sp.add_argument("--voz")
             sp.add_argument("--provedor", choices=sorted(PROVEDORES), default="elevenlabs")
             sp.add_argument("--aprovacao", type=int)
         if nome == "render":

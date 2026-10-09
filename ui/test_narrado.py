@@ -424,3 +424,60 @@ def test_fetch_google_usa_header_e_decodifica(monkeypatch):
     out = narrado._fetch_google("gkey", narrado.GOOGLE_URL, {"input": {"text": "oi"}})
     req = visto["req"]
     assert out == b"ID3audio" and req.get_header("X-goog-api-key") == "gkey" and "gkey" not in req.full_url
+
+
+# --- velocidade e tratamento de voz ---
+
+TRAT = {"tom": -1, "graves_db": 2, "agudos_db": -3}
+
+
+def test_filtro_tratamento():
+    f = narrado._filtro(TRAT)
+    assert "asetrate=48000*" in f and "atempo=" in f and "bass=g=2" in f and "treble=g=-3" in f
+    assert "acompressor" in f
+    assert "asetrate" not in narrado._filtro({"graves_db": 2})          # tom 0: não mexe no pitch
+
+
+@pytest.mark.parametrize("tr, trecho", [({"eco": 1}, "eco"), ({"tom": 9}, "tom"), ({"graves_db": "x"}, "graves_db")])
+def test_tratamento_invalido(tmp_path, root, tr, trecho):
+    with pytest.raises(ValueError, match=trecho):
+        narrado.tts(_proj(tmp_path), "pt", VOZ_G, root=root, provedor="google", tratamento=tr)
+
+
+@ffmpeg
+def test_tts_google_velocidade_e_tratamento(tmp_path, root, mp3, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "gkey")
+    p, ch = _proj(tmp_path), []
+    r = narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, ch), provedor="google",
+                    velocidade=0.95, tratamento=TRAT)
+    assert r["status"] == "ok" and ch[0][2]["audioConfig"]["speakingRate"] == 0.95
+    st = narrado.estado(p, "pt")
+    out = p / st["c01"]["audio"]
+    assert out.read_bytes() != mp3                                        # passou pelo ffmpeg
+    assert abs(st["c01"]["dur"] - 1.5) < 0.1                              # tom não muda a duração
+    assert not list((p / "pt" / "audio").glob("*.cru.*"))                 # sem sobra do bruto
+    narrado.escrever_cenas(p, "pt")
+
+
+@ffmpeg
+def test_tts_mudar_tratamento_regenera(tmp_path, root, mp3, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "gkey")
+    p = _proj(tmp_path)
+    narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, []), provedor="google", tratamento=TRAT)
+    r = narrado.tts(p, "pt", VOZ_G, root=root, _fetch=_fetch_g(mp3, []), provedor="google",
+                    tratamento={**TRAT, "tom": -2})
+    assert r["geradas"] == ["c01", "c02"]
+
+
+def test_velocidade_so_no_google(tmp_path, root):
+    with pytest.raises(ValueError, match="velocidade"):
+        narrado.tts(_proj(tmp_path), "pt", "v", root=root, velocidade=0.9)
+
+
+def test_perfil_le_idioma_do_canal(tmp_path):
+    f = tmp_path / "idiomas.json"
+    f.write_text(json.dumps({"pt": {"provedor": "google", "voz": VOZ_G, "velocidade": 0.95, "tratamento": TRAT,
+                                    "handle": "@x"}}), encoding="utf-8")
+    assert narrado.perfil(f, "pt") == {"voice_id": VOZ_G, "provedor": "google", "velocidade": 0.95, "tratamento": TRAT}
+    with pytest.raises(ValueError, match="en"):
+        narrado.perfil(f, "en")
