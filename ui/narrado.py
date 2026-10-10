@@ -297,6 +297,11 @@ def validar(ep: dict, proj: Path, lang: str, visuais: bool = True) -> list[dict]
     achados = _achados(proj)
     if achados is None:
         e("raiz", "falta pesquisa.md")
+    if ep.get("aspecto", "16:9") not in motion.ASPECTOS:
+        e("raiz", f"aspecto inválido: {ep.get('aspecto')!r} (9:16 ou 16:9)")
+    td = ep.get("tela_final_dur")
+    if td is not None and not (motion._num(td) and 1 <= td <= TELAFINAL_DUR):
+        e("raiz", f"tela_final_dur inválido: {td!r} (1 a {TELAFINAL_DUR:g} s)")
     if visuais and "mapa" in ep:
         m = ep["mapa"]
         if not isinstance(m, dict) or not isinstance(m.get("pontos"), dict) or not m["pontos"] or not all(
@@ -476,14 +481,15 @@ def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
                   "textos": TEXTOS_FIM.get(lang, TEXTOS_FIM["pt"]), "_fala": None})
     for n, k in enumerate(lista[:-1]):
         k["saida"] = k.get("_saida") or _transicao(k, lista[n + 1])
+    tela = ep.get("tela_final_dur", TELAFINAL_DUR)
     for n, k in enumerate(lista):
         entra = lista[n - 1]["saida"]["dur"] if n else 0.0
         sai = k["saida"]["dur"] if "saida" in k else 0.0
         fala = k.pop("_fala")
         k.pop("_saida", None)
-        corpo = fala + PAUSA if fala is not None else (VINHETA_DUR if k["tipo"] == "vinheta" else TELAFINAL_DUR)
+        corpo = fala + PAUSA if fala is not None else (VINHETA_DUR if k["tipo"] == "vinheta" else tela)
         k["dur"], k["dur_piso"] = round(entra + corpo + sai, 3), True
-    d = {"marca": ep["marca"], "aspecto": "16:9", "modo": "doc", "cenas": lista}
+    d = {"marca": ep["marca"], "aspecto": ep.get("aspecto", "16:9"), "modo": "doc", "cenas": lista}
     if ep.get("mapa"):
         d["mapa"] = {"arquivo": ep["mapa"]["src"], "pontos": ep["mapa"]["pontos"]}
     if ep.get("atores"):
@@ -512,7 +518,7 @@ def cenas_motion(ep: dict, lang: str, duracoes: dict, tema: dict, palavras: dict
         k["dur_piso"] = True     # fala curta: o kit estica até o mínimo da animação; a voz segue os tempos medidos
         out.append(k)
         entra = saida
-    return {"marca": ep["marca"], "aspecto": "16:9", "cenas": out}
+    return {"marca": ep["marca"], "aspecto": ep.get("aspecto", "16:9"), "cenas": out}
 
 
 def _dir(proj: Path, lang: str) -> Path:

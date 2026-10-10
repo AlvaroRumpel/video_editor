@@ -1007,3 +1007,33 @@ def test_acoes_sobrepostas_no_mesmo_lado_geram_aviso():
     av = narrado.sobrepostas("c01", beats)
     assert len(av) == 1 and "c01" in av[0] and "olha" in av[0] and "fala" in av[0]
     assert narrado.sobrepostas("c01", [beats[0], {**beats[1], "s": 5.0}]) == []
+
+
+def test_cenas_motion_doc_aspecto_padrao_e_vertical_com_tela_final_curta():
+    tema = motion.carregar_tema("dark-historia")
+    ep = _ep_doc()
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))
+    assert d["aspecto"] == "16:9" and d["cenas"][-1]["dur"] == round(0.3 + narrado.TELAFINAL_DUR, 3)
+    ep["aspecto"], ep["tela_final_dur"] = "9:16", 3.0
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))
+    assert d["aspecto"] == "9:16" and d["cenas"][-1]["dur"] == round(0.3 + 3.0, 3)
+
+
+@pytest.mark.parametrize("mut, trecho", [
+    (lambda e: e.__setitem__("aspecto", "4:3"), "aspecto inválido"),
+    (lambda e: e.__setitem__("tela_final_dur", 0.2), "tela_final_dur inválido"),
+    (lambda e: e.__setitem__("tela_final_dur", 99), "tela_final_dur inválido"),
+    (lambda e: e.__setitem__("tela_final_dur", "3"), "tela_final_dur inválido"),
+])
+def test_validar_aspecto_e_tela_final(tmp_path, mut, trecho):
+    ep = _ep_doc()
+    mut(ep)
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_vertical_ok(tmp_path):
+    ep = _ep_doc()
+    ep["aspecto"], ep["tela_final_dur"] = "9:16", 3.0
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
