@@ -102,7 +102,14 @@ def casar(texto: str, transcricao) -> list[dict]:
     return [{"w": A[i], "s": round(tempos[i][0], 3), "e": round(tempos[i][1], 3)} for i in range(len(A))]
 
 
-def transcrever(mp3: Path, lang: str, modelo: str = "small") -> list:
+def nomes(texto: str) -> str:
+    """Palavras com maiúscula do roteiro (nomes próprios e inícios de frase), sem repetir: vocabulário para o
+    whisper. Não passar o texto inteiro: como initial_prompt ele vira "fala anterior" e o modelo pula trechos."""
+    return ", ".join(sorted(set(re.findall(r"\b[A-ZÀ-Ý][\wÀ-ÿ'-]*", texto or ""))))
+
+
+def transcrever(mp3: Path, lang: str, modelo: str = "small", prompt: str | None = None) -> list:
+    """prompt: texto esperado (o roteiro da cena) para o whisper reconhecer nomes próprios."""
     try:
         import numpy as np
         from faster_whisper import WhisperModel
@@ -118,7 +125,7 @@ def transcrever(mp3: Path, lang: str, modelo: str = "small") -> list:
         except Exception as e:  # noqa: BLE001 — download/rede: mensagem acionável
             raise RuntimeError(f"modelo whisper '{modelo}' indisponível ({e}); na 1ª vez precisa de rede "
                                f"para baixar ~460 MB: rode `python ui/narrado.py alinhar <proj>` com internet") from None
-    segs, _ = _MODELOS[modelo].transcribe(a, language=lang, word_timestamps=True)
+    segs, _ = _MODELOS[modelo].transcribe(a, language=lang, word_timestamps=True, initial_prompt=prompt)
     return [(w.word.strip(), float(w.start), float(w.end)) for s in segs for w in (s.words or [])]
 
 
@@ -138,7 +145,11 @@ def alinhar(proj: Path, lang: str, _transcrever=None) -> dict:
         if cache.get(c["id"], {}).get("hash") == s["hash"]:
             continue
         try:
-            pal = casar(narrado._loc(c["texto"], lang), tr(proj / s["audio"], lang))
+            texto = narrado._loc(c["texto"], lang)
+            try:
+                pal = casar(texto, tr(proj / s["audio"], lang))
+            except ValueError:   # nome próprio mal ouvido: repete com os nomes como vocabulário
+                pal = casar(texto, tr(proj / s["audio"], lang, prompt=nomes(texto)))
         except ValueError as e:
             raise ValueError(f"{c['id']}: {e}") from None
         cache[c["id"]] = {"hash": s["hash"], "palavras": pal}
