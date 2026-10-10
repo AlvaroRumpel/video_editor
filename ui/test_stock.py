@@ -545,3 +545,18 @@ def test_filtrar_largura_min_para_arquivo_historico():
     c = {"tipo": "foto", "download_url": "https://x/y.jpg", "largura": 1400}
     assert not stock._filtrar(c, "foto")
     assert stock._filtrar(c, "foto", 1200)
+
+
+def test_download_com_429_espera_e_tenta_de_novo(tmp_path, mp4, jpg, chaves, monkeypatch):
+    esperas = []
+    monkeypatch.setattr(stock.time, "sleep", lambda s: esperas.append(s))
+    downloads = {"n": 0}
+    def fetch(url, headers=None):
+        if "api.pexels.com" in url:
+            return 200, json.dumps(PEXELS_VIDEOS).encode(), {}
+        downloads["n"] += 1
+        if downloads["n"] == 1:
+            return 429, b"", {"Retry-After": "3"}
+        return 200, mp4, {}
+    r = stock.buscar("x", "video", ["pexels"], 1, tmp_path / "c", _fetch=fetch)
+    assert len(r["candidatos"]) == 1 and downloads["n"] == 2 and 3 in esperas

@@ -59,8 +59,8 @@ def _url_segura(url: str) -> str:
     return f"{p.scheme}://{p.netloc}{p.path}"
 
 
-def _json(fetch, url, headers=None):
-    """GET + JSON; 429 → espera Retry-After (≤ 60 s) uma vez. Devolve (obj|None, aviso|None)."""
+def _get(fetch, url, headers=None):
+    """GET; 429 → espera Retry-After (≤ 60 s) e tenta uma vez de novo."""
     status, corpo, h = fetch(url, headers)
     if status == 429:
         ra = next((v for k_, v in h.items() if k_.lower() == "retry-after"), "5")
@@ -70,8 +70,14 @@ def _json(fetch, url, headers=None):
             espera = 5
         time.sleep(espera)
         status, corpo, h = fetch(url, headers)
-        if status == 429:
-            return None, f"429 persistente em {_url_segura(url)}"
+    return status, corpo, h
+
+
+def _json(fetch, url, headers=None):
+    """GET + JSON (com o retry de 429 do _get). Devolve (obj|None, aviso|None)."""
+    status, corpo, h = _get(fetch, url, headers)
+    if status == 429:
+        return None, f"429 persistente em {_url_segura(url)}"
     if not (200 <= status < 300):
         return None, f"HTTP {status} em {_url_segura(url)}"
     try:
@@ -266,7 +272,7 @@ def buscar(termo: str, tipo: str, fontes: list[str], n: int, dst_dir: Path, _fet
         for c in cands:
             if baixados >= n or not _filtrar(c, tipo, largura_min):
                 continue
-            status, corpo, _ = fetch(c["download_url"], None)
+            status, corpo, _ = _get(fetch, c["download_url"], None)
             if len(corpo) > MAX_DOWNLOAD:
                 avisos.append(f"{nome}-{c['id']}: arquivo > 150 MB, descartado"); continue
             if not (200 <= status < 300) or not corpo:
