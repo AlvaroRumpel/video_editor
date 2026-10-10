@@ -1035,5 +1035,7 @@ def test_doc_vertical_legenda_cabe_e_troca_de_grupo(tmp_path):
         op = lambda t: pg.evaluate("""(t) => { __kit.ir(t); return [...document.querySelectorAll('#c01 .d-legenda span')]
             .map(e => parseFloat(getComputedStyle(e).opacity)); }""", t)
         a, c = op(0.6), op(1.5)
+        caixa = float(pg.evaluate("""() => { __kit.ir(0.6); return getComputedStyle(document.querySelector('#c01 .d-legenda')).opacity; }"""))
         b.close()
+    assert caixa > 0.9, "contêiner da legenda nasce oculto (.d-hud>* opacity 0) e precisa de mostra()"
     assert a[0] > 0.9 and a[1] < 0.1 and c[0] < 0.1 and c[1] > 0.9

@@ -393,6 +393,7 @@ html[data-aspecto="9:16"] .d-legenda span{position:absolute;left:0;right:0;top:0
     legenda(ctx, b) {
       const box = el("div", "d-legenda t"), { tl } = ctx.c;
       ctx.hud.appendChild(box);
+      mostra(tl, box, b.at);
       b.grupos.forEach((g) => {
         const s = texto(el("span", null, g.t)), a = ctx.c.fala + g.s, f = ctx.c.fala + g.f;
         box.appendChild(s);
