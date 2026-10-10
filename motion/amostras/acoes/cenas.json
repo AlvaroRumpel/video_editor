@@ -1,0 +1,90 @@
+{
+ "marca": "dark-historia",
+ "aspecto": "16:9",
+ "modo": "doc",
+ "atores": {
+  "kendall": {
+   "traje": "capitao",
+   "nome": "Capitão Kendall"
+  },
+  "dew": {
+   "traje": "inspetor"
+  },
+  "casal": {
+   "traje": [
+    "medico",
+    "menino"
+   ]
+  }
+ },
+ "cenas": [
+  {
+   "id": "c01",
+   "tipo": "doc",
+   "fundo": "escuro",
+   "palco": {
+    "tipo": "escuro"
+   },
+   "dur": 34,
+   "dur_piso": true,
+   "beats": [
+    {
+     "faz": "acao",
+     "modelo": "olha",
+     "ator": "kendall",
+     "alvo": "casal",
+     "lado": "esq",
+     "s": 0.5
+    },
+    {
+     "faz": "acao",
+     "modelo": "fala",
+     "ator": "dew",
+     "alvo": "casal",
+     "texto": "Doutor Crippen?",
+     "lado": "dir",
+     "s": 5
+    },
+    {
+     "faz": "acao",
+     "modelo": "telegrama",
+     "texto": "Suspeitos a bordo",
+     "lado": "centro",
+     "s": 9.5
+    },
+    {
+     "faz": "acao",
+     "modelo": "le",
+     "ator": "dew",
+     "texto": "Procurado: Crippen",
+     "lado": "esq",
+     "s": 14
+    },
+    {
+     "faz": "acao",
+     "modelo": "aponta",
+     "ator": "kendall",
+     "alvo": "casal",
+     "lado": "dir",
+     "s": 18.5
+    },
+    {
+     "faz": "acao",
+     "modelo": "anda",
+     "ator": "dew",
+     "de": "esq",
+     "para": "dir",
+     "lado": "centro",
+     "s": 22
+    },
+    {
+     "faz": "acao",
+     "modelo": "sobe_a_bordo",
+     "ator": "dew",
+     "lado": "esq",
+     "s": 26.5
+    }
+   ]
+  }
+ ]
+}

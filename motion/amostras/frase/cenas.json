@@ -1,0 +1,5 @@
+{"marca": "dark-historia", "aspecto": "16:9", "modo": "doc",
+ "cenas": [{"id": "c01", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "escuro"}, "dur": 9, "dur_piso": true,
+  "beats": [{"faz": "palavras", "frase": "Ordenou que todos fossem para a mesma ilha", "risco": "mesma",
+             "palavras": ["Ordenou", "que", "todos", "fossem", "para", "a", "mesma", "ilha"],
+             "ts": [0.5, 0.9, 1.2, 1.6, 2.0, 2.2, 2.4, 2.9], "s": 0.5}]}]}

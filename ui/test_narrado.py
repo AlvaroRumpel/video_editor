@@ -731,7 +731,7 @@ def test_render_doc_sfx_trilha_realces_e_ritmo(tmp_path, root, mp3, monkeypatch)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=100:d=2", str(trilha)], check=True)
     r = narrado.render(p, "pt", rascunho=True, trilha=trilha)
     assert chamadas["realces"] == esperado
-    assert all("sem beat" in a for a in r["avisos"])              # c02 (fala de teste) sem beats → aviso, não erro
+    assert all("sem beat" in a or "palavras soltas" in a for a in r["avisos"])   # c02 sem beats → aviso, não erro
 
 
 def test_descricao_inclui_creditos_de_mapa_fundo_e_inserto(tmp_path):
@@ -861,3 +861,149 @@ def test_validar_em_localizado_em_itens(tmp_path):
     assert narrado.validar(narrado.ler(p), p, "pt") == []
     b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))
     assert b[-1]["itens"][0]["s"] == 7.0                            # "doce" = token 14
+
+
+def _ep_acoes():
+    ep = _ep_doc()
+    ep["atores"] = {"kendall": {"traje": "capitao", "nome": {"pt": "Capitão Kendall"}},
+                    "casal": {"traje": ["medico", "menino"]}}
+    ep["cenas"][0]["beats"].append(
+        {"em": "chegaram", "faz": "acao", "modelo": "olha", "ator": "kendall", "alvo": "casal"})
+    return ep
+
+
+def test_validar_acao_ok(tmp_path):
+    p = _proj(tmp_path, _ep_acoes())
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("mut, trecho", [
+    (lambda b: b.update(modelo="explodir"), "modelo desconhecido"),
+    (lambda b: b.update(ator="fulano"), "ator 'fulano' não existe em atores"),
+    (lambda b: b.pop("alvo"), "olha precisa de alvo"),
+    (lambda b: b.update(lado="cima"), "lado"),
+    (lambda b: b.update(escala=2), "escala"),
+    (lambda b: b.update(dur=20), "dur"),
+    (lambda b: b.update(texto={"pt": "x" * 41}), "40 caracteres"),
+])
+def test_validar_acao_erros(tmp_path, mut, trecho):
+    ep = _ep_acoes()
+    mut(ep["cenas"][0]["beats"][-1])
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_acao_sem_atores_no_episodio(tmp_path):
+    ep = _ep_acoes()
+    del ep["atores"]
+    p = _proj(tmp_path, ep)
+    assert any("ator 'kendall' não existe em atores" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_validar_anda_de_igual_a_para(tmp_path):
+    ep = _ep_acoes()
+    ep["cenas"][0]["beats"][-1].update(modelo="anda", de="esq", para="esq")
+    del ep["cenas"][0]["beats"][-1]["alvo"]
+    p = _proj(tmp_path, ep)
+    assert any("de e para iguais" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+@pytest.mark.parametrize("traje", ["pirata", [], ["civil"] * 4, 7])
+def test_validar_atores_traje_invalido(tmp_path, traje):
+    ep = _ep_acoes()
+    ep["atores"]["kendall"]["traje"] = traje
+    p = _proj(tmp_path, ep)
+    assert any("traje" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def _com_beat(ep, beat):
+    ep["cenas"][0]["beats"].append(beat)
+    return ep
+
+
+def test_frase_valida_e_resolve(tmp_path):
+    ep = _com_beat(_ep_doc(), {"em": "não", "faz": "palavras", "frase": "Não havia água.", "risco": "água"})
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))[-1]
+    assert b["palavras"] == ["Não", "havia", "água."] and len(b["ts"]) == 3 and b["ts"] == sorted(b["ts"])
+
+
+def test_frase_com_pontuacao_e_caixa_casa_tokens(tmp_path):
+    ep = _com_beat(_ep_doc(), {"em": "Em", "faz": "palavras", "frase": "EM junho, de 1629"})
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+@pytest.mark.parametrize("frase, trecho", [
+    ("junho 1629 chegaram", "contígu"),
+    ("não havia ouro", "não está no texto"),
+    (" ".join(["havia"] * 11), "mais de 10 palavras"),
+])
+def test_frase_erros(tmp_path, frase, trecho):
+    ep = _com_beat(_ep_doc(), {"em": "junho", "faz": "palavras", "frase": frase})
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_frase_localizada(tmp_path):
+    ep = _ep_doc_en(["no", "water"])
+    ep["cenas"][0]["beats"][0] = {"faz": "palavras", "frase": {"pt": "Não havia água", "en": "There was no water"}}
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    assert narrado.validar(narrado.ler(p), p, "en") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "en", _palavras(ep, "en"))[0]
+    assert b["palavras"] == ["There", "was", "no", "water"]
+
+
+def test_aviso_palavras_soltas():
+    ep = _com_beat(_ep_doc(), {"faz": "palavras", "palavras": ["água"]})   # _ep_doc já traz 3 palavras soltas
+    assert len(narrado.avisos_direcao(ep, "pt")) == 2
+    ok = _com_beat(_ep_doc(), {"faz": "palavras", "frase": "Não havia água"})
+    assert len(narrado.avisos_direcao(ok, "pt")) == 1                      # só a lista original
+
+
+def test_cenas_doc_leva_atores_localizados():
+    ep = _ep_acoes()
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
+    assert d["atores"]["kendall"]["nome"] == "Capitão Kendall" and d["atores"]["casal"]["traje"] == ["medico", "menino"]
+    assert any(b["faz"] == "acao" for b in d["cenas"][0]["beats"])
+
+
+def test_frase_sem_em_com_artigo_repetido_e_contigua(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["texto"]["pt"] = "O capitão viu o navio afundar. Ninguém falou."
+    ep["cenas"][0]["beats"] = [{"faz": "palavras", "frase": "o navio afundar"}]
+    ep["cenas"][0].pop("fundo", None)
+    ep["cenas"][0]["fundo"] = {"tipo": "escuro"}
+    ep.pop("mapa", None)
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))[0]
+    assert b["ts"] == [1.5, 2.0, 2.5]                      # tokens 3, 4, 5 (o, navio, afundar), não o "O" inicial
+
+
+def test_anda_sem_de_usa_esq_como_padrao(tmp_path):
+    ep = _ep_acoes()
+    ep["cenas"][0]["beats"][-1].update(modelo="anda", para="esq")
+    del ep["cenas"][0]["beats"][-1]["alvo"]
+    p = _proj(tmp_path, ep)
+    assert any("de e para iguais" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+@pytest.mark.parametrize("modelo, dur, trecho", [("sobe_a_bordo", 1.5, "dur mínima"), ("anda", 1.0, "dur mínima")])
+def test_acao_dur_minima_por_modelo(tmp_path, modelo, dur, trecho):
+    ep = _ep_acoes()
+    b = ep["cenas"][0]["beats"][-1]
+    b.update(modelo=modelo, dur=dur, para="dir")
+    b.pop("alvo")
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_acoes_sobrepostas_no_mesmo_lado_geram_aviso():
+    beats = [{"faz": "acao", "modelo": "olha", "s": 1.0}, {"faz": "acao", "modelo": "fala", "s": 2.5, "lado": "dir"},
+             {"faz": "acao", "modelo": "le", "s": 2.6, "lado": "esq"}]
+    av = narrado.sobrepostas("c01", beats)
+    assert len(av) == 1 and "c01" in av[0] and "olha" in av[0] and "fala" in av[0]
+    assert narrado.sobrepostas("c01", [beats[0], {**beats[1], "s": 5.0}]) == []
