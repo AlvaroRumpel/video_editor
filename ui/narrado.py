@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -462,10 +463,18 @@ def _transicao(a: dict, b: dict) -> dict:
     return {"transicao": "fade", "dur": 0.3}
 
 
-def legenda_beat(pal: list[dict], tam: int = 3) -> dict | None:
-    """Legenda palavra a palavra dos Shorts: grupos de `tam` palavras, cada um dura até o início do seguinte."""
+def legenda_beat(pal: list[dict], texto: str = "", tam: int = 3) -> dict | None:
+    """Legenda palavra a palavra dos Shorts: grupos de `tam` palavras, cada um dura até o início do seguinte.
+    Mostra as palavras do `texto` (com acento) quando a contagem bate com os tokens alinhados; senão, os tokens."""
     if not pal:
         return None
+    exibe = [w.strip(",.;:") for w in texto.split()]
+    if len(exibe) == len(pal):
+        pal = [{**p, "w": exibe[i]} for i, p in enumerate(pal)]
+    else:                      # tokens normalizados juntam/trocam palavras (números): só devolve o acento
+        sem = lambda w: "".join(ch for ch in unicodedata.normalize("NFD", w.lower()) if unicodedata.category(ch) != "Mn")  # noqa: E731
+        acento = {sem(w): w for w in exibe}
+        pal = [{**p, "w": acento.get(p["w"], p["w"])} for p in pal]
     gr = [pal[i:i + tam] for i in range(0, len(pal), tam)]
     fins = [g[0]["s"] for g in gr[1:]] + [pal[-1]["e"]]
     return {"faz": "legenda", "s": gr[0][0]["s"],
@@ -484,7 +493,7 @@ def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
             if label and not any(b["faz"] == "rotulo" for b in beats):
                 beats.append({"faz": "rotulo", "nome": label, "s": 0.3})
             if ep.get("aspecto") == "9:16":
-                leg = legenda_beat(palavras.get(c["id"], {}).get("palavras", []))
+                leg = legenda_beat(palavras.get(c["id"], {}).get("palavras", []), _loc(c["texto"], lang))
                 if leg:
                     beats.append(leg)
             k = {"tipo": "doc", "fundo": "escuro", "palco": p or {"tipo": "escuro"}, "beats": beats}

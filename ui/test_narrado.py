@@ -1069,3 +1069,12 @@ def test_cenas_doc_vertical_ganha_legenda_e_16x9_nao():
     d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, pal)
     c01 = d["cenas"][0]
     assert [b["faz"] for b in c01["beats"]].count("legenda") == 1 and c01["beats"][-1]["faz"] == "legenda"
+
+
+def test_legenda_beat_usa_palavras_do_texto_com_acento_e_cai_no_token_se_nao_bate():
+    pal = [{"w": w, "s": s, "e": s + 0.3} for w, s in [("elas", 0.0), ("nao", 0.4), ("morreram", 0.8)]]
+    b = narrado.legenda_beat(pal, "Elas não morreram.")
+    assert b["grupos"][0]["t"] == "ELAS NÃO MORRERAM"
+    b = narrado.legenda_beat(pal, "Elas não morreram de sede")        # contagem diferente: acentua pelo dicionário do texto
+    assert b["grupos"][0]["t"] == "ELAS NÃO MORRERAM"
+    assert narrado.legenda_beat(pal, "")["grupos"][0]["t"] == "ELAS NAO MORRERAM"      # sem texto: tokens crus
