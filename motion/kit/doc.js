@@ -115,7 +115,10 @@ html[data-aspecto="9:16"] .d-marco .d{font-size:34px}
 html[data-aspecto="9:16"] .d-marco .x{font-size:26px}
 html[data-aspecto="9:16"] .d-prox{left:80px;right:80px;top:860px;font-size:64px}
 html[data-aspecto="9:16"] .d-cta{position:absolute;left:80px;right:80px;top:1060px;text-align:center;font:700 44px var(--k-punch-familia);letter-spacing:.12em;color:var(--k-acento);text-transform:uppercase;opacity:0}
-html[data-aspecto="9:16"] .d-tag{left:80px;right:80px;bottom:300px}`;
+html[data-aspecto="9:16"] .d-tag{left:80px;right:80px;bottom:300px}
+.d-legenda{display:none}
+html[data-aspecto="9:16"] .d-legenda{display:block;position:absolute;left:80px;right:80px;top:1250px;height:220px;text-align:center}
+html[data-aspecto="9:16"] .d-legenda span{position:absolute;left:0;right:0;top:0;font:800 72px/1.1 var(--k-corpo-familia);text-transform:uppercase;opacity:0;overflow-wrap:anywhere}`;
   document.head.appendChild(el("style", null, CSS));
 
   // ---------- camada de clima (uma vez, dentro de #k-fixos, abaixo do grão do kit)
@@ -153,7 +156,7 @@ html[data-aspecto="9:16"] .d-tag{left:80px;right:80px;bottom:300px}`;
 
   // ---------- beats: (ctx, b, i) -> instante em que a entrada termina
   const SLOT = { data: "canto", contador: "painel", rotulo: "rotulo", palavras: "centro", citacao: "centro",
-                 lista: "centro", linha_tempo: "centro", selo: "centro" };
+                 lista: "centro", linha_tempo: "centro", selo: "centro", legenda: "legenda" };
   const fora = (ctx, b) => {   // sai quando o próximo beat do mesmo slot entra, ou no fim da cena
     const prox = ctx.beats.filter((o) => o.at > b.at + 0.01 && SLOT[o.faz] && SLOT[o.faz] === SLOT[b.faz])
       .sort((x, y) => x.at - y.at)[0];
@@ -385,6 +388,18 @@ html[data-aspecto="9:16"] .d-tag{left:80px;right:80px;bottom:300px}`;
       tl.to(im, { scale: 1.0, duration: Math.max(0.1, ctx.fim - b.at - 0.6), ease: "none" }, b.at + 0.6);
       KIT.cue(b.at, "whoosh", -10);
       return b.at + 0.6;
+    },
+
+    legenda(ctx, b) {
+      const box = el("div", "d-legenda t"), { tl } = ctx.c;
+      ctx.hud.appendChild(box);
+      b.grupos.forEach((g) => {
+        const s = texto(el("span", null, g.t)), a = ctx.c.fala + g.s, f = ctx.c.fala + g.f;
+        box.appendChild(s);
+        tl.fromTo(s, { opacity: 0 }, { opacity: 1, duration: 0.01, immediateRender: false }, a);
+        tl.to(s, { opacity: 0, duration: 0.01 }, Math.max(a + 0.02, f - 0.01));
+      });
+      return b.at;
     },
 
     selo(ctx, b) {

@@ -462,6 +462,16 @@ def _transicao(a: dict, b: dict) -> dict:
     return {"transicao": "fade", "dur": 0.3}
 
 
+def legenda_beat(pal: list[dict], tam: int = 3) -> dict | None:
+    """Legenda palavra a palavra dos Shorts: grupos de `tam` palavras, cada um dura até o início do seguinte."""
+    if not pal:
+        return None
+    gr = [pal[i:i + tam] for i in range(0, len(pal), tam)]
+    fins = [g[0]["s"] for g in gr[1:]] + [pal[-1]["e"]]
+    return {"faz": "legenda", "s": gr[0][0]["s"],
+            "grupos": [{"t": " ".join(w["w"] for w in g).upper(), "s": g[0]["s"], "f": f} for g, f in zip(gr, fins)]}
+
+
 def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
     lista = []
     for c in ep["cenas"]:
@@ -473,6 +483,10 @@ def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
             label = _loc(c.get("overlay"), lang)
             if label and not any(b["faz"] == "rotulo" for b in beats):
                 beats.append({"faz": "rotulo", "nome": label, "s": 0.3})
+            if ep.get("aspecto") == "9:16":
+                leg = legenda_beat(palavras.get(c["id"], {}).get("palavras", []))
+                if leg:
+                    beats.append(leg)
             k = {"tipo": "doc", "fundo": "escuro", "palco": p or {"tipo": "escuro"}, "beats": beats}
         k = {"id": c["id"], **k, "_fala": duracoes[c["id"]], "_saida": c.get("saida")}
         lista.append(k)

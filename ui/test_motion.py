@@ -1017,3 +1017,23 @@ def test_doc_vertical_tela_final_e_chips_do_mapa_dentro_da_safe_area(tmp_path):
     assert caixas, "sem chips medidos"
     for x0, y0, x1, y1 in caixas:
         assert 80 <= x0 and x1 <= 1000 and 180 <= y0 and y1 <= 1660, caixas
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_vertical_legenda_cabe_e_troca_de_grupo(tmp_path):
+    from playwright.sync_api import sync_playwright
+    grupos = [{"t": "EM JUNHO DE", "s": 0.2, "f": 1.0}, {"t": "ANTICONSTITUCIONALISSIMAMENTE GRANDE", "s": 1.0, "f": 2.0}]
+    p, _ = _doc_v(tmp_path, [{"faz": "legenda", "s": 0.2, "grupos": grupos}])
+    r = motion.montar(p)
+    assert [e for e in r["erros"] if e["id"] == "c01" and ("safe" in e["motivo"] or "estoura" in e["motivo"])] == [], r["erros"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1080, "height": 1920})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        op = lambda t: pg.evaluate("""(t) => { __kit.ir(t); return [...document.querySelectorAll('#c01 .d-legenda span')]
+            .map(e => parseFloat(getComputedStyle(e).opacity)); }""", t)
+        a, c = op(0.6), op(1.5)
+        b.close()
+    assert a[0] > 0.9 and a[1] < 0.1 and c[0] < 0.1 and c[1] > 0.9

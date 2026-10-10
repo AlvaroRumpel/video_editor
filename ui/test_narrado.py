@@ -1048,3 +1048,24 @@ def test_cenas_doc_vertical_usa_texto_de_tela_final_de_short():
     ep["aspecto"] = "16:9"
     fim = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))["cenas"][-1]
     assert fim["textos"] == narrado.TEXTOS_FIM["pt"]
+
+
+def test_legenda_beat_agrupa_em_tres_e_encadeia_tempos():
+    pal = [{"w": w, "s": s, "e": s + 0.3} for w, s in
+           [("em", 0.0), ("junho", 0.4), ("de", 0.8), ("1629", 1.2), ("cerca", 1.8)]]
+    b = narrado.legenda_beat(pal)
+    assert b == {"faz": "legenda", "s": 0.0, "grupos": [
+        {"t": "EM JUNHO DE", "s": 0.0, "f": 1.2}, {"t": "1629 CERCA", "s": 1.2, "f": 2.1}]}
+    assert narrado.legenda_beat([]) is None
+
+
+def test_cenas_doc_vertical_ganha_legenda_e_16x9_nao():
+    tema = motion.carregar_tema("dark-historia")
+    ep = _ep_doc()
+    pal = _palavras(ep)
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, pal)
+    assert not any(b["faz"] == "legenda" for c in d["cenas"] for b in c.get("beats", []))
+    ep["aspecto"], ep["tela_final_dur"] = "9:16", 3.0
+    d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, pal)
+    c01 = d["cenas"][0]
+    assert [b["faz"] for b in c01["beats"]].count("legenda") == 1 and c01["beats"][-1]["faz"] == "legenda"
