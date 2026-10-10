@@ -192,6 +192,43 @@
       balao(S, POS.esq, b.texto, t + 0.7);
       KIT.cue(t + 0.7, "tique", -10);
     },
+    telegrama(S, b) {
+      const t = S.at, g = S.g, tl = S.tl;
+      P(g, `M120 ${CHAO}V120M105 150H135M110 182H130`, { w: 2.2 });
+      g.appendChild(svg("circle", { cx: 120, cy: 117, r: 3.5, fill: PRETO, stroke: TINTA, "stroke-width": 1.6 }));
+      [18, 32, 46].forEach((r, i) => {
+        const a = P(g, `M${120 + r * 0.7} ${117 - r * 0.7}A${r} ${r} 0 0 1 ${120 + r * 0.7} ${117 + r * 0.7}`, { stroke: ACENTO, w: 2 });
+        tl.fromTo(a, { opacity: 0 }, { opacity: 1, duration: 0.2, yoyo: true, repeat: 5, immediateRender: false }, t + 0.3 + i * 0.18);
+        tl.set(a, { opacity: 0 }, t + 2.0);
+      });
+      // destino: prédio simples com janelas que acendem quando o telegrama chega
+      P(g, `M440 ${CHAO}V190H520V${CHAO}M432 190L480 160L528 190`, { fill: PRETO });
+      const jan = [0, 1, 2].map((i) => {
+        const r = svg("rect", { x: 452 + i * 22, y: 214, width: 12, height: 18, fill: PRETO, stroke: TINTA, "stroke-width": 1.4 });
+        g.appendChild(r);
+        return r;
+      });
+      const env = G(g);
+      env.appendChild(svg("rect", { x: -11, y: -8, width: 22, height: 16, fill: TINTA, stroke: PRETO, "stroke-width": 1.2 }));
+      P(env, "M-11 -8L0 2L11 -8", { stroke: PRETO, w: 1.4 });
+      gsap.set(env, { x: 140, y: 205, opacity: 0 });
+      tl.set(env, { opacity: 1 }, t + 1.0);
+      tl.to(env, { x: 470, duration: 1.4, ease: "power1.inOut" }, t + 1.0);
+      tl.to(env, { y: 160, duration: 0.7, ease: "sine.out" }, t + 1.0);
+      tl.to(env, { y: 205, duration: 0.7, ease: "sine.in" }, t + 1.7);
+      tl.to(env, { opacity: 0, scale: 0.6, duration: 0.2 }, t + 2.4);
+      jan.forEach((j, i) => tl.to(j, { fill: "#efe6cf", duration: 0.15 }, t + 2.5 + i * 0.12));
+      if (b.texto) {
+        const tira = texto(el("div", "a-tira", b.texto));
+        tira.style.top = "84%";
+        S.box.appendChild(tira);
+        tl.fromTo(tira, { opacity: 0, clipPath: "inset(0 100% 0 0)" },
+          { opacity: 1, clipPath: "inset(0 0% 0 0)", duration: 0.8, ease: "steps(14)", immediateRender: false }, t + 2.5);
+        tl.to(tira, { opacity: 0, duration: 0.3 }, S.at + S.dur - 0.7);
+      }
+      KIT.cue(t + 0.2, "morse", -10);
+      KIT.cue(t + 2.5, "ping", -8);
+    },
   };
 
   BEATS.acao = (ctx, b) => {

@@ -339,3 +339,9 @@ def test_mix_trilha_realce_sobe_a_trilha_no_trecho(video, trilha, tmp_path):
     com = audio.rms_db(dst, 4.2, 4.9, BP100)        # voz desligada em 4–5 s, com realce
     sem = audio.rms_db(dst, 6.2, 6.9, BP100)        # voz desligada em 6–7 s, sem realce
     assert com > sem + 5
+
+
+def test_sfx_kit_tem_morse(tmp_path):
+    audio.sfx_kit(tmp_path / "sfx")
+    w = tmp_path / "sfx" / "morse.wav"
+    assert w.is_file() and 1.0 < audio.duracao(w) < 1.5

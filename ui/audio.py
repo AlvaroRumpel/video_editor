@@ -25,6 +25,7 @@ SONS = {
     "tique": "sine=f=2000:d=0.03,volume=0.5,afade=t=out:st=0.005:d=0.025",
     "maquina": "anoisesrc=d=0.04:c=white:a=0.8,highpass=f=2000,afade=t=out:st=0.005:d=0.035",
     "carimbo": "anoisesrc=d=0.25:c=brown:a=1,lowpass=f=400,volume=2,afade=t=out:st=0.02:d=0.23",
+    "morse": "sine=f=820:d=1.2,volume=0.35,apulsator=mode=square:hz=6:amount=1,afade=t=out:st=1.0:d=0.2",
     "clarao": "anoisesrc=d=0.5:c=white:a=0.4,highpass=f=4000,afade=t=in:d=0.05,afade=t=out:st=0.1:d=0.4",
 }
 ALIASES = {"tick": "tique", "rise": "whoosh", "whoosh-reveal": "whoosh", "pop-dourado": "ping",

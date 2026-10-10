@@ -1,8 +1,58 @@
-{"marca": "dark-historia", "aspecto": "16:9", "modo": "doc",
- "atores": {"kendall": {"traje": "capitao", "nome": "Capitão Kendall"},
-            "dew": {"traje": "inspetor"},
-            "casal": {"traje": ["medico", "menino"]}},
- "cenas": [{"id": "c01", "tipo": "doc", "fundo": "escuro", "palco": {"tipo": "escuro"}, "dur": 24, "dur_piso": true,
-  "beats": [
-   {"faz": "acao", "modelo": "olha", "ator": "kendall", "alvo": "casal", "lado": "esq", "s": 0.5},
-   {"faz": "acao", "modelo": "fala", "ator": "dew", "alvo": "casal", "texto": "Doutor Crippen?", "lado": "dir", "s": 5}]}]}
+{
+ "marca": "dark-historia",
+ "aspecto": "16:9",
+ "modo": "doc",
+ "atores": {
+  "kendall": {
+   "traje": "capitao",
+   "nome": "Capitão Kendall"
+  },
+  "dew": {
+   "traje": "inspetor"
+  },
+  "casal": {
+   "traje": [
+    "medico",
+    "menino"
+   ]
+  }
+ },
+ "cenas": [
+  {
+   "id": "c01",
+   "tipo": "doc",
+   "fundo": "escuro",
+   "palco": {
+    "tipo": "escuro"
+   },
+   "dur": 40,
+   "dur_piso": true,
+   "beats": [
+    {
+     "faz": "acao",
+     "modelo": "olha",
+     "ator": "kendall",
+     "alvo": "casal",
+     "lado": "esq",
+     "s": 0.5
+    },
+    {
+     "faz": "acao",
+     "modelo": "fala",
+     "ator": "dew",
+     "alvo": "casal",
+     "texto": "Doutor Crippen?",
+     "lado": "dir",
+     "s": 5
+    },
+    {
+     "faz": "acao",
+     "modelo": "telegrama",
+     "texto": "Suspeitos a bordo",
+     "lado": "centro",
+     "s": 9.5
+    }
+   ]
+  }
+ ]
+}
