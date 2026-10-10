@@ -75,3 +75,54 @@ def test_validar_audio_ausente(tmp_path):
     (p / "pt" / "audio" / "c02.mp3").unlink()
     erros = shorts.validar(p, "pt")
     assert any(e["id"] == "s01" and "c02" in e["motivo"] and "tts" in e["motivo"] for e in erros), erros
+
+
+def test_montar_gera_mini_episodio_vertical(tmp_path):
+    p = _ep_dir(tmp_path)
+    d = shorts.montar(p, "s01", "pt")
+    assert d == p / "shorts" / "s01"
+    ep = json.loads((d / "episodio.json").read_text(encoding="utf-8"))
+    assert [c["id"] for c in ep["cenas"]] == ["c01", "c02"]
+    assert ep["aspecto"] == "9:16" and ep["tela_final_dur"] == shorts.TELA_FINAL_DUR
+    assert ep["titulo"] == {"pt": "Gancho"} and ep["marca"] == "dark-historia"
+    assert "vinheta_apos" not in ep and "titulo_curto" not in ep
+    st = json.loads((d / "pt" / "narracao.json").read_text(encoding="utf-8"))
+    assert sorted(st) == ["c01", "c02"]
+    assert sorted(json.loads((d / "pt" / "palavras.json").read_text(encoding="utf-8"))) == ["c01", "c02"]
+    assert sorted(x.name for x in (d / "pt" / "audio").iterdir()) == ["c01.mp3", "c02.mp3"]
+    assert (d / "assets" / "a.png").read_bytes() == b"x" and (d / "pesquisa.md").is_file()
+
+
+def test_montar_mantem_mapa_e_atores(tmp_path):
+    p = _ep_dir(tmp_path)
+    ep = json.loads((p / "episodio.json").read_text(encoding="utf-8"))
+    ep["mapa"], ep["atores"] = {"src": "assets/a.png", "pontos": {"x": [1, 2]}}, {"capitao": {"traje": "capitao"}}
+    (p / "episodio.json").write_text(json.dumps(ep), encoding="utf-8")
+    novo = json.loads((shorts.montar(p, "s01", "pt") / "episodio.json").read_text(encoding="utf-8"))
+    assert novo["mapa"] == ep["mapa"] and novo["atores"] == ep["atores"]
+
+
+def test_montar_idempotente_nao_apaga_saidas(tmp_path):
+    p = _ep_dir(tmp_path)
+    d = shorts.montar(p, "s01", "pt")
+    (d / "pt" / "final.mp4").write_bytes(b"video")
+    shorts.montar(p, "s01", "pt")
+    assert (d / "pt" / "final.mp4").read_bytes() == b"video"
+
+
+def test_montar_recusa_short_invalido_e_desconhecido(tmp_path):
+    p = _ep_dir(tmp_path, durs=(30.0, 30.0, 5.0, 5.0))
+    with pytest.raises(ValueError, match="60"):
+        shorts.montar(p, "s01", "pt")
+    with pytest.raises(ValueError, match="s09"):
+        shorts.montar(p, "s09", "pt")
+
+
+def test_renderizar_chama_narrado_no_projeto_derivado(tmp_path, monkeypatch):
+    p = _ep_dir(tmp_path)
+    chamadas = []
+    monkeypatch.setattr(shorts.narrado, "render",
+                        lambda proj, lang, rascunho=False, trilha=None: chamadas.append((proj, lang, rascunho, trilha))
+                        or {"ok": True, "video": str(proj / lang / "final.mp4")})
+    r = shorts.renderizar(p, "s01", "pt", rascunho=True, trilha="t.mp3")
+    assert chamadas == [(p / "shorts" / "s01", "pt", True, "t.mp3")] and r["ok"]
