@@ -64,6 +64,7 @@
 .d-palavras.c{right:700px}  /* cena com contador: fica à esquerda do painel (x>=1240) */
 .d-palavras span{display:inline-block;margin:0 20px;position:relative;opacity:0}
 .d-palavras.f{left:200px;right:200px;top:50%;transform:translateY(-55%);line-height:1.12}
+.d-palavras.f.c{right:700px}
 .d-palavras.f span{margin:0 12px}
 .d-palavras.f span.hl{color:var(--k-acento)}
 .d-risco{position:absolute;left:0;right:0;top:52%;height:12px;background:#C0392B;transform:scaleX(0);transform-origin:left}

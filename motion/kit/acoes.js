@@ -29,6 +29,7 @@
     pai.appendChild(p);
     return p;
   };
+  const oc = (e) => { e.setAttribute("opacity", 0); return e; };   // nasce oculto: só a timeline revela
   const G = (pai, tr) => { const g = svg("g"); if (tr) g.setAttribute("transform", tr); pai.appendChild(g); return g; };
 
   // ---------- figuras: silhueta de gravura (contorno creme, fundo quase preto, hachura no lado da sombra)
@@ -76,7 +77,11 @@
     P(f.cabeca, "M0 -27A9 11 0 0 0 0 -5Z", { fill: `url(#${hach})`, stroke: null });
     P(f.cabeca, "M8.6 -17L13 -13.5L8.6 -12", { w: 1.3 });
     P(f.cabeca, T.chapeu, { fill: PRETO });
-    gsap.set([f.pernaE, f.pernaD, f.tronco, f.cabeca, ...f.be, ...f.bd, f.bob], { transformOrigin: "0 0" });
+    for (const e of [f.pernaE, f.pernaD, f.tronco, f.cabeca, ...f.be, ...f.bd]) {
+      const bb = e.getBBox();                       // GSAP mede transformOrigin a partir do canto do bbox: converte para a origem local (0,0)
+      gsap.set(e, { transformOrigin: `${-bb.x}px ${-bb.y}px` });
+    }
+    gsap.set(f.bob, { transformOrigin: "0 0" });
     return f;
   }
 
@@ -148,6 +153,8 @@
   function traco(S, x1, y1, x2, y2, t, dur) {
     const p = P(S.g, `M${x1} ${y1}Q${(x1 + x2) / 2} ${Math.min(y1, y2) - 18} ${x2} ${y2}`, { stroke: ACENTO, w: 1.8 });
     const L = p.getTotalLength();
+    oc(p);
+    S.tl.set(p, { opacity: 1 }, t);
     p.setAttribute("stroke-dasharray", L);
     p.setAttribute("stroke-dashoffset", L);
     S.tl.fromTo(p, { attr: { "stroke-dashoffset": L } }, { attr: { "stroke-dashoffset": 0 }, duration: dur, ease: "power2.inOut", immediateRender: false }, t);
@@ -175,6 +182,7 @@
       const ex = svg("text", { x: POS.esq, y: y - 34, "text-anchor": "middle", fill: ACENTO, "font-size": 40, "font-weight": 700,
         "font-family": "var(--k-display-familia)" });
       ex.textContent = "!";
+      oc(ex);
       ex.style.transformBox = "fill-box";
       ex.style.transformOrigin = "50% 100%";
       S.g.appendChild(ex);
@@ -198,6 +206,7 @@
       g.appendChild(svg("circle", { cx: 120, cy: 117, r: 3.5, fill: PRETO, stroke: TINTA, "stroke-width": 1.6 }));
       [18, 32, 46].forEach((r, i) => {
         const a = P(g, `M${120 + r * 0.7} ${117 - r * 0.7}A${r} ${r} 0 0 1 ${120 + r * 0.7} ${117 + r * 0.7}`, { stroke: ACENTO, w: 2 });
+        oc(a);
         tl.fromTo(a, { opacity: 0 }, { opacity: 1, duration: 0.2, yoyo: true, repeat: 5, immediateRender: false }, t + 0.3 + i * 0.18);
         tl.set(a, { opacity: 0 }, t + 2.0);
       });
@@ -232,9 +241,9 @@
     le(S, b) {
       const [A] = elenco(S, b.ator, POS.centro, 1), t = S.at, tl = S.tl, x = POS.centro;
       pose(tl, A, { bd: [-72, -85], be: [-58, -95], ca: 14 }, t + 0.4, 0.6);
-      const folha = G(S.g, `translate(${x + 30} ${CHAO - 178}) rotate(-8)`);
+      const folha = oc(G(S.g, `translate(${x + 30} ${CHAO - 178}) rotate(-8)`));
       P(folha, "M0 0H46V58H0Z", { fill: TINTA, stroke: PRETO, w: 1 });
-      const linhas = [10, 22, 34, 46].map((y) => P(folha, `M6 ${y}H${y === 46 ? 28 : 40}`, { stroke: PRETO, w: 1.4 }));
+      const linhas = [10, 22, 34, 46].map((y) => oc(P(folha, `M6 ${y}H${y === 46 ? 28 : 40}`, { stroke: PRETO, w: 1.4 })));
       tl.fromTo(folha, { opacity: 0 }, { opacity: 1, duration: 0.3, immediateRender: false }, t + 0.7);
       linhas.forEach((l, i) => tl.fromTo(l, { opacity: 0 }, { opacity: 1, duration: 0.2, immediateRender: false }, t + 1.2 + i * 0.35));
       if (b.texto) balao(S, x - 40, b.texto, t + 1.6);
@@ -245,6 +254,7 @@
       pose(tl, A, { bd: [-84, -4], tr: 4, ca: -4 }, t + 0.5, 0.4, "power2.out");
       pose(tl, B[0], { ca: 6 }, t + 0.9, 0.5);
       const anel = svg("ellipse", { cx: POS.dir, cy: CHAO + 2, rx: 30, ry: 6, fill: "none", stroke: ACENTO, "stroke-width": 2 });
+      oc(anel);
       anel.style.transformBox = "fill-box";
       anel.style.transformOrigin = "50% 50%";
       S.g.appendChild(anel);
@@ -252,6 +262,7 @@
       tl.set(anel, { opacity: 0 }, t + 3.0);
       const seta = P(S.g, `M${POS.dir} ${CHAO - 205}V${CHAO - 186}M${POS.dir - 7} ${CHAO - 194}L${POS.dir} ${CHAO - 186}L${POS.dir + 7} ${CHAO - 194}`,
         { stroke: ACENTO, w: 2.4 });
+      oc(seta);
       tl.fromTo(seta, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.35, ease: "bounce.out", immediateRender: false }, t + 1.0);
       KIT.cue(t + 0.9, "tique", -10);
     },
