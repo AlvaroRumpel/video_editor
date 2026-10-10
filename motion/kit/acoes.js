@@ -229,6 +229,53 @@
       KIT.cue(t + 0.2, "morse", -10);
       KIT.cue(t + 2.5, "ping", -8);
     },
+    le(S, b) {
+      const [A] = elenco(S, b.ator, POS.centro, 1), t = S.at, tl = S.tl, x = POS.centro;
+      pose(tl, A, { bd: [-72, -85], be: [-58, -95], ca: 14 }, t + 0.4, 0.6);
+      const folha = G(S.g, `translate(${x + 30} ${CHAO - 178}) rotate(-8)`);
+      P(folha, "M0 0H46V58H0Z", { fill: TINTA, stroke: PRETO, w: 1 });
+      const linhas = [10, 22, 34, 46].map((y) => P(folha, `M6 ${y}H${y === 46 ? 28 : 40}`, { stroke: PRETO, w: 1.4 }));
+      tl.fromTo(folha, { opacity: 0 }, { opacity: 1, duration: 0.3, immediateRender: false }, t + 0.7);
+      linhas.forEach((l, i) => tl.fromTo(l, { opacity: 0 }, { opacity: 1, duration: 0.2, immediateRender: false }, t + 1.2 + i * 0.35));
+      if (b.texto) balao(S, x - 40, b.texto, t + 1.6);
+      KIT.cue(t + 0.7, "tique", -10);
+    },
+    aponta(S, b) {
+      const [A] = elenco(S, b.ator, POS.esq, 1), B = elenco(S, b.alvo, POS.dir, -1), t = S.at, tl = S.tl;
+      pose(tl, A, { bd: [-84, -4], tr: 4, ca: -4 }, t + 0.5, 0.4, "power2.out");
+      pose(tl, B[0], { ca: 6 }, t + 0.9, 0.5);
+      const anel = svg("ellipse", { cx: POS.dir, cy: CHAO + 2, rx: 30, ry: 6, fill: "none", stroke: ACENTO, "stroke-width": 2 });
+      anel.style.transformBox = "fill-box";
+      anel.style.transformOrigin = "50% 50%";
+      S.g.appendChild(anel);
+      tl.fromTo(anel, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1.4, duration: 0.7, repeat: 2, ease: "power2.out", immediateRender: false }, t + 0.9);
+      tl.set(anel, { opacity: 0 }, t + 3.0);
+      const seta = P(S.g, `M${POS.dir} ${CHAO - 205}V${CHAO - 186}M${POS.dir - 7} ${CHAO - 194}L${POS.dir} ${CHAO - 186}L${POS.dir + 7} ${CHAO - 194}`,
+        { stroke: ACENTO, w: 2.4 });
+      tl.fromTo(seta, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.35, ease: "bounce.out", immediateRender: false }, t + 1.0);
+      KIT.cue(t + 0.9, "tique", -10);
+    },
+    anda(S, b) {
+      const de = POS[b.de || "esq"], para = POS[b.para], dir = para >= de ? 1 : -1, t = S.at, tl = S.tl;
+      const [A] = elenco(S, b.ator, de, dir);
+      const dist = Math.abs(para - de), dur = Math.min(S.dur - 1, Math.max(1.6, dist / 70));
+      tl.to(A.mov, { x: para, duration: dur, ease: "none" }, t + 0.5);
+      passos(tl, A, t + 0.5, dur, Math.max(2, Math.round(dist / 44)));
+    },
+    sobe_a_bordo(S, b) {
+      const [A] = elenco(S, b.ator, 90, 1), t = S.at, tl = S.tl, g = S.g, topo = CHAO - 70;
+      P(g, `M360 ${topo}H545L525 ${CHAO}H378Z`, { fill: PRETO });
+      P(g, `M385 ${topo}V${topo - 26}M440 ${topo}V${topo - 26}M495 ${topo}V${topo - 26}M385 ${topo - 26}H525`, { w: 1.4 });
+      P(g, `M120 ${CHAO}L360 ${topo}`, { w: 2.6 });
+      for (let i = 1; i < 7; i++) P(g, `M${120 + i * 34} ${CHAO - i * 10 - 4}V${CHAO - i * 10 + 4}`, { w: 1.3, op: 0.7 });
+      const dur = Math.min(S.dur - 1.6, 2.4);
+      tl.to(A.mov, { x: 345, y: topo, duration: dur, ease: "none" }, t + 0.5);
+      pose(tl, A, { tr: 6 }, t + 0.5, 0.3);
+      passos(tl, A, t + 0.5, dur, 5);
+      pose(tl, A, { bd: [-150, -120], tr: 0 }, t + 0.5 + dur + 0.1, 0.35, "power2.out");
+      pose(tl, A, { bd: [0, 0] }, t + 0.5 + dur + 0.8, 0.35);
+      KIT.cue(t + 0.5 + dur, "tique", -10);
+    },
   };
 
   BEATS.acao = (ctx, b) => {
