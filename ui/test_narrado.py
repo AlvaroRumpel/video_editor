@@ -1078,3 +1078,9 @@ def test_legenda_beat_usa_palavras_do_texto_com_acento_e_cai_no_token_se_nao_bat
     b = narrado.legenda_beat(pal, "Elas não morreram de sede")        # contagem diferente: acentua pelo dicionário do texto
     assert b["grupos"][0]["t"] == "ELAS NÃO MORRERAM"
     assert narrado.legenda_beat(pal, "")["grupos"][0]["t"] == "ELAS NAO MORRERAM"      # sem texto: tokens crus
+
+
+def test_ritmo_conta_o_fim_da_acao():
+    beats = [{"faz": "acao", "modelo": "telegrama", "s": 0.3}]          # anima até 4.1 s
+    assert narrado.ritmo("c01", beats, 8.0) == []
+    assert narrado.ritmo("c01", [{"faz": "data", "s": 0.3}], 8.0) == ["c01: 0.3–8.0 s sem beat"]

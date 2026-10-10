@@ -408,7 +408,10 @@ def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
 
 def ritmo(cid: str, beats: list[dict], dur: float) -> list[str]:
     sub = [x["s"] for b in beats for k in ("itens", "marcos") for x in b.get(k) or [] if isinstance(x, dict) and "s" in x]
-    ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", [])), *sub})
+    fim_acao = [b["s"] + (b.get("dur") or DUR_ACAO[b["modelo"]]) for b in beats
+                if b.get("faz") == "acao" and b.get("modelo") in DUR_ACAO]   # vinheta animando conta até acabar
+    ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", [])), *sub,
+                 *(min(t, float(dur)) for t in fim_acao)})
     return [f"{cid}: {a:.1f}–{b:.1f} s sem beat" for a, b in zip(ts, ts[1:]) if b - a > RITMO_MAX]
 
 
