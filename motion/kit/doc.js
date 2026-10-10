@@ -112,7 +112,10 @@ html[data-aspecto="9:16"] .d-lista{left:80px;width:920px;top:470px}
 html[data-aspecto="9:16"] .d-lista .i{font-size:44px}
 html[data-aspecto="9:16"] .d-linha{left:120px;right:120px;top:900px}
 html[data-aspecto="9:16"] .d-marco .d{font-size:34px}
-html[data-aspecto="9:16"] .d-marco .x{font-size:26px}`;
+html[data-aspecto="9:16"] .d-marco .x{font-size:26px}
+html[data-aspecto="9:16"] .d-prox{left:80px;right:80px;top:860px;font-size:64px}
+html[data-aspecto="9:16"] .d-cta{position:absolute;left:80px;right:80px;top:1060px;text-align:center;font:700 44px var(--k-punch-familia);letter-spacing:.12em;color:var(--k-acento);text-transform:uppercase;opacity:0}
+html[data-aspecto="9:16"] .d-tag{left:80px;right:80px;bottom:300px}`;
   document.head.appendChild(el("style", null, CSS));
 
   // ---------- camada de clima (uma vez, dentro de #k-fixos, abaixo do grão do kit)
@@ -462,8 +465,9 @@ html[data-aspecto="9:16"] .d-marco .x{font-size:26px}`;
       const { tx, ty, sc } = pose(t);
       cam.style.transform = `translate(${tx.toFixed(2)}px,${ty.toFixed(2)}px) scale(${sc.toFixed(5)})`;
       for (const [e, x, y, dx, dy] of ancoras) {
-        e.style.left = `${(tx + x * sc + dx).toFixed(1)}px`;
-        e.style.top = `${(ty + y * sc + dy).toFixed(1)}px`;
+        const w = e.offsetWidth, h = e.offsetHeight, l = tx + x * sc + dx, tp = ty + y * sc + dy;
+        e.style.left = `${(V ? clamp(l, 80, 1000 - w) : l).toFixed(1)}px`;
+        e.style.top = `${(V ? clamp(tp, 180, 1660 - h) : tp).toFixed(1)}px`;
       }
     });
     if (p.tipo === "mapa") window.__docCamMapa = camAt(camera, fim);
@@ -543,8 +547,16 @@ html[data-aspecto="9:16"] .d-marco .x{font-size:26px}`;
     Object.assign(vid.style, { left: "870px", top: "320px", width: "720px", height: "405px" });
     vid.appendChild(el("div", "g", tx.video || ""));
     const tag = texto(el("div", "d-tag t", c.tema.tagline || ""));
-    palco.append(prox, ins, vid, tag);
-    [prox, ins, vid, tag].forEach((e, i) =>
+    const cta = texto(el("div", "d-cta t", tx.inscreva || ""));
+    let itens = [prox, ins, vid, tag];
+    if (V) {                       // Short: sem quadros-guia (elementos finais não existem em Shorts)
+      const selo = el("div", "d-selo"), { s } = seloSvg(240);
+      Object.assign(selo.style, { left: `${W / 2 - 120}px`, top: "560px", width: "240px", height: "240px" });
+      selo.appendChild(s);
+      palco.append(selo, prox, cta, tag);
+      itens = [selo, prox, cta, tag];
+    } else palco.append(prox, ins, vid, tag);
+    itens.forEach((e, i) =>
       tl.fromTo(e, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out", immediateRender: false }, t0 + i * 0.2));
     KIT.cue(t0, "whoosh", -10);
     return t0 + 1.4;

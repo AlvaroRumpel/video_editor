@@ -991,3 +991,29 @@ def test_doc_vertical_beats_de_texto_ficam_na_safe_area(tmp_path):
     layout = [e for e in r.get("erros", []) if "safe area" in e["motivo"] or "estoura" in e["motivo"]]
     cenas_doc = [e for e in layout if e["id"] in ("c01", "c02")]
     assert cenas_doc == [], cenas_doc
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_vertical_tela_final_e_chips_do_mapa_dentro_da_safe_area(tmp_path):
+    from playwright.sync_api import sync_playwright
+    p, d = _doc_v(tmp_path, [
+        {"faz": "ponto", "ponto": "a", "rotulo": "Cabo da Boa Esperança", "s": 0.2},
+        {"faz": "rota", "de": "a", "para": "b", "km": 3000, "s": 0.4},
+        {"faz": "ponto", "ponto": "b", "rotulo": "Abrolhos de Houtman", "s": 1.0}])
+    d["cenas"][3]["textos"] = {"prox": "História completa no canal", "inscreva": "inscreva-se", "video": ""}
+    d["cenas"][3]["dur"] = 3
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = motion.montar(p)
+    assert [e for e in r["erros"] if e["id"] == "c901"] == [], r["erros"]
+    with sync_playwright() as pw_:
+        b = pw_.chromium.launch(args=["--allow-file-access-from-files"])
+        pg = b.new_page(viewport={"width": 1080, "height": 1920})
+        pg.goto((p / "motion" / "index.html").resolve().as_uri())
+        pg.wait_for_function("window.__kit !== undefined")
+        caixas = pg.evaluate("""() => { __kit.ir(2.0); return [...document.querySelectorAll('#c01 .d-chip')].map(e => {
+            const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }); }""")
+        b.close()
+    assert caixas, "sem chips medidos"
+    for x0, y0, x1, y1 in caixas:
+        assert 80 <= x0 and x1 <= 1000 and 180 <= y0 and y1 <= 1660, caixas

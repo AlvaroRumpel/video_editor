@@ -26,6 +26,8 @@ LANG_RE = re.compile(r"[a-z]{2}")
 PAUSA = 0.4            # respiro depois da fala de cada cena
 VINHETA_DUR = 4.0
 TELAFINAL_DUR = 20.0
+TEXTOS_FIM_SHORT = {"pt": {"prox": "História completa no canal", "inscreva": "inscreva-se", "video": ""},
+                    "en": {"prox": "Full story on the channel", "inscreva": "subscribe", "video": ""}}
 TEXTOS_FIM = {"pt": {"prox": "Próxima história", "inscreva": "inscreva-se", "video": "próximo vídeo"},
               "en": {"prox": "Next story", "inscreva": "subscribe", "video": "next video"}}
 SFX_DIR = pipeline.ROOT / "motion" / "sfx"
@@ -478,7 +480,8 @@ def _cenas_doc(ep: dict, lang: str, duracoes: dict, palavras: dict) -> dict:
             titulo = _loc(ep.get("titulo_curto"), lang) or _loc(ep.get("titulo"), lang) or ""
             lista.append({"id": "c900", "tipo": "vinheta", "fundo": "escuro", "titulo": titulo, "_fala": None})
     lista.append({"id": "c901", "tipo": "telafinal", "fundo": "escuro",
-                  "textos": TEXTOS_FIM.get(lang, TEXTOS_FIM["pt"]), "_fala": None})
+                  "textos": (TEXTOS_FIM_SHORT if ep.get("aspecto") == "9:16" else TEXTOS_FIM).get(lang, TEXTOS_FIM["pt"]),
+                  "_fala": None})
     for n, k in enumerate(lista[:-1]):
         k["saida"] = k.get("_saida") or _transicao(k, lista[n + 1])
     tela = ep.get("tela_final_dur", TELAFINAL_DUR)

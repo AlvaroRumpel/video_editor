@@ -1037,3 +1037,14 @@ def test_validar_vertical_ok(tmp_path):
     ep["aspecto"], ep["tela_final_dur"] = "9:16", 3.0
     p = _proj(tmp_path, ep)
     assert narrado.validar(narrado.ler(p), p, "pt") == []
+
+
+def test_cenas_doc_vertical_usa_texto_de_tela_final_de_short():
+    tema = motion.carregar_tema("dark-historia")
+    ep = _ep_doc()
+    ep["aspecto"], ep["tela_final_dur"] = "9:16", 3.0
+    fim = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))["cenas"][-1]
+    assert fim["textos"] == narrado.TEXTOS_FIM_SHORT["pt"]
+    ep["aspecto"] = "16:9"
+    fim = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, tema, _palavras(ep))["cenas"][-1]
+    assert fim["textos"] == narrado.TEXTOS_FIM["pt"]
