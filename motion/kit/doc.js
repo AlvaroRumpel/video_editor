@@ -4,7 +4,8 @@
    Tudo que depende do tempo é pintor (KIT.pintor), nunca onUpdate. */
 (() => {
   "use strict";
-  const W = 1920, H = 1080, DERIVA = 0.006, SAIDA = 0.35;
+  const V = document.documentElement.dataset.aspecto === "9:16";   // __KIT_DADOS ainda não existe aqui (carrega depois)
+  const W = V ? 1080 : 1920, H = V ? 1920 : 1080, DERIVA = 0.006, SAIDA = 0.35;
   const easeIO = gsap.parseEase("power2.inOut");
   const easeOut = gsap.parseEase("power3.out");
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -91,7 +92,27 @@
 .d-guia{position:absolute;border:2px solid rgba(184,134,43,.45);opacity:0}
 .d-guia .g{position:absolute;left:0;right:0;bottom:-52px;text-align:center;font:600 22px var(--k-corpo-familia);letter-spacing:.2em;color:rgba(237,230,214,.6);text-transform:uppercase}
 .d-prox{position:absolute;left:200px;right:200px;top:130px;text-align:center;font:italic 600 76px var(--k-display-familia);opacity:0}
-.d-tag{position:absolute;left:200px;right:200px;bottom:110px;text-align:center;font:500 30px var(--k-corpo-familia);letter-spacing:.15em;color:#cdbf9f;opacity:0}`;
+.d-tag{position:absolute;left:200px;right:200px;bottom:110px;text-align:center;font:500 30px var(--k-corpo-familia);letter-spacing:.15em;color:#cdbf9f;opacity:0}
+html[data-aspecto="9:16"] .d-data{left:80px;top:200px}
+html[data-aspecto="9:16"] .d-data .a{font-size:130px}
+html[data-aspecto="9:16"] .d-painel{left:80px;right:auto;top:470px;width:920px;padding:28px 32px}
+html[data-aspecto="9:16"] .d-painel .v{font-size:120px}
+html[data-aspecto="9:16"] .d-pontos{grid-template-columns:repeat(40,16px)}
+html[data-aspecto="9:16"] .d-rotulo{left:80px;right:80px;bottom:300px}
+html[data-aspecto="9:16"] .d-rotulo .n{font-size:50px;line-height:1.1;white-space:normal}
+html[data-aspecto="9:16"] .d-rotulo .p{white-space:normal}
+html[data-aspecto="9:16"] .d-palavras{left:80px;right:80px;top:760px;font-size:96px}
+html[data-aspecto="9:16"] .d-palavras.c{right:80px;top:780px}
+html[data-aspecto="9:16"] .d-palavras.f{left:80px;right:80px;top:50%}
+html[data-aspecto="9:16"] .d-palavras.f.c{right:80px}
+html[data-aspecto="9:16"] .d-palavras span{margin:0 14px}
+html[data-aspecto="9:16"] .d-citacao{left:80px;right:80px;top:520px}
+html[data-aspecto="9:16"] .d-citacao .q{font-size:54px}
+html[data-aspecto="9:16"] .d-lista{left:80px;width:920px;top:470px}
+html[data-aspecto="9:16"] .d-lista .i{font-size:44px}
+html[data-aspecto="9:16"] .d-linha{left:120px;right:120px;top:900px}
+html[data-aspecto="9:16"] .d-marco .d{font-size:34px}
+html[data-aspecto="9:16"] .d-marco .x{font-size:26px}`;
   document.head.appendChild(el("style", null, CSS));
 
   // ---------- camada de clima (uma vez, dentro de #k-fixos, abaixo do grão do kit)
@@ -365,7 +386,7 @@
 
     selo(ctx, b) {
       const box = el("div", "d-selo"), { tl } = ctx.c;
-      Object.assign(box.style, { left: `${W / 2 - 130}px`, top: "300px", width: "260px", height: "260px" });
+      Object.assign(box.style, { left: `${W / 2 - 130}px`, top: V ? "520px" : "300px", width: "260px", height: "260px" });
       box.appendChild(seloSvg(260).s);
       ctx.hud.appendChild(box);
       tl.fromTo(box, { opacity: 0, scale: 1.8 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power4.in", immediateRender: false }, b.at);

@@ -964,3 +964,30 @@ def test_montar_amostra_acoes_gera_marcas_e_sem_erro_de_js(tmp_path):
     tempos = json.loads((proj / "motion" / "tempos.json").read_text(encoding="utf-8"))
     assert {m["rotulo"] for m in tempos["marcas"]} == {"acao olha", "acao fala", "acao telegrama", "acao le",
                                                        "acao aponta", "acao anda", "acao sobe_a_bordo"}
+
+
+BEATS_TEXTO_LONGO = BEATS_TODOS + [
+    {"faz": "rotulo", "nome": "Companhia Holandesa das Índias Orientais", "papel": "empresa que organizou a viagem", "s": 2.6},
+    {"faz": "data", "t": "4 de junho de 1629", "s": 2.8},
+]
+
+
+def _doc_v(tmp_path, beats0, beats1=()):
+    p, d = _doc(tmp_path)
+    d["aspecto"] = "9:16"
+    d["cenas"][0]["beats"], d["cenas"][1]["beats"] = list(beats0), list(beats1)
+    (p / "cenas.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return p, d
+
+
+@pw
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+def test_doc_vertical_beats_de_texto_ficam_na_safe_area(tmp_path):
+    p, _ = _doc_v(tmp_path, BEATS_TEXTO_LONGO, [
+        {"faz": "citacao", "t": "Uma história incrível que ninguém acreditou", "autor": "Kieran Hosty", "s": 0.3},
+        {"faz": "lista", "itens": [{"t": "comerciantes", "s": 0.6}, {"t": "Escandinávia"}, {"t": "Ilhas Britânicas"}], "s": 0.5},
+        {"faz": "linha_tempo", "marcos": [{"data": "1628", "t": "partida"}, {"data": "1629", "t": "naufrágio"}], "s": 1.0}])
+    r = motion.montar(p)
+    layout = [e for e in r.get("erros", []) if "safe area" in e["motivo"] or "estoura" in e["motivo"]]
+    cenas_doc = [e for e in layout if e["id"] in ("c01", "c02")]
+    assert cenas_doc == [], cenas_doc
