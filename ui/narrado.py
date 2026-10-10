@@ -40,6 +40,8 @@ MODELOS_ACAO = {"olha": ("ator", "alvo"), "fala": ("ator", "alvo"), "telegrama":
                 "aponta": ("ator", "alvo"), "sobe_a_bordo": ("ator",), "anda": ("ator", "para")}
 TRAJES = ("capitao", "inspetor", "medico", "secretaria", "menino", "marinheiro", "civil")
 LADOS_ACAO = ("esq", "centro", "dir")
+DUR_ACAO = {"olha": 3.2, "fala": 3.6, "telegrama": 3.8, "le": 3.2, "aponta": 2.8, "sobe_a_bordo": 4.0, "anda": 3.0}   # = DUR de acoes.js
+DUR_MIN_ACAO = {"sobe_a_bordo": 3.0, "anda": 2.6}
 RITMO_MAX = 6.0   # s de fala sem beat nem troca de cena
 GOOGLE_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 GOOGLE_MAX_BYTES = 5000           # limite do Google por requisição (texto em UTF-8)
@@ -112,6 +114,20 @@ def _acha(ws: list[str], palavra: str, depois: int = 0) -> int | None:
     return None
 
 
+def _acha_frase(ws: list[str], palavras: list[str], depois: int = 0) -> list[int] | None:
+    """Índices dos tokens de `palavras` como trecho CONTÍGUO de ws, a partir de `depois` (1ª ocorrência)."""
+    alvo = []
+    for w in palavras:
+        t = alinhar.tokens(str(w))
+        if not t:
+            return None
+        alvo.append(t[0]["w"])
+    for k in range(depois, len(ws) - len(alvo) + 1):
+        if ws[k:k + len(alvo)] == alvo:
+            return list(range(k, k + len(alvo)))
+    return None
+
+
 def _inicios(c: dict, lang: str) -> list:
     """Token de início de cada beat (regra única de validar e resolver_beats): `em` → _acha;
     sem `em`: 1º beat = 0, depois início da frase seguinte ao beat anterior (ou o mesmo token).
@@ -162,14 +178,14 @@ def _v_acao(b: dict, ep: dict, lang: str, e) -> None:
         if campo not in b:
             e(f"{m} precisa de {campo}")
     for campo in ("ator", "alvo"):
-        if campo in b and b[campo] not in atores:
+        if campo in b and not (isinstance(b[campo], str) and b[campo] in atores):
             e(f"{campo} {b[campo]!r} não existe em atores")
     if b.get("lado", "dir") not in LADOS_ACAO:
         e(f"lado inválido: {b.get('lado')!r} ({'|'.join(LADOS_ACAO)})")
     for campo in ("de", "para"):
         if campo in b and b[campo] not in LADOS_ACAO:
             e(f"{campo} precisa ser {'|'.join(LADOS_ACAO)}")
-    if b.get("de") is not None and b.get("de") == b.get("para"):
+    if m == "anda" and b.get("de", "esq") == b.get("para"):
         e("anda com de e para iguais")
     esc = b.get("escala", 1)
     if isinstance(esc, bool) or not isinstance(esc, (int, float)) or not 0.6 <= esc <= 1.2:
@@ -177,6 +193,8 @@ def _v_acao(b: dict, ep: dict, lang: str, e) -> None:
     d = b.get("dur")
     if d is not None and (isinstance(d, bool) or not isinstance(d, (int, float)) or not 1 <= d <= 8):
         e("dur precisa estar entre 1 e 8 s")
+    elif d is not None and d < DUR_MIN_ACAO.get(m, 0):
+        e(f"dur mínima de {m}: {DUR_MIN_ACAO[m]} s")
     t = _loc(b.get("texto"), lang)
     if isinstance(t, str) and len(t) > 40:
         e("texto da ação com até 40 caracteres")
@@ -252,7 +270,7 @@ def _v_direcao(ep: dict, c: dict, proj: Path, lang: str, e) -> None:
                 break
             ks.append(d)
             d += 1
-        if b.get("_frase") and ks and ks != list(range(ks[0], ks[0] + len(ks))):
+        if b.get("_frase") and len(ks) == len(b["palavras"]) and ini[k - 1] is not None                 and _acha_frase(ws, b["palavras"], ini[k - 1]) is None:
             e(q, "frase precisa ser trecho contíguo da fala")
         if b["faz"] == "contador" and b.get("pontos") and not (
                 isinstance(b.get("valor"), int) and not isinstance(b["valor"], bool) and 0 < b["valor"] <= 500):
@@ -360,7 +378,12 @@ def resolver_beats(c: dict, lang: str, palavras: dict) -> list[dict]:
         b["s"] = pal[k]["s"]
         if b["faz"] == "palavras" and "frase" in b:
             b["palavras"] = b["frase"].split()
-        if b["faz"] == "palavras":
+            idx = _acha_frase(ws, b["palavras"], k)
+            if idx is None:
+                raise ValueError(f"{c['id']}: frase {b['frase']!r} não é trecho contíguo da fala (rode validar)")
+            b["s"] = pal[idx[0]]["s"]
+            b["ts"] = [pal[i]["s"] for i in idx]
+        elif b["faz"] == "palavras":
             ts, d = [], k
             for w in b["palavras"]:
                 d = _ach(ws, w, c, d)
@@ -379,6 +402,18 @@ def ritmo(cid: str, beats: list[dict], dur: float) -> list[str]:
     sub = [x["s"] for b in beats for k in ("itens", "marcos") for x in b.get(k) or [] if isinstance(x, dict) and "s" in x]
     ts = sorted({0.0, float(dur), *(b["s"] for b in beats), *(t for b in beats for t in b.get("ts", [])), *sub})
     return [f"{cid}: {a:.1f}–{b:.1f} s sem beat" for a, b in zip(ts, ts[1:]) if b - a > RITMO_MAX]
+
+
+def sobrepostas(cid: str, beats: list[dict]) -> list[str]:
+    """Avisa quando duas `acao` ocupam o mesmo lado ao mesmo tempo (duração = dur ou padrão do modelo)."""
+    ac = sorted((b for b in beats if b.get("faz") == "acao" and b.get("modelo") in DUR_ACAO), key=lambda b: b["s"])
+    out = []
+    for i, a in enumerate(ac):
+        fim = a["s"] + (a.get("dur") or DUR_ACAO[a["modelo"]])
+        for b in ac[i + 1:]:
+            if b["s"] < fim and a.get("lado", "dir") == b.get("lado", "dir"):
+                out.append(f"{cid}: acao {a['modelo']} e {b['modelo']} sobrepostas no lado {a.get('lado', 'dir')}")
+    return out
 
 
 def modo_doc(ep: dict) -> bool:
@@ -739,13 +774,14 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
         raise ValueError(f"trilha não encontrada: {trilha}")
     escrever_cenas(proj, lang)          # valida, confere tts e alinhar antes de resolver beats
     ep = ler(proj)
-    doc, avisos = modo_doc(ep), []
+    doc, avisos, soltas = modo_doc(ep), [], []
     if doc:
         st0 = estado(proj, lang)
         pal = _palavras(proj, lang, ep, st0)
         for c in ep["cenas"]:
             beats = resolver_beats(c, lang, pal) if c.get("beats") else []
             avisos += ritmo(c["id"], beats, st0[c["id"]]["dur"])
+            soltas += sobrepostas(c["id"], beats)
         if avisos and not rascunho:
             raise ValueError("ritmo: " + "; ".join(avisos))
         if not trilha and not rascunho:
@@ -795,7 +831,7 @@ def render(proj, lang: str, rascunho: bool = False, trilha=None) -> dict:
     legenda = out.with_suffix(".srt")
     legenda.write_text(srt(ep, lang, tempos, st), encoding="utf-8")
     return {"ok": True, "video": str(out), "srt": str(legenda), "duracao": tempos["duracao"],
-            "avisos": avisos + (avisos_direcao(ep, lang) if doc else [])}
+            "avisos": avisos + soltas + (avisos_direcao(ep, lang) if doc else [])}
 
 
 FONTE_THUMB = pipeline.ROOT / "motion" / "kit" / "fonts" / "Archivo.ttf"

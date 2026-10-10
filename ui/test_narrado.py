@@ -968,3 +968,42 @@ def test_cenas_doc_leva_atores_localizados():
     d = narrado.cenas_motion(ep, "pt", {"c01": 9.0, "c02": 3.0}, motion.carregar_tema("dark-historia"), _palavras(ep))
     assert d["atores"]["kendall"]["nome"] == "Capitão Kendall" and d["atores"]["casal"]["traje"] == ["medico", "menino"]
     assert any(b["faz"] == "acao" for b in d["cenas"][0]["beats"])
+
+
+def test_frase_sem_em_com_artigo_repetido_e_contigua(tmp_path):
+    ep = _ep_doc()
+    ep["cenas"][0]["texto"]["pt"] = "O capitão viu o navio afundar. Ninguém falou."
+    ep["cenas"][0]["beats"] = [{"faz": "palavras", "frase": "o navio afundar"}]
+    ep["cenas"][0].pop("fundo", None)
+    ep["cenas"][0]["fundo"] = {"tipo": "escuro"}
+    ep.pop("mapa", None)
+    p = _proj(tmp_path, ep)
+    assert narrado.validar(narrado.ler(p), p, "pt") == []
+    b = narrado.resolver_beats(ep["cenas"][0], "pt", _palavras(ep))[0]
+    assert b["ts"] == [1.5, 2.0, 2.5]                      # tokens 3, 4, 5 (o, navio, afundar), não o "O" inicial
+
+
+def test_anda_sem_de_usa_esq_como_padrao(tmp_path):
+    ep = _ep_acoes()
+    ep["cenas"][0]["beats"][-1].update(modelo="anda", para="esq")
+    del ep["cenas"][0]["beats"][-1]["alvo"]
+    p = _proj(tmp_path, ep)
+    assert any("de e para iguais" in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+@pytest.mark.parametrize("modelo, dur, trecho", [("sobe_a_bordo", 1.5, "dur mínima"), ("anda", 1.0, "dur mínima")])
+def test_acao_dur_minima_por_modelo(tmp_path, modelo, dur, trecho):
+    ep = _ep_acoes()
+    b = ep["cenas"][0]["beats"][-1]
+    b.update(modelo=modelo, dur=dur, para="dir")
+    b.pop("alvo")
+    p = _proj(tmp_path, ep)
+    assert any(trecho in e["motivo"] for e in narrado.validar(narrado.ler(p), p, "pt"))
+
+
+def test_acoes_sobrepostas_no_mesmo_lado_geram_aviso():
+    beats = [{"faz": "acao", "modelo": "olha", "s": 1.0}, {"faz": "acao", "modelo": "fala", "s": 2.5, "lado": "dir"},
+             {"faz": "acao", "modelo": "le", "s": 2.6, "lado": "esq"}]
+    av = narrado.sobrepostas("c01", beats)
+    assert len(av) == 1 and "c01" in av[0] and "olha" in av[0] and "fala" in av[0]
+    assert narrado.sobrepostas("c01", [beats[0], {**beats[1], "s": 5.0}]) == []
