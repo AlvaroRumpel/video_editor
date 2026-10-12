@@ -66,6 +66,7 @@
 .d-palavras span{display:inline-block;margin:0 20px;position:relative;opacity:0}
 .d-palavras.f{left:200px;right:200px;top:50%;transform:translateY(-55%);line-height:1.12}
 .d-palavras.f.c{right:700px}
+.d-palavras.f.a{top:22%;transform:none}  /* cena com ação: a vinheta ocupa o terço de baixo */
 .d-palavras.f span{margin:0 12px}
 .d-palavras.f span.hl{color:var(--k-acento)}
 .d-risco{position:absolute;left:0;right:0;top:52%;height:12px;background:#C0392B;transform:scaleX(0);transform-origin:left}
@@ -303,7 +304,8 @@ html[data-aspecto="9:16"] .d-legenda span{position:absolute;left:0;right:0;top:0
 
     palavras(ctx, b) {
       const frase = typeof b.frase === "string";
-      const box = el("div", "d-palavras t" + (frase ? " f" : "") + (ctx.beats.some((o) => o.faz === "contador") ? " c" : "")), { tl } = ctx.c;
+      const box = el("div", "d-palavras t" + (frase ? " f" : "") + (ctx.beats.some((o) => o.faz === "contador") ? " c" : "") +
+        (ctx.beats.some((o) => o.faz === "acao") ? " a" : "")), { tl } = ctx.c;
       if (frase) box.style.fontSize = `${b.palavras.length <= 4 ? 120 : b.palavras.length <= 7 ? 100 : 84}px`;
       const ats = b.ats.length ? b.ats : b.palavras.map((_, i) => b.at + i * 0.3);
       const limpa = (w) => String(w).replace(/#\d+$/, "").replace(/[^\p{L}\p{N}']/gu, "").toLowerCase();
